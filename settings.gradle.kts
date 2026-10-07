@@ -1,0 +1,3 @@
+rootProject.name = "ledger-lab"
+
+include("common", "ledger-service")

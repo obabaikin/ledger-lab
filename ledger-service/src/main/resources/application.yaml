@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: ledger-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ledger?reWriteBatchedInserts=true
+    username: ledger
+    password: ledger
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: ledger
+      auto-offset-reset: earliest
+      properties:
+        max.poll.records: 500
+    listener:
+      concurrency: 3
+
+ledger:
+  topic:
+    name: transfers
+    partitions: 6
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always

@@ -1,0 +1,12 @@
+spring:
+  kafka:
+    listener:
+      concurrency: 2
+ledger:
+  topic:
+    name: transfers
+    partitions: 4
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN

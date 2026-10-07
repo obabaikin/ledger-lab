@@ -1,0 +1,25 @@
+# Local working notes, never published
+CLAUDE.md
+docs/worklog.md
+docs/backlog.md
+docs/stories.md
+docs/errors.md
+
+# Build
+build/
+.gradle/
+out/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Env and secrets
+.env
+*.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+kubeconfig*
