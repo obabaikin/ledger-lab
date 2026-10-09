@@ -1,7 +1,7 @@
 package com.ledgerlab.ledger
 
 import com.ledgerlab.ledger.domain.AccountStatus
-import com.ledgerlab.ledger.domain.TransferOutcome
+import com.ledgerlab.common.TransferOutcome
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

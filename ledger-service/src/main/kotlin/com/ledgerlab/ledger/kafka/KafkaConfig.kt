@@ -1,23 +1,29 @@
 package com.ledgerlab.ledger.kafka
 
-import org.apache.kafka.clients.admin.NewTopic
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.kafka.config.TopicBuilder
 import org.springframework.kafka.listener.DefaultErrorHandler
 import org.springframework.util.backoff.FixedBackOff
 import tools.jackson.core.JacksonException
+import java.time.Duration
 
 @ConfigurationProperties("ledger.topic")
-data class TopicProperties(val name: String, val partitions: Int)
+data class TopicProperties(val name: String)
+
+@ConfigurationProperties("ledger.results")
+data class ResultsProperties(
+    val topic: String,
+    val publishInterval: Duration,
+    val batchSize: Int,
+    val sendTimeout: Duration,
+)
+
+@ConfigurationProperties("ledger.consumer")
+data class ConsumerProperties(val retryBackoff: Duration)
 
 @Configuration
 class KafkaConfig {
-
-    @Bean
-    fun transfersTopic(topic: TopicProperties): NewTopic =
-        TopicBuilder.name(topic.name).partitions(topic.partitions).replicas(1).build()
 
     /**
      * A ledger must never skip a transfer. Transient failures (database down, lock timeout)
@@ -25,8 +31,8 @@ class KafkaConfig {
      * Only messages that can never be parsed are logged and skipped.
      */
     @Bean
-    fun kafkaErrorHandler(): DefaultErrorHandler =
-        DefaultErrorHandler(FixedBackOff(500L, FixedBackOff.UNLIMITED_ATTEMPTS)).apply {
+    fun kafkaErrorHandler(consumer: ConsumerProperties): DefaultErrorHandler =
+        DefaultErrorHandler(FixedBackOff(consumer.retryBackoff.toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS)).apply {
             addNotRetryableExceptions(JacksonException::class.java)
         }
 }

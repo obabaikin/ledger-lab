@@ -2,7 +2,7 @@ package com.ledgerlab.ledger.persistence
 
 import com.ledgerlab.ledger.domain.ReconciliationReport
 import com.ledgerlab.ledger.domain.RejectReason
-import com.ledgerlab.ledger.domain.TransferOutcome
+import com.ledgerlab.common.TransferOutcome
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 import java.util.UUID

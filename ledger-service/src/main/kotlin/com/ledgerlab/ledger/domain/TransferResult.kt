@@ -1,7 +1,5 @@
 package com.ledgerlab.ledger.domain
 
-enum class TransferOutcome { POSTED, REJECTED }
-
 enum class RejectReason {
     INVALID_AMOUNT,
     SAME_ACCOUNT,

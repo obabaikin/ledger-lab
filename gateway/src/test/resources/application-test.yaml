@@ -1,0 +1,15 @@
+gateway:
+  transfers-topic: transfers
+  results-topic: transfer-results
+  outbox:
+    publish-interval: 20ms
+    batch-size: 100
+    send-timeout: 30s
+  consumer:
+    retry-backoff: 200ms
+  max-wait: 5s
+  retry-after: 1s
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN

@@ -1,11 +1,13 @@
 package com.ledgerlab.ledger.kafka
 
+import com.ledgerlab.common.Observability.MDC_RUN_ID
 import com.ledgerlab.common.TransferCommand
 import com.ledgerlab.ledger.domain.TransferResult
 import com.ledgerlab.ledger.service.LedgerService
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
@@ -24,6 +26,15 @@ class TransferConsumer(
     @KafkaListener(topics = ["\${ledger.topic.name}"])
     fun onTransfer(payload: String) {
         val command = objectMapper.readValue(payload, TransferCommand::class.java)
+        MDC.put(MDC_RUN_ID, command.runId.toString())
+        try {
+            handle(command)
+        } finally {
+            MDC.remove(MDC_RUN_ID)
+        }
+    }
+
+    private fun handle(command: TransferCommand) {
         when (ledger.apply(command)) {
             TransferResult.Posted -> posted.increment()
             is TransferResult.Rejected -> rejected.increment()

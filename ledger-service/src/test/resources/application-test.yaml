@@ -5,7 +5,13 @@ spring:
 ledger:
   topic:
     name: transfers
-    partitions: 4
+  results:
+    topic: transfer-results
+    publish-interval: 20ms
+    batch-size: 100
+    send-timeout: 30s
+  consumer:
+    retry-backoff: 200ms
 logging:
   level:
     org.apache.kafka: WARN

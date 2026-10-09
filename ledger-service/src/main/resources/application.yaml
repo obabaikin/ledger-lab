@@ -1,10 +1,17 @@
 spring:
   application:
     name: ledger-service
+  threads:
+    virtual:
+      enabled: true
   datasource:
-    url: jdbc:postgresql://localhost:5432/ledger?reWriteBatchedInserts=true
+    url: jdbc:postgresql://localhost:5432/ledgerlab?reWriteBatchedInserts=true
     username: ledger
     password: ledger
+    hikari:
+      schema: ledger
+  flyway:
+    default-schema: ledger
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
@@ -12,13 +19,27 @@ spring:
       auto-offset-reset: earliest
       properties:
         max.poll.records: 500
+    producer:
+      acks: all
     listener:
       concurrency: 3
+      # Topics come from infrastructure (ADR 0008); a name that does not match fails the start.
+      missing-topics-fatal: true
 
 ledger:
   topic:
     name: transfers
-    partitions: 6
+  results:
+    topic: transfer-results
+    publish-interval: 50ms
+    batch-size: 500
+    send-timeout: 30s
+  consumer:
+    retry-backoff: 500ms
+
+logging:
+  pattern:
+    correlation: "[run=%X{runId:-}] "
 
 management:
   endpoints:
