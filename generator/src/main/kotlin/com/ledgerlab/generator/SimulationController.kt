@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.scheduling.annotation.Scheduled
@@ -25,8 +26,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 data class StartSimulationRequest(
     @field:NotNull val runId: UUID?,
-    @field:Min(1) @field:Max(5_000) val tps: Int,
-    @field:Min(1) @field:Max(300) val durationSeconds: Int,
+    @field:Min(1) @field:Max(1_000) val tps: Int,
+    @field:Min(1) @field:Max(30) val durationSeconds: Int,
     @field:Min(2) val accountCount: Int,
     @field:Min(0) val blockedAccounts: Int = 0,
     @field:Min(0) val hotAccounts: Int = 5,
@@ -34,10 +35,16 @@ data class StartSimulationRequest(
     @field:Min(1) @field:Max(30) val waitTimeoutSeconds: Int = 5,
 )
 
+private const val MAX_PAGE = 1_000
+
 /** Time for a request that has just timed out to finish its coroutine. */
 private val STOP_GRACE_MARGIN: Duration = Duration.ofSeconds(1)
 
 class SimulationAlreadyRunningException(runId: UUID) : RuntimeException("Simulation $runId is already running")
+
+class JournalCapacityException(message: String) : RuntimeException(message)
+
+class NotFoundException(message: String) : RuntimeException(message)
 
 /** Service-to-service API used by the control service to drive a run. */
 @RestController
@@ -59,11 +66,20 @@ class SimulationController(
             request.waitShare, Duration.ofSeconds(request.waitTimeoutSeconds.toLong()),
             stopGrace(request.waitTimeoutSeconds), client, props.maxInFlight, registry,
         )
-        // compute() holds the map entry while the check and the start happen, so two concurrent
-        // starts for the same run cannot both pass.
-        simulations.compute(runId) { _, existing ->
+        require(simulation.journalCapacity <= props.journal.maxEntries) {
+            "tps x durationSeconds = ${simulation.journalCapacity} exceeds the journal cap of ${props.journal.maxEntries}"
+        }
+        // The capacity check and the insert must not interleave with another start.
+        synchronized(simulations) {
+            val reserved = simulations.values.filter { it.journal != null }.sumOf { it.journalCapacity }
+            if (reserved + simulation.journalCapacity > props.journal.maxEntries) {
+                throw JournalCapacityException(
+                    "journals in memory hold $reserved of ${props.journal.maxEntries} entries; retry after older journals are released",
+                )
+            }
+            val existing = simulations[runId]
             if (existing?.state?.active == true) throw SimulationAlreadyRunningException(runId)
-            simulation.also { it.start() }
+            simulations[runId] = simulation.also { it.start() }
         }
         return simulation.status()
     }
@@ -71,15 +87,49 @@ class SimulationController(
     /** Finished simulations stay readable for a while, then go, so a long-lived pod does not grow forever. */
     @Scheduled(fixedDelayString = "\${generator.retention-sweep-interval}")
     fun evictFinished() {
-        val cutoff = Instant.now().minus(props.retention)
-        simulations.entries.removeIf { (_, simulation) ->
-            !simulation.state.active && (simulation.finishedAt ?: Instant.MAX).isBefore(cutoff)
+        val now = Instant.now()
+        synchronized(simulations) {
+            simulations.entries.removeIf { (_, simulation) ->
+                !simulation.state.active && (simulation.finishedAt ?: Instant.MAX).isBefore(now.minus(props.retention))
+            }
+            simulations.values
+                .filter { !it.state.active && (it.finishedAt ?: Instant.MAX).isBefore(now.minus(props.journal.retention)) }
+                .forEach { it.releaseJournal() }
         }
     }
 
     @GetMapping("/{runId}")
     fun status(@PathVariable runId: UUID): ResponseEntity<SimulationStatus> =
         simulations[runId]?.let { ResponseEntity.ok(it.status()) } ?: ResponseEntity.notFound().build()
+
+    @GetMapping("/{runId}/transfers/{transferId}")
+    fun transfer(@PathVariable runId: UUID, @PathVariable transferId: UUID): JournalEntryView =
+        journalOf(simulationOf(runId)).get(transferId)
+            ?: throw NotFoundException("No transfer $transferId in the journal of simulation $runId")
+
+    /** Pages in the order of first send; while the run is active [JournalPage.next] is always set, as entries keep coming. */
+    @GetMapping("/{runId}/transfers")
+    fun transfers(
+        @PathVariable runId: UUID,
+        @RequestParam outcome: JournalOutcome?,
+        @RequestParam resent: Boolean?,
+        @RequestParam rejectReason: String?,
+        @RequestParam(defaultValue = "0") after: Long,
+        @RequestParam(defaultValue = "100") limit: Int,
+    ): JournalPage {
+        require(limit in 1..MAX_PAGE) { "limit must be between 1 and $MAX_PAGE" }
+        require(after >= 0) { "after must not be negative" }
+        val simulation = simulationOf(runId)
+        // Read before the page: a run that is already over adds no entries, so the page may say there is no next one.
+        val complete = !simulation.state.active
+        return journalOf(simulation).page(JournalFilter(outcome, resent, rejectReason), after, limit, complete)
+    }
+
+    private fun simulationOf(runId: UUID): Simulation =
+        simulations[runId] ?: throw NotFoundException("No simulation $runId")
+
+    private fun journalOf(simulation: Simulation): Journal =
+        simulation.journal ?: throw NotFoundException("The journal of simulation ${simulation.runId} has been released")
 
     /**
      * Starts a graceful stop. 202 while the run is still stopping: poll the status until it is no
@@ -103,6 +153,14 @@ class SimulationController(
     @ExceptionHandler(SimulationAlreadyRunningException::class)
     @ResponseStatus(HttpStatus.CONFLICT)
     fun alreadyRunning(e: SimulationAlreadyRunningException): Map<String, String> = mapOf("error" to (e.message ?: "conflict"))
+
+    @ExceptionHandler(JournalCapacityException::class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    fun journalFull(e: JournalCapacityException): Map<String, String> = mapOf("error" to (e.message ?: "conflict"))
+
+    @ExceptionHandler(NotFoundException::class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    fun notFound(e: NotFoundException): Map<String, String> = mapOf("error" to (e.message ?: "not found"))
 
     @ExceptionHandler(IllegalArgumentException::class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)

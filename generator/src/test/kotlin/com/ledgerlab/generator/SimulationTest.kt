@@ -2,6 +2,8 @@ package com.ledgerlab.generator
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.entry
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import tools.jackson.databind.ObjectMapper
@@ -11,14 +13,35 @@ import java.util.UUID
 class SimulationTest {
 
     private fun client(url: String, maxAttempts: Int = 3, retryBackoff: Duration = Duration.ofMillis(50)) =
-        GatewayClient(
-            GeneratorProperties(url, Duration.ofSeconds(2), Duration.ofSeconds(10), maxAttempts, retryBackoff, 500, Duration.ofHours(1), Duration.ofMinutes(5)),
-            ObjectMapper(),
-        )
+        GatewayClient(testProperties(url, maxAttempts, retryBackoff), ObjectMapper())
 
     private fun SimulationStatus.assertSettledCounts() {
         assertThat(inFlight).isZero()
         assertThat(acknowledged + failed + unknown).isEqualTo(requested)
+    }
+
+    private fun Simulation.entries(): List<JournalEntryView> =
+        journal!!.page(JournalFilter(), after = 0, limit = Int.MAX_VALUE, complete = true).items
+
+    /** The journal and the counters are kept apart; they must tell the same story. */
+    private fun Simulation.assertJournalMatchesStatus() {
+        val status = status()
+        val entries = entries()
+        assertThat(entries).hasSize(status.requested.toInt())
+        assertThat(entries.map { it.seq }).isEqualTo((1L..entries.size).toList())
+        assertThat(entries.map { it.transferId }).doesNotHaveDuplicates()
+        assertThat(entries).allSatisfy { assertThat(it.first).isNotNull() }
+        val byOutcome = entries.groupingBy { it.outcome }.eachCount()
+        assertThat(byOutcome[JournalOutcome.PENDING]).isNull()
+        assertThat(byOutcome[JournalOutcome.ACKNOWLEDGED] ?: 0).isEqualTo(status.acknowledged.toInt())
+        assertThat(byOutcome[JournalOutcome.FAILED] ?: 0).isEqualTo(status.failed.toInt())
+        assertThat(byOutcome[JournalOutcome.UNKNOWN] ?: 0).isEqualTo(status.unknown.toInt())
+        assertThat(entries.sumOf { it.resends.size }).isEqualTo(status.retries.toInt())
+        assertThat(entries.count { it.gatewayStatus == GatewayApi.STATUS_POSTED }).isEqualTo(status.posted.toInt())
+        assertThat(entries.count { it.gatewayStatus == GatewayApi.STATUS_REJECTED }).isEqualTo(status.rejected.toInt())
+        assertThat(entries.mapNotNull { it.rejectReason }.groupingBy { it }.eachCount().mapValues { it.value.toLong() })
+            .isEqualTo(status.rejectedByReason)
+        assertThat(status.rejectedByReason.values.sum()).isEqualTo(status.rejected)
     }
 
     private fun simulation(
@@ -51,6 +74,12 @@ class SimulationTest {
             assertThat(status.posted).isGreaterThan(0)
             assertThat(gateway.attemptsById).hasSize(status.requested.toInt())
             assertThat(gateway.attemptsById.values.map { it.get() }).containsOnly(1)
+            simulation.assertJournalMatchesStatus()
+            assertThat(simulation.entries()).allSatisfy {
+                assertThat(it.first!!.result).isEqualTo(SendResult.RESPONSE)
+                assertThat(it.first!!.httpStatus).isIn(200, 202)
+                assertThat(it.resends).isEmpty()
+            }
         }
     }
 
@@ -66,6 +95,17 @@ class SimulationTest {
             assertThat(status.failed).isZero()
             assertThat(status.retries).isEqualTo(status.requested)
             assertThat(gateway.attemptsById.values.map { it.get() }).containsOnly(2)
+            simulation.assertJournalMatchesStatus()
+            assertThat(simulation.entries()).allSatisfy { entry ->
+                assertThat(entry.first!!.httpStatus).isEqualTo(503)
+                assertThat(entry.resends).singleElement().satisfies({ resend ->
+                    assertThat(resend.kind).isEqualTo(ResendKind.RETRY)
+                    assertThat(resend.number).isEqualTo(2)
+                    assertThat(resend.result).isEqualTo(SendResult.RESPONSE)
+                    assertThat(resend.httpStatus).isEqualTo(202)
+                    assertThat(resend.offsetMs).isGreaterThanOrEqualTo(entry.first!!.offsetMs + entry.first!!.latencyMs)
+                })
+            }
         }
     }
 
@@ -82,6 +122,7 @@ class SimulationTest {
             assertThat(status.failed).isZero()
             assertThat(status.acknowledged).isZero()
             status.assertSettledCounts()
+            simulation.assertJournalMatchesStatus()
         }
     }
 
@@ -98,6 +139,7 @@ class SimulationTest {
             assertThat(status.unknown).isZero()
             assertThat(status.retries).isZero()
             status.assertSettledCounts()
+            simulation.assertJournalMatchesStatus()
         }
     }
 
@@ -135,6 +177,7 @@ class SimulationTest {
             assertThat(status.failed).isZero()
             assertThat(status.unknown).isGreaterThan(0)
             status.assertSettledCounts()
+            simulation.assertJournalMatchesStatus()
         }
     }
 
@@ -153,6 +196,79 @@ class SimulationTest {
             assertThat(status.unknown).isEqualTo(status.requested)
             assertThat(status.failed).isZero()
             status.assertSettledCounts()
+            simulation.assertJournalMatchesStatus()
+        }
+    }
+
+    @Test
+    fun `a ledger rejection keeps its reason in the journal and in the status`() {
+        FakeGateway(rejectReason = "INSUFFICIENT_FUNDS").use { gateway ->
+            val simulation = simulation(client(gateway.url), tps = 20, seconds = 1, waitShare = 1.0)
+
+            simulation.start()
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            val status = simulation.status()
+            assertThat(status.rejected).isEqualTo(status.requested)
+            assertThat(status.rejectedByReason).containsExactly(entry("INSUFFICIENT_FUNDS", status.requested))
+            simulation.assertJournalMatchesStatus()
+            assertThat(simulation.entries()).allSatisfy {
+                assertThat(it.outcome).isEqualTo(JournalOutcome.ACKNOWLEDGED)
+                assertThat(it.gatewayStatus).isEqualTo(GatewayApi.STATUS_REJECTED)
+                assertThat(it.rejectReason).isEqualTo("INSUFFICIENT_FUNDS")
+            }
+        }
+    }
+
+    @Test
+    fun `a send cut off by the grace period is recorded as cancelled`() {
+        FakeGateway(responseDelay = Duration.ofSeconds(5)).use { gateway ->
+            val simulation = simulation(client(gateway.url), tps = 100, seconds = 30, stopGrace = Duration.ofMillis(200))
+            simulation.start()
+            await().atMost(Duration.ofSeconds(5)).until { simulation.status().inFlight > 10 }
+
+            simulation.stop()
+            await().atMost(Duration.ofSeconds(5)).until { simulation.state == SimulationState.STOPPED }
+
+            val cancelled = simulation.entries().filter { it.first!!.result == SendResult.CANCELLED }
+            assertThat(cancelled).isNotEmpty()
+            assertThat(cancelled).allSatisfy {
+                assertThat(it.outcome).isEqualTo(JournalOutcome.UNKNOWN)
+                assertThat(it.first!!.httpStatus).isNull()
+            }
+            simulation.assertJournalMatchesStatus()
+        }
+    }
+
+    @Test
+    fun `entries are readable while the run is going and start as pending`() {
+        FakeGateway(responseDelay = Duration.ofMillis(500)).use { gateway ->
+            val simulation = simulation(client(gateway.url), tps = 50, seconds = 30)
+            simulation.start()
+            await().atMost(Duration.ofSeconds(5)).until { simulation.status().inFlight > 5 }
+
+            val page = simulation.journal!!.page(JournalFilter(outcome = JournalOutcome.PENDING), 0, 1_000, complete = false)
+            assertThat(page.items).isNotEmpty()
+            assertThat(page.next).isNotNull()
+
+            simulation.stop()
+            await().atMost(Duration.ofSeconds(10)).until { simulation.state == SimulationState.STOPPED }
+            simulation.assertJournalMatchesStatus()
+        }
+    }
+
+    @Test
+    fun `a released journal is gone, the status stays`() {
+        FakeGateway().use { gateway ->
+            val simulation = simulation(client(gateway.url), tps = 20, seconds = 1)
+            simulation.start()
+            assertThatThrownBy { simulation.releaseJournal() }.isInstanceOf(IllegalStateException::class.java)
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            simulation.releaseJournal()
+
+            assertThat(simulation.journal).isNull()
+            assertThat(simulation.status().requested).isGreaterThan(0)
         }
     }
 }

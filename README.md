@@ -65,6 +65,7 @@ curl -s -X POST localhost:8082/internal/simulations -H 'content-type: applicatio
   -d "{\"runId\":\"$RUN\",\"tps\":200,\"durationSeconds\":10,\"accountCount\":100,\"blockedAccounts\":2}"
 # 3. compare the four views
 curl -s localhost:8082/internal/simulations/$RUN         # what the clients were told
+curl -s "localhost:8082/internal/simulations/$RUN/transfers?outcome=UNKNOWN" # the clients' journal, by transfer
 curl -s localhost:8081/internal/runs/$RUN/summary        # accepted, published, posted, rejected, latency
 curl -s localhost:8080/internal/runs/$RUN/reconciliation # the ledger's own checks
 # optional: stop early; the clients stop, the bank finishes what it accepted

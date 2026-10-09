@@ -16,7 +16,10 @@ generator:
   retry-backoff: 1s
   max-in-flight: 2000
   retention: 1h
-  retention-sweep-interval: 5m
+  retention-sweep-interval: 1m
+  journal:
+    retention: 10m
+    max-entries: 300000
 
 logging:
   pattern:

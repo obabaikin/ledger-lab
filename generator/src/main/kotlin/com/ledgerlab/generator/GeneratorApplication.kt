@@ -30,4 +30,12 @@ data class GeneratorProperties(
     /** How long a finished simulation stays available through the API. */
     val retention: Duration,
     val retentionSweepInterval: Duration,
+    val journal: JournalProperties,
+)
+
+data class JournalProperties(
+    /** How long after its run ends a journal is kept: long enough for the client reconciliation. */
+    val retention: Duration,
+    /** Entries all journals in memory may take together; a start beyond it is refused, never an OOM. */
+    val maxEntries: Long,
 )

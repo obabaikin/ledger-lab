@@ -14,6 +14,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.concurrent.ThreadLocalRandom
+import kotlin.coroutines.cancellation.CancellationException
 
 /** Everything the generator knows about the gateway's public API. */
 object GatewayApi {
@@ -54,7 +55,12 @@ class GatewayClient(private val props: GeneratorProperties, private val objectMa
         .connectTimeout(props.connectTimeout)
         .build()
 
-    suspend fun submit(command: TransferCommand, wait: Duration?, canRetry: () -> Boolean = { true }): SubmissionResult {
+    suspend fun submit(
+        command: TransferCommand,
+        wait: Duration?,
+        canRetry: () -> Boolean = { true },
+        sends: SendRecorder = SendRecorder.NONE,
+    ): SubmissionResult {
         val url = props.gatewayUrl + GatewayApi.TRANSFERS_PATH + (wait?.let { "?wait=$it" } ?: "")
         val payload = objectMapper.writeValueAsString(
             mapOf(
@@ -76,12 +82,25 @@ class GatewayClient(private val props: GeneratorProperties, private val objectMa
         var mayHaveArrived = false
         while (true) {
             attempt++
-            val response = try {
-                http.sendAsync(request, HttpResponse.BodyHandlers.ofString()).await()
+            val sendStarted = System.nanoTime()
+            // Stays NO_RESPONSE if something unexpected is thrown: the request may have left by then.
+            var sendResult = SendResult.NO_RESPONSE
+            var response: HttpResponse<String>? = null
+            try {
+                response = http.sendAsync(request, HttpResponse.BodyHandlers.ofString()).await()
+                sendResult = SendResult.RESPONSE
             } catch (e: IOException) {
                 // Without a connection the request never left; any other I/O error may come after the gateway committed.
-                if (e !is ConnectException && e !is HttpConnectTimeoutException) mayHaveArrived = true
-                null
+                if (e is ConnectException || e is HttpConnectTimeoutException) {
+                    sendResult = SendResult.NOT_CONNECTED
+                } else {
+                    mayHaveArrived = true
+                }
+            } catch (e: CancellationException) {
+                sendResult = SendResult.CANCELLED
+                throw e
+            } finally {
+                sends.record(sendStarted, System.nanoTime(), sendResult, response?.statusCode())
             }
             val elapsed = Duration.ofNanos(System.nanoTime() - started)
             if (response != null && response.statusCode() !in 500..599) {

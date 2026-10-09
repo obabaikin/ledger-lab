@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.LongAdder
 import java.util.concurrent.ThreadLocalRandom
@@ -43,6 +44,7 @@ data class SimulationStatus(
     val acknowledged: Long,
     val posted: Long,
     val rejected: Long,
+    val rejectedByReason: Map<String, Long>,
     val failed: Long,
     /** Sent, but no answer settled it: the gateway may have the transfer. */
     val unknown: Long,
@@ -80,6 +82,7 @@ class Simulation(
     private val acknowledged = LongAdder()
     private val posted = LongAdder()
     private val rejected = LongAdder()
+    private val rejectedByReason = ConcurrentHashMap<String, LongAdder>()
     private val failed = LongAdder()
     private val unknown = LongAdder()
     private val retries = LongAdder()
@@ -88,6 +91,12 @@ class Simulation(
         .publishPercentiles(*LATENCY_PERCENTILES).register(registry)
 
     val startedAt: Instant = Instant.now()
+    private val startNanos = System.nanoTime()
+    /** Released some time after the run ends, while the status stays; dropping the reference is what frees the memory. */
+    @Volatile var journal: Journal? = Journal(startNanos)
+        private set
+    /** Journal entries this run may take; reserved against the generator-wide cap at start. */
+    val journalCapacity: Long = targetTps.toLong() * duration.toSeconds()
     @Volatile var finishedAt: Instant? = null
     @Volatile var state: SimulationState = SimulationState.RUNNING
         private set
@@ -104,7 +113,6 @@ class Simulation(
     fun start() {
         pacer = scope.launch {
             val intervalNanos = 1_000_000_000L / targetTps
-            val startNanos = System.nanoTime()
             val endNanos = startNanos + duration.toNanos()
             var launched = 0L
             while (isActive && System.nanoTime() < endNanos) {
@@ -164,30 +172,49 @@ class Simulation(
         // A submission launched just before a stop may start after it; it must not send.
         if (state != SimulationState.RUNNING) return
         requested.increment()
+        val command = profile.next()
+        val entry = checkNotNull(journal) { "journal released while the run is active" }.add(command)
         try {
             val wait = if (ThreadLocalRandom.current().nextDouble() < waitShare) waitTimeout else null
-            val result = client.submit(profile.next(), wait) { state == SimulationState.RUNNING }
+            val result = client.submit(command, wait, { state == SimulationState.RUNNING }, entry)
             retries.add((result.attempts - 1).toLong())
             when (result.outcome) {
-                SubmissionOutcome.FAILED -> failed.increment()
-                SubmissionOutcome.UNKNOWN -> unknown.increment()
+                SubmissionOutcome.FAILED -> {
+                    failed.increment()
+                    entry.settle(JournalOutcome.FAILED)
+                }
+                SubmissionOutcome.UNKNOWN -> {
+                    unknown.increment()
+                    entry.settle(JournalOutcome.UNKNOWN)
+                }
                 SubmissionOutcome.ACKNOWLEDGED -> {
                     acknowledged.increment()
                     when (result.status) {
                         GatewayApi.STATUS_POSTED -> posted.increment()
-                        GatewayApi.STATUS_REJECTED -> rejected.increment()
+                        GatewayApi.STATUS_REJECTED -> {
+                            rejected.increment()
+                            result.rejectReason?.let { rejectedByReason.computeIfAbsent(it) { LongAdder() }.increment() }
+                        }
                     }
+                    entry.settle(JournalOutcome.ACKNOWLEDGED, result.status, result.rejectReason)
                     if (wait != null && result.status in GatewayApi.FINAL_STATUSES) latency.record(result.latency)
                 }
             }
         } catch (e: CancellationException) {
             unknown.increment()
+            entry.settle(JournalOutcome.UNKNOWN)
             throw e
         } catch (e: Exception) {
             // It may have been thrown after the request went out, so it cannot count as failed.
             log.warn("Submission in simulation {} ended with an error", runId, e)
             unknown.increment()
+            entry.settle(JournalOutcome.UNKNOWN)
         }
+    }
+
+    fun releaseJournal() {
+        check(!state.active) { "journal of an active run cannot be released" }
+        journal = null
     }
 
     fun status(): SimulationStatus {
@@ -195,7 +222,8 @@ class Simulation(
         val seconds = Duration.between(startedAt, end).toMillis().coerceAtLeast(1) / 1000.0
         return SimulationStatus(
             runId, state, targetTps, duration.toSeconds().toInt(), startedAt, finishedAt,
-            requested.sum(), acknowledged.sum(), posted.sum(), rejected.sum(), failed.sum(), unknown.sum(), retries.sum(),
+            requested.sum(), acknowledged.sum(), posted.sum(), rejected.sum(),
+            rejectedByReason.mapValues { it.value.sum() }, failed.sum(), unknown.sum(), retries.sum(),
             open.get(), requested.sum() / seconds,
         )
     }

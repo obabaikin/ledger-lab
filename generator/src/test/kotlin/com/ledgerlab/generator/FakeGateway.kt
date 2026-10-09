@@ -8,11 +8,15 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Minimal stand-in for the gateway's POST /transfers, with an optional first-attempt failure, a refusal and a slow answer. */
+/**
+ * Minimal stand-in for the gateway's POST /transfers, with an optional first-attempt failure, a refusal,
+ * a slow answer and a ledger rejection for waited requests.
+ */
 class FakeGateway(
     private val failFirstAttempt: Boolean = false,
     private val refuseWith: Int? = null,
     private val responseDelay: Duration = Duration.ZERO,
+    private val rejectReason: String? = null,
 ) : AutoCloseable {
     private val objectMapper = ObjectMapper()
     private val server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
@@ -33,6 +37,7 @@ class FakeGateway(
             val (code, response) = when {
                 failFirstAttempt && attempt == 1 -> 503 to """{"error":"unavailable"}"""
                 refuseWith != null -> refuseWith to """{"error":"refused"}"""
+                waited && rejectReason != null -> 200 to """{"transferId":"$id","status":"REJECTED","rejectReason":"$rejectReason"}"""
                 waited -> 200 to """{"transferId":"$id","status":"POSTED"}"""
                 else -> 202 to """{"transferId":"$id","status":"ACCEPTED"}"""
             }
