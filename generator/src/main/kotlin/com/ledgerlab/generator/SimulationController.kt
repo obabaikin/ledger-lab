@@ -71,14 +71,14 @@ class SimulationController(
         }
         // The capacity check and the insert must not interleave with another start.
         synchronized(simulations) {
+            val existing = simulations[runId]
+            if (existing?.state?.active == true) throw SimulationAlreadyRunningException(runId)
             val reserved = simulations.values.filter { it.journal != null }.sumOf { it.journalCapacity }
             if (reserved + simulation.journalCapacity > props.journal.maxEntries) {
                 throw JournalCapacityException(
                     "journals in memory hold $reserved of ${props.journal.maxEntries} entries; retry after older journals are released",
                 )
             }
-            val existing = simulations[runId]
-            if (existing?.state?.active == true) throw SimulationAlreadyRunningException(runId)
             simulations[runId] = simulation.also { it.start() }
         }
         return simulation.status()

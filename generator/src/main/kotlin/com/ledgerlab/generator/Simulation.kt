@@ -171,9 +171,10 @@ class Simulation(
     private suspend fun submitOne() {
         // A submission launched just before a stop may start after it; it must not send.
         if (state != SimulationState.RUNNING) return
-        requested.increment()
         val command = profile.next()
         val entry = checkNotNull(journal) { "journal released while the run is active" }.add(command)
+        // Counted only once the entry exists, so that every request ends up in exactly one outcome.
+        requested.increment()
         try {
             val wait = if (ThreadLocalRandom.current().nextDouble() < waitShare) waitTimeout else null
             val result = client.submit(command, wait, { state == SimulationState.RUNNING }, entry)

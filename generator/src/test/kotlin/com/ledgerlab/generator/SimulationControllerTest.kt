@@ -36,6 +36,19 @@ class SimulationControllerTest {
     }
 
     @Test
+    fun `a repeated start of an active run is told it is running, not that memory is full`() {
+        FakeGateway().use { gateway ->
+            val controller = controller(gateway, JournalProperties(Duration.ofMinutes(10), maxEntries = 100))
+            val run = request(tps = 100, seconds = 1)
+            controller.start(run)
+
+            assertThatThrownBy { controller.start(run) }.isInstanceOf(SimulationAlreadyRunningException::class.java)
+
+            await().atMost(Duration.ofSeconds(15)).until { controller.status(run.runId!!).body!!.state == SimulationState.FINISHED }
+        }
+    }
+
+    @Test
     fun `a released journal frees its share of the cap, the status stays readable`() {
         FakeGateway().use { gateway ->
             val controller = controller(gateway, JournalProperties(Duration.ZERO, maxEntries = 100))
