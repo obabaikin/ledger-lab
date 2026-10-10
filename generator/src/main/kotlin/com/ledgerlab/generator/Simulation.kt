@@ -8,7 +8,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -23,6 +22,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.LongAdder
 import java.util.concurrent.ThreadLocalRandom
@@ -140,6 +140,8 @@ class Simulation(
     private companion object {
         /** How often the pacer checks whether more submissions are due. */
         val PACER_TICK = Duration.ofMillis(1)
+        /** A send that ended without an answer, possibly after the request went out: it cannot count as failed. */
+        val CUT_SHORT = SubmissionResult(null, null, 1, SubmissionOutcome.UNKNOWN, Duration.ZERO)
         /** How often the pacer checks for the last open requests after the run time is over. */
         val DRAIN_POLL = Duration.ofMillis(10)
     }
@@ -214,34 +216,44 @@ class Simulation(
         val random = ThreadLocalRandom.current()
         val wait = if (random.nextDouble() < waitShare) waitTimeout else null
         val duplicateDelay = if (random.nextDouble() < duplicateShare) duplicateDelays[random.nextInt(duplicateDelays.size)] else null
+        // Collected as each send ends, so a 2xx already received still counts when the other send is cut short.
+        val answers = ConcurrentLinkedQueue<Answer>()
         try {
-            val answers = coroutineScope {
-                val duplicate = duplicateDelay?.let { async { sendDuplicate(command, wait, entry, it) } }
+            coroutineScope {
+                duplicateDelay?.let { launch { sendDuplicate(command, wait, entry, it)?.let(answers::add) } }
                 val main = client.submit(command, wait, { state == SimulationState.RUNNING }, recorder(entry, wait != null, duplicate = false))
-                val mainAnswer = Answer(main, System.nanoTime())
+                answers.add(Answer(main, System.nanoTime()))
                 retries.add((main.attempts - 1).toLong())
                 recordSubmissionLatency(main, wait, SendKind.FIRST)
-                listOfNotNull(mainAnswer, duplicate?.await())
             }
-            settle(entry, combine(answers.sortedBy { it.endedNanos }.map { it.result }))
         } catch (e: CancellationException) {
-            unknown.increment()
-            entry.settle(JournalOutcome.UNKNOWN)
+            settle(entry, combine(inOrder(answers) + CUT_SHORT))
             throw e
         } catch (e: Exception) {
-            // It may have been thrown after the request went out, so it cannot count as failed.
             log.warn("Submission in simulation {} ended with an error", runId, e)
-            unknown.increment()
-            entry.settle(JournalOutcome.UNKNOWN)
+            settle(entry, combine(inOrder(answers) + CUT_SHORT))
+            return
         }
+        settle(entry, combine(inOrder(answers)))
     }
+
+    private fun inOrder(answers: Collection<Answer>): List<SubmissionResult> =
+        answers.sortedBy { it.endedNanos }.map { it.result }
 
     /** One more send of the same request, never retried; a stop before its moment means it is never sent. */
     private suspend fun sendDuplicate(command: TransferCommand, wait: Duration?, entry: JournalEntry, delay: Duration): Answer? {
         val stopped = withTimeoutOrNull(delay.toMillis()) { stopSignal.join() } != null
         if (stopped || state != SimulationState.RUNNING) return null
         duplicatesSent.increment()
-        val result = client.submit(command, wait, { false }, recorder(entry, wait != null, duplicate = true))
+        val result = try {
+            client.submit(command, wait, { false }, recorder(entry, wait != null, duplicate = true))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Kept to this send, so it cannot cancel the first send and lose an answer that one gets.
+            log.warn("Duplicate in simulation {} ended with an error", runId, e)
+            CUT_SHORT
+        }
         recordSubmissionLatency(result, wait, SendKind.DUPLICATE)
         return Answer(result, System.nanoTime())
     }

@@ -361,4 +361,25 @@ class SimulationTest {
             assertThat(simulation.status().requested).isEqualTo(simulation.journalCapacity).isEqualTo(21)
         }
     }
+
+    @Test
+    fun `a duplicate cut off by a stop does not undo the answer the first send got`() {
+        FakeGateway(repeatDelay = Duration.ofSeconds(5)).use { gateway ->
+            val simulation = simulation(
+                client(gateway.url), tps = 50, seconds = 30, stopGrace = Duration.ofMillis(300),
+                duplicateShare = 1.0, duplicateDelays = listOf(Duration.ofMillis(50)),
+            )
+            simulation.start()
+            await().atMost(Duration.ofSeconds(5)).until { simulation.status().duplicatesSent > 5 }
+
+            simulation.stop()
+            await().atMost(Duration.ofSeconds(5)).until { simulation.state == SimulationState.STOPPED }
+
+            val status = simulation.status()
+            assertThat(status.unknown).isZero()
+            assertThat(status.acknowledged).isEqualTo(status.requested)
+            assertThat(simulation.entries().flatMap { it.resends }.map { it.result }).contains(SendResult.CANCELLED)
+            simulation.assertJournalMatchesStatus()
+        }
+    }
 }

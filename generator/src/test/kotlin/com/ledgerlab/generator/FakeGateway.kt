@@ -10,13 +10,14 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Minimal stand-in for the gateway's POST /transfers, with an optional first-attempt failure, a refusal,
- * a slow answer and a ledger rejection for waited requests.
+ * a slow answer, a slow answer to repeats of an id, and a ledger rejection for waited requests.
  */
 class FakeGateway(
     private val failFirstAttempt: Boolean = false,
     private val refuseWith: Int? = null,
     private val responseDelay: Duration = Duration.ZERO,
     private val rejectReason: String? = null,
+    private val repeatDelay: Duration = Duration.ZERO,
 ) : AutoCloseable {
     private val objectMapper = ObjectMapper()
     private val server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
@@ -33,7 +34,7 @@ class FakeGateway(
             val id = body["transferId"] as String
             val attempt = attemptsById.computeIfAbsent(id) { AtomicInteger() }.incrementAndGet()
             val waited = exchange.requestURI.query?.contains("wait=") == true
-            Thread.sleep(responseDelay)
+            Thread.sleep(if (attempt > 1) repeatDelay else responseDelay)
             val (code, response) = when {
                 failFirstAttempt && attempt == 1 -> 503 to """{"error":"unavailable"}"""
                 refuseWith != null -> refuseWith to """{"error":"refused"}"""

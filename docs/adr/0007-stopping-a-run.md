@@ -12,7 +12,7 @@ the "open requests" counter could stay above zero for good.
 ## Decision
 
 **A stop is graceful.** The generator goes `RUNNING → STOPPING → STOPPED`. On stop it launches
-no new transfers and makes no retries; a duplicate still waiting for its moment is dropped, never sent. Requests already sent keep running until they get their
+no new transfers and makes no retries; a duplicate whose moment comes after the stop is not sent. Requests already sent keep running until they get their
 answer, up to a grace period. `POST /internal/simulations/{id}/stop` answers 202 while the run
 is stopping, and the caller polls the status until it is no longer active. If the run has already
 ended, on its own or by an earlier stop, the answer is 200 with the final state, so a caller with

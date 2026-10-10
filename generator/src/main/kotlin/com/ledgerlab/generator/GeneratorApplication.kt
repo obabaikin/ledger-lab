@@ -37,7 +37,7 @@ data class GeneratorProperties(
 data class ProfileProperties(
     /** Share of transfers the client sends a second time with the same id and body. */
     val duplicateShare: Double,
-    /** Delay of a duplicate after the first send, picked from this list. */
+    /** Delay of a duplicate after the first send starts, picked from this list; it may overlap that send. */
     val duplicateDelays: List<Duration>,
     /** Share of transfers no account can cover, picked by count so a run has exactly that many. */
     val oversizedShare: Double,
