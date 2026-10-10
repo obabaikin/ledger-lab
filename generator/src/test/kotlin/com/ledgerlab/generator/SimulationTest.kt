@@ -1,5 +1,6 @@
 package com.ledgerlab.generator
 
+import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -36,7 +37,8 @@ class SimulationTest {
         assertThat(byOutcome[JournalOutcome.ACKNOWLEDGED] ?: 0).isEqualTo(status.acknowledged.toInt())
         assertThat(byOutcome[JournalOutcome.FAILED] ?: 0).isEqualTo(status.failed.toInt())
         assertThat(byOutcome[JournalOutcome.UNKNOWN] ?: 0).isEqualTo(status.unknown.toInt())
-        assertThat(entries.sumOf { it.resends.size }).isEqualTo(status.retries.toInt())
+        assertThat(entries.sumOf { e -> e.resends.count { it.kind == ResendKind.RETRY } }).isEqualTo(status.retries.toInt())
+        assertThat(entries.sumOf { e -> e.resends.count { it.kind == ResendKind.DUPLICATE } }).isEqualTo(status.duplicatesSent.toInt())
         assertThat(entries.count { it.gatewayStatus == GatewayApi.STATUS_POSTED }).isEqualTo(status.posted.toInt())
         assertThat(entries.count { it.gatewayStatus == GatewayApi.STATUS_REJECTED }).isEqualTo(status.rejected.toInt())
         assertThat(entries.mapNotNull { it.rejectReason }.groupingBy { it }.eachCount().mapValues { it.value.toLong() })
@@ -50,11 +52,14 @@ class SimulationTest {
         seconds: Long,
         waitShare: Double = 0.0,
         stopGrace: Duration = Duration.ofSeconds(5),
+        duplicateShare: Double = 0.0,
+        duplicateDelays: List<Duration> = emptyList(),
+        registry: MeterRegistry = SimpleMeterRegistry(),
     ) = Simulation(
         runId = UUID.randomUUID(), targetTps = tps, duration = Duration.ofSeconds(seconds),
         profile = LoadProfile(UUID.randomUUID(), accountCount = 20, blockedAccounts = 2, hotAccounts = 3),
         waitShare = waitShare, waitTimeout = Duration.ofSeconds(1), stopGrace = stopGrace, client = client,
-        maxInFlight = 500, registry = SimpleMeterRegistry(),
+        maxInFlight = 500, registry = registry, duplicateShare = duplicateShare, duplicateDelays = duplicateDelays,
     )
 
     @Test
@@ -269,6 +274,91 @@ class SimulationTest {
 
             assertThat(simulation.journal).isNull()
             assertThat(simulation.status().requested).isGreaterThan(0)
+        }
+    }
+
+    @Test
+    fun `a duplicate is a second send of the same transfer, not a second transfer`() {
+        FakeGateway().use { gateway ->
+            val registry = SimpleMeterRegistry()
+            val simulation = simulation(
+                client(gateway.url), tps = 50, seconds = 1, waitShare = 1.0,
+                duplicateShare = 1.0, duplicateDelays = listOf(Duration.ZERO, Duration.ofMillis(50)), registry = registry,
+            )
+
+            simulation.start()
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            val status = simulation.status()
+            assertThat(status.requested).isEqualTo(50)
+            assertThat(status.duplicatesSent).isEqualTo(status.requested)
+            assertThat(status.acknowledged).isEqualTo(status.requested)
+            assertThat(status.retries).isZero()
+            assertThat(gateway.attemptsById).hasSize(50)
+            assertThat(gateway.attemptsById.values.map { it.get() }).containsOnly(2)
+            simulation.assertJournalMatchesStatus()
+            assertThat(simulation.entries()).allSatisfy {
+                assertThat(it.resends).singleElement().satisfies({ resend -> assertThat(resend.kind).isEqualTo(ResendKind.DUPLICATE) })
+            }
+
+            fun sends(kind: String) = registry.get("generator.send.latency")
+                .tags("waited", "true", "kind", kind, "final", "true").timer().count()
+            assertThat(sends("first")).isEqualTo(50)
+            assertThat(sends("duplicate")).isEqualTo(50)
+            assertThat(registry.get("generator.submission.latency").tag("kind", "duplicate").timer().count()).isEqualTo(50)
+        }
+    }
+
+    @Test
+    fun `an answer to either send acknowledges the transfer`() {
+        // Whichever send of a transfer arrives first gets the 503; with a single attempt alone it would stay unknown.
+        FakeGateway(failFirstAttempt = true).use { gateway ->
+            val simulation = simulation(
+                client(gateway.url, maxAttempts = 1), tps = 20, seconds = 1,
+                duplicateShare = 1.0, duplicateDelays = listOf(Duration.ZERO),
+            )
+
+            simulation.start()
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            val status = simulation.status()
+            assertThat(status.acknowledged).isEqualTo(status.requested)
+            assertThat(status.unknown).isZero()
+            simulation.assertJournalMatchesStatus()
+        }
+    }
+
+    @Test
+    fun `a stop cancels duplicates that are still waiting for their moment`() {
+        FakeGateway().use { gateway ->
+            val simulation = simulation(
+                client(gateway.url), tps = 50, seconds = 30,
+                duplicateShare = 1.0, duplicateDelays = listOf(Duration.ofSeconds(20)),
+            )
+            simulation.start()
+            await().atMost(Duration.ofSeconds(5)).until { simulation.status().requested > 10 }
+
+            simulation.stop()
+            await().atMost(Duration.ofSeconds(3)).until { simulation.state == SimulationState.STOPPED }
+
+            val status = simulation.status()
+            assertThat(status.duplicatesSent).isZero()
+            assertThat(gateway.attemptsById.values.map { it.get() }).containsOnly(1)
+            assertThat(status.acknowledged).isEqualTo(status.requested)
+            simulation.assertJournalMatchesStatus()
+        }
+    }
+
+    @Test
+    fun `the pacer never launches more than the journal reserved`() {
+        // 1s / 7 is rounded down to whole nanoseconds, which used to make a 22nd send due just before the end.
+        FakeGateway().use { gateway ->
+            val simulation = simulation(client(gateway.url), tps = 7, seconds = 3)
+
+            simulation.start()
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            assertThat(simulation.status().requested).isEqualTo(simulation.journalCapacity).isEqualTo(21)
         }
     }
 }

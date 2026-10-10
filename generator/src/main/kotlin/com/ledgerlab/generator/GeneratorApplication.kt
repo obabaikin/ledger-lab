@@ -31,6 +31,18 @@ data class GeneratorProperties(
     val retention: Duration,
     val retentionSweepInterval: Duration,
     val journal: JournalProperties,
+    val profile: ProfileProperties,
+)
+
+data class ProfileProperties(
+    /** Share of transfers the client sends a second time with the same id and body. */
+    val duplicateShare: Double,
+    /** Delay of a duplicate after the first send, picked from this list. */
+    val duplicateDelays: List<Duration>,
+    /** Share of transfers no account can cover, picked by count so a run has exactly that many. */
+    val oversizedShare: Double,
+    /** Share of transfers to a blocked account, picked by count. */
+    val blockedShare: Double,
 )
 
 data class JournalProperties(

@@ -20,6 +20,12 @@ generator:
   journal:
     retention: 10m
     max-entries: 300000
+  profile:
+    duplicate-share: 0.02
+    # 0: both inserts race on the key; 50ms: accepted, no result yet; 1s: the result is in.
+    duplicate-delays: 0ms, 50ms, 1s
+    oversized-share: 0.005
+    blocked-share: 0.005
 
 logging:
   pattern:

@@ -100,7 +100,7 @@ class GatewayClient(private val props: GeneratorProperties, private val objectMa
                 sendResult = SendResult.CANCELLED
                 throw e
             } finally {
-                sends.record(sendStarted, System.nanoTime(), sendResult, response?.statusCode())
+                sends.record(attempt, sendStarted, System.nanoTime(), sendResult, response?.statusCode())
             }
             val elapsed = Duration.ofNanos(System.nanoTime() - started)
             if (response != null && response.statusCode() !in 500..599) {

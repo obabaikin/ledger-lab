@@ -12,7 +12,7 @@ the "open requests" counter could stay above zero for good.
 ## Decision
 
 **A stop is graceful.** The generator goes `RUNNING → STOPPING → STOPPED`. On stop it launches
-no new transfers and makes no retries. Requests already sent keep running until they get their
+no new transfers and makes no retries; a duplicate still waiting for its moment is dropped, never sent. Requests already sent keep running until they get their
 answer, up to a grace period. `POST /internal/simulations/{id}/stop` answers 202 while the run
 is stopping, and the caller polls the status until it is no longer active. If the run has already
 ended, on its own or by an earlier stop, the answer is 200 with the final state, so a caller with
@@ -30,6 +30,11 @@ counts, as the client contract in ADR 0006 defines them: acknowledged (2xx), fai
 attempt reached the gateway) and unknown (sent, but no answer settled it). A 5xx or a timeout
 on the last allowed attempt, including one cut short by a stop, is unknown, not failed.
 
+**A transfer is judged by all its sends.** Besides retries, a share of transfers is sent a second
+time with the same id and body, as a user pressing twice would. Any 2xx on any send acknowledges
+the transfer; otherwise any send that may have arrived leaves it unknown; only then has it failed.
+A duplicate is counted in `duplicatesSent`, never as a new transfer.
+
 **The bank keeps working.** Only the client side stops. Every transfer the gateway accepted is
 still published and applied, so the bank side of reconciliation (accepted = published =
 applied) is complete after a stop as well.
@@ -46,5 +51,7 @@ applied) is complete after a stop as well.
   answer. Hence acknowledged ≤ accepted by the gateway ≤ acknowledged + unknown.
 - A stop takes up to the grace period: 13 seconds with the defaults (2 s connect, 5 s wait,
   5 s request timeout, 1 s margin).
+- A run that ends on its own also sends its pending duplicates, which adds at most the longest
+  duplicate delay to its end.
 - A run that ends on its own has no such bound: it waits for every open request, which ends
   by its own timeouts within three attempts (about 40 seconds with the defaults).

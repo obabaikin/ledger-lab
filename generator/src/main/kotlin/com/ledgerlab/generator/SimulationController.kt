@@ -60,11 +60,15 @@ class SimulationController(
     @ResponseStatus(HttpStatus.CREATED)
     fun start(@Valid @RequestBody request: StartSimulationRequest): SimulationStatus {
         val runId = request.runId!!
-        val profile = LoadProfile(runId, request.accountCount, request.blockedAccounts, request.hotAccounts)
+        val profile = LoadProfile(
+            runId, request.accountCount, request.blockedAccounts, request.hotAccounts,
+            oversizedShare = props.profile.oversizedShare, blockedShare = props.profile.blockedShare,
+        )
         val simulation = Simulation(
             runId, request.tps, Duration.ofSeconds(request.durationSeconds.toLong()), profile,
             request.waitShare, Duration.ofSeconds(request.waitTimeoutSeconds.toLong()),
             stopGrace(request.waitTimeoutSeconds), client, props.maxInFlight, registry,
+            props.profile.duplicateShare, props.profile.duplicateDelays,
         )
         require(simulation.journalCapacity <= props.journal.maxEntries) {
             "tps x durationSeconds = ${simulation.journalCapacity} exceeds the journal cap of ${props.journal.maxEntries}"

@@ -15,7 +15,10 @@ enum class SendResult {
     CANCELLED,
 }
 
-enum class ResendKind { RETRY }
+/** What a send was, from the client's side; the gateway cannot tell a retry from a duplicate. */
+enum class SendKind { FIRST, RETRY, DUPLICATE }
+
+enum class ResendKind { RETRY, DUPLICATE }
 
 enum class JournalOutcome { PENDING, ACKNOWLEDGED, FAILED, UNKNOWN }
 
@@ -40,7 +43,7 @@ data class JournalEntryView(
     val outcome: JournalOutcome,
     val gatewayStatus: String?,
     val rejectReason: String?,
-    /** Null while the first send still waits for its answer: a send is recorded when it ends. */
+    /** The first attempt of the submission, even when a duplicate ended earlier; null while it waits for its answer. */
     val first: Send?,
     val resends: List<Resend>,
 )
@@ -58,24 +61,24 @@ data class JournalFilter(
             (rejectReason == null || entry.rejectReason == rejectReason)
 }
 
-/** Receives every send of one transfer as it ends, so a send cut short by cancellation is still recorded. */
+/** Receives every send of one submission as it ends, so a send cut short by cancellation is still recorded. */
 fun interface SendRecorder {
-    fun record(startedNanos: Long, endedNanos: Long, result: SendResult, httpStatus: Int?)
+    fun record(attempt: Int, startedNanos: Long, endedNanos: Long, result: SendResult, httpStatus: Int?)
 
     companion object {
-        val NONE = SendRecorder { _, _, _, _ -> }
+        val NONE = SendRecorder { _, _, _, _, _ -> }
     }
 }
 
 /**
- * One transfer as the client knows it. Only its own submission coroutine writes it; API threads
- * read it, so every field a reader sees is published through a volatile write.
+ * One transfer as the client knows it. Its submission and its duplicate may record sends at the
+ * same time; API threads read it, so every field a reader sees is published through a volatile write.
  */
 class JournalEntry(
     val seq: Long,
     private val command: TransferCommand,
     private val runStartNanos: Long,
-) : SendRecorder {
+) {
     @Volatile var outcome: JournalOutcome = JournalOutcome.PENDING
         private set
     @Volatile private var gatewayStatus: String? = null
@@ -85,14 +88,20 @@ class JournalEntry(
 
     val transferId: UUID get() = command.transferId
 
-    override fun record(startedNanos: Long, endedNanos: Long, result: SendResult, httpStatus: Int?) {
+    /** Resends are numbered in the order they end, so the list only grows at its end while it is read. */
+    @Synchronized
+    fun record(kind: SendKind, startedNanos: Long, endedNanos: Long, result: SendResult, httpStatus: Int?) {
         val offsetMs = (startedNanos - runStartNanos) / 1_000_000
         val latencyMs = (endedNanos - startedNanos) / 1_000_000
-        if (first == null) {
-            first = Send(offsetMs, result, httpStatus, latencyMs)
-        } else {
-            resends = resends + Resend(ResendKind.RETRY, resends.size + 2, offsetMs, result, httpStatus, latencyMs)
+        val resendKind = when (kind) {
+            SendKind.FIRST -> {
+                first = Send(offsetMs, result, httpStatus, latencyMs)
+                return
+            }
+            SendKind.RETRY -> ResendKind.RETRY
+            SendKind.DUPLICATE -> ResendKind.DUPLICATE
         }
+        resends = resends + Resend(resendKind, resends.size + 2, offsetMs, result, httpStatus, latencyMs)
     }
 
     fun settle(outcome: JournalOutcome, gatewayStatus: String? = null, rejectReason: String? = null) {

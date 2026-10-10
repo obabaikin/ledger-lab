@@ -7,7 +7,8 @@ fun testProperties(
     maxAttempts: Int = 3,
     retryBackoff: Duration = Duration.ofMillis(50),
     journal: JournalProperties = JournalProperties(Duration.ofMinutes(10), 300_000),
+    profile: ProfileProperties = ProfileProperties(0.0, emptyList(), 0.005, 0.005),
 ) = GeneratorProperties(
     url, Duration.ofSeconds(2), Duration.ofSeconds(10), maxAttempts, retryBackoff, 500,
-    Duration.ofHours(1), Duration.ofMinutes(5), journal,
+    Duration.ofHours(1), Duration.ofMinutes(5), journal, profile,
 )

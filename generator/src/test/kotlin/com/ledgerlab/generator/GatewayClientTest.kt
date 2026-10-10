@@ -20,6 +20,10 @@ class GatewayClientTest {
 
     private fun command() = TransferCommand(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100, Instant.now())
 
+    private fun JournalEntry.sends() = SendRecorder { attempt, startedNanos, endedNanos, result, httpStatus ->
+        record(if (attempt == 1) SendKind.FIRST else SendKind.RETRY, startedNanos, endedNanos, result, httpStatus)
+    }
+
     private fun closedPort(): Int = ServerSocket(0).use { it.localPort }
 
     @Test
@@ -27,7 +31,7 @@ class GatewayClientTest {
         val command = command()
         val entry = JournalEntry(1, command, System.nanoTime())
 
-        val result = client("http://localhost:${closedPort()}", maxAttempts = 2).submit(command, wait = null, sends = entry)
+        val result = client("http://localhost:${closedPort()}", maxAttempts = 2).submit(command, wait = null, sends = entry.sends())
 
         assertThat(result.outcome).isEqualTo(SubmissionOutcome.FAILED)
         assertThat(result.attempts).isEqualTo(2)
@@ -44,7 +48,7 @@ class GatewayClientTest {
 
         val command = command()
         val entry = JournalEntry(1, command, System.nanoTime())
-        val pending = async(Dispatchers.IO) { client.submit(command, wait = null, sends = entry) }
+        val pending = async(Dispatchers.IO) { client.submit(command, wait = null, sends = entry.sends()) }
         // Waiting for the request alone is not enough: closing before the 503 is written makes the first send NO_RESPONSE.
         await().atMost(Duration.ofSeconds(5)).until { entry.view().first != null }
         gateway.close() // the retry finds no gateway

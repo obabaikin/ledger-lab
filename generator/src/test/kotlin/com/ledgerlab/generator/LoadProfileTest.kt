@@ -25,16 +25,36 @@ class LoadProfileTest {
     }
 
     @Test
-    fun `skews traffic towards hot accounts and injects some invalid transfers`() {
+    fun `skews traffic towards hot accounts`() {
         val profile = LoadProfile(UUID.randomUUID(), accountCount = 100, blockedAccounts = 2, hotAccounts = 5, seed = 7)
 
         val commands = List(20_000) { profile.next() }
         val toHot = commands.count { it.toAccount in 1..5 } / commands.size.toDouble()
-        val toBlocked = commands.count { it.toAccount in 99..100 } / commands.size.toDouble()
-        val oversized = commands.count { it.amountCents >= 1_000_000_000L } / commands.size.toDouble()
 
         assertThat(toHot).isBetween(0.30, 0.40)
-        assertThat(toBlocked).isBetween(0.005, 0.02)
-        assertThat(oversized).isBetween(0.005, 0.02)
+        assertThat(commands.filter { it.amountCents != profile.oversizedAmountCents })
+            .allSatisfy { assertThat(it.amountCents).isBetween(1, 2_000) }
+    }
+
+    @Test
+    fun `invalid transfers come by count, exactly the share of a run and never both on one transfer`() {
+        val profile = LoadProfile(UUID.randomUUID(), accountCount = 100, blockedAccounts = 2, hotAccounts = 5, seed = 3)
+
+        val commands = List(1_000) { profile.next() }
+        val oversized = commands.withIndex().filter { it.value.amountCents == profile.oversizedAmountCents }.map { it.index + 1 }
+        val toBlocked = commands.withIndex().filter { it.value.toAccount in 99..100 }.map { it.index + 1 }
+
+        assertThat(oversized).containsExactly(200, 400, 600, 800, 1_000)
+        assertThat(toBlocked).containsExactly(100, 300, 500, 700, 900)
+    }
+
+    @Test
+    fun `a single hot account that pays does not pay itself`() {
+        val profile = LoadProfile(UUID.randomUUID(), accountCount = 3, blockedAccounts = 0, hotAccounts = 1, hotShare = 1.0, seed = 5)
+
+        val commands = List(1_000) { profile.next() }
+
+        assertThat(commands).allSatisfy { assertThat(it.toAccount).isNotEqualTo(it.fromAccount) }
+        assertThat(commands.filter { it.fromAccount == 1 }).isNotEmpty()
     }
 }

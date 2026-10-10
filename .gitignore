@@ -1,12 +1,6 @@
 # Local working notes, never published
 CLAUDE.md
-docs/worklog.md
-docs/backlog.md
-docs/stories.md
-docs/errors.md
-docs/handoff.md
-docs/timelog.md
-docs/process.md
+docs/*.md
 
 # Build
 build/

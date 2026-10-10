@@ -14,8 +14,8 @@ class JournalTest {
     private fun add(): JournalEntry =
         journal.add(TransferCommand(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100, Instant.now()))
 
-    private fun respond(entry: JournalEntry, httpStatus: Int) =
-        entry.record(start, start + 1_000_000, SendResult.RESPONSE, httpStatus)
+    private fun respond(entry: JournalEntry, httpStatus: Int, kind: SendKind = SendKind.FIRST) =
+        entry.record(kind, start, start + 1_000_000, SendResult.RESPONSE, httpStatus)
 
     @Test
     fun `pages follow the order of first send and end only when the journal is complete`() {
@@ -41,7 +41,7 @@ class JournalTest {
     @Test
     fun `filters combine and skip entries without losing the cursor`() {
         val pending = add()
-        val retried = add().also { respond(it, 503); respond(it, 202); it.settle(JournalOutcome.ACKNOWLEDGED, "ACCEPTED") }
+        val retried = add().also { respond(it, 503); respond(it, 202, SendKind.RETRY); it.settle(JournalOutcome.ACKNOWLEDGED, "ACCEPTED") }
         val rejected = add().also { respond(it, 200); it.settle(JournalOutcome.ACKNOWLEDGED, "REJECTED", "BLOCKED_ACCOUNT") }
         val failed = add().also { respond(it, 422); it.settle(JournalOutcome.FAILED) }
 
@@ -62,12 +62,28 @@ class JournalTest {
     @Test
     fun `the first send is the entry itself, later ones are numbered from 2`() {
         val entry = add()
-        entry.record(start + 2_000_000, start + 5_000_000, SendResult.NO_RESPONSE, null)
-        entry.record(start + 1_005_000_000, start + 1_010_000_000, SendResult.RESPONSE, 202)
+        entry.record(SendKind.FIRST, start + 2_000_000, start + 5_000_000, SendResult.NO_RESPONSE, null)
+        entry.record(SendKind.RETRY, start + 1_005_000_000, start + 1_010_000_000, SendResult.RESPONSE, 202)
 
         val view = journal.get(entry.transferId)!!
         assertThat(view.first).isEqualTo(Send(offsetMs = 2, result = SendResult.NO_RESPONSE, httpStatus = null, latencyMs = 3))
         assertThat(view.resends).containsExactly(Resend(ResendKind.RETRY, 2, 1_005, SendResult.RESPONSE, 202, 5))
         assertThat(journal.get(UUID.randomUUID())).isNull()
+    }
+
+    @Test
+    fun `a duplicate that ends before the first send does not take its place`() {
+        val entry = add()
+        entry.record(SendKind.DUPLICATE, start + 1_000_000, start + 4_000_000, SendResult.RESPONSE, 202)
+        entry.record(SendKind.FIRST, start, start + 900_000_000, SendResult.RESPONSE, 503)
+        entry.record(SendKind.RETRY, start + 950_000_000, start + 960_000_000, SendResult.RESPONSE, 200)
+
+        val view = journal.get(entry.transferId)!!
+        assertThat(view.first).isEqualTo(Send(offsetMs = 0, result = SendResult.RESPONSE, httpStatus = 503, latencyMs = 900))
+        assertThat(view.resends).containsExactly(
+            Resend(ResendKind.DUPLICATE, 2, 1, SendResult.RESPONSE, 202, 3),
+            Resend(ResendKind.RETRY, 3, 950, SendResult.RESPONSE, 200, 10),
+        )
+        assertThat(journal.page(JournalFilter(resent = true), 0, 10, complete = true).items).hasSize(1)
     }
 }

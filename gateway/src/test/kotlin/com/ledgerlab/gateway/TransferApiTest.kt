@@ -7,14 +7,18 @@ import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.kafka.core.ConsumerFactory
 import java.time.Duration
 import java.util.Properties
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 
 class TransferApiTest : IntegrationTest() {
 
     @Autowired lateinit var consumerFactory: ConsumerFactory<String, String>
+    @Autowired lateinit var jdbc: JdbcTemplate
 
     @Test
     fun `accepts a transfer with 202 and publishes it to kafka through the outbox`() {
@@ -53,6 +57,24 @@ class TransferApiTest : IntegrationTest() {
         assertThat(second.statusCode).isIn(HttpStatus.ACCEPTED, HttpStatus.OK)
         assertThat(second.body!!["transferId"]).isEqualTo(first.body!!["transferId"])
         assertThat(second.body!!["acceptedAt"]).isEqualTo(first.body!!["acceptedAt"])
+    }
+
+    @Test
+    fun `submissions of one id racing on the insert all get the one transfer`() {
+        val pool = Executors.newFixedThreadPool(8)
+        repeat(10) {
+            val request = body()
+            val gate = CountDownLatch(1)
+            val responses = List(8) { pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { gate.await(); submit(request) } }
+            gate.countDown()
+
+            val answers = responses.map { it.get() }
+            assertThat(answers).allSatisfy { assertThat(it.statusCode.is2xxSuccessful).isTrue() }
+            assertThat(answers.map { it.body!!["acceptedAt"] }.distinct()).hasSize(1)
+            val rows = jdbc.queryForObject("SELECT count(*) FROM transfers WHERE transfer_id = ?", Int::class.java, request["transferId"])
+            assertThat(rows).isEqualTo(1)
+        }
+        pool.shutdown()
     }
 
     @Test
