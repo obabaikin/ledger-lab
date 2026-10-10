@@ -351,7 +351,7 @@ class SimulationTest {
 
     @Test
     fun `the pacer never launches more than the journal reserved`() {
-        // 1s / 7 is rounded down to whole nanoseconds, which used to make a 22nd send due just before the end.
+        // 1s / 7 is rounded down to whole nanoseconds, which would make a 22nd send due just before the end.
         FakeGateway().use { gateway ->
             val simulation = simulation(client(gateway.url), tps = 7, seconds = 3)
 

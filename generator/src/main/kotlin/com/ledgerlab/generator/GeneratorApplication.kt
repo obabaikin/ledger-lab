@@ -41,7 +41,6 @@ data class ProfileProperties(
     val duplicateDelays: List<Duration>,
     /** Share of transfers no account can cover, picked by count so a run has exactly that many. */
     val oversizedShare: Double,
-    /** Share of transfers to a blocked account, picked by count. */
     val blockedShare: Double,
 )
 

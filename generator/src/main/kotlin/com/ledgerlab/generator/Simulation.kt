@@ -62,8 +62,7 @@ data class SimulationStatus(
 /**
  * One load run. A pacer launches [targetTps] submissions per second, spread evenly; each
  * submission is a coroutine over a non-blocking HTTP call, so slow responses do not slow the
- * pace. The semaphore caps how many requests may be open at once. A share of transfers is sent
- * a second time with the same id and body, as a user pressing twice would.
+ * pace. The semaphore caps how many requests may be open at once.
  */
 class Simulation(
     val runId: UUID,
@@ -240,7 +239,6 @@ class Simulation(
     private fun inOrder(answers: Collection<Answer>): List<SubmissionResult> =
         answers.sortedBy { it.endedNanos }.map { it.result }
 
-    /** One more send of the same request, never retried; a stop before its moment means it is never sent. */
     private suspend fun sendDuplicate(command: TransferCommand, wait: Duration?, entry: JournalEntry, delay: Duration): Answer? {
         val stopped = withTimeoutOrNull(delay.toMillis()) { stopSignal.join() } != null
         if (stopped || state != SimulationState.RUNNING) return null
