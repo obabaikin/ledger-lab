@@ -116,14 +116,15 @@ INSERT INTO control.invite_tokens (token, expires_at, quota)
 VALUES ('<random token>', now() + interval '30 days', 5);  -- runs per hour
 ```
 
-`POST /api/sessions {"token": ...}` opens a session and counts the visit; the
-session id is the key to it, no cookie is set. `POST /api/sessions/{sessionId}/runs {"requestId", "tps", "durationSeconds"}`
-answers 202 with the run `QUEUED` and its place; a repeat with the same `requestId` and body returns the
-same run, a different body is 422. Over the invite's hourly quota, or with the queue full, the answer is 429. At most three
-runs hold a place at once, and a run that waits more than five minutes expires
-([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)). The API is described in
-`control/openapi.json`, checked against the running service. For now a run that leaves the queue stays `CREATED`:
-opening its accounts and driving the services is the next step.
+`POST /api/sessions {"token": ...}` opens a session and counts the visit; the session id is the
+key to it, no cookie is set. `POST /api/sessions/{sessionId}/runs {"requestId", "tps",
+"durationSeconds"}` answers 202 with the run `QUEUED` and its place; a repeat with the same
+`requestId` and body returns the same run, a different body is 422. Over the invite's hourly quota,
+or with the queue full, the answer is 429. At most three runs hold a place at once, and a run that
+waits more than five minutes expires ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
+The API is described in `control/openapi.json`, checked against the running service. For now a run
+that leaves the queue stays `CREATED`: opening its accounts and driving the services is the next
+step.
 
 ## Scope and non-goals
 

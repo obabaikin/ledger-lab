@@ -42,8 +42,8 @@ interleave: concurrent starts get exactly the free places of the queue and of th
 
 ## Considered and rejected
 
-- **A cookie for the session.** It would need a consent banner, and a link that carries the session
-  is easier to share inside the company that received it.
+- **A cookie for the session.** The project stores nothing in the visitor's browser by design, and
+  a link that carries the session is easier to share inside the company that received it.
 - **A queue in memory.** Lost on every restart of control; the table costs one index.
 - **Only disabling the button against double clicks.** A retried request from the network would
   still start a second run.
