@@ -37,56 +37,53 @@ class ResultHandlingTest : IntegrationTest() {
     fun `a waiting request is answered as soon as the result arrives`() {
         val transferId = UUID.randomUUID()
         val runId = UUID.randomUUID()
-        val pool = Executors.newSingleThreadExecutor()
+        Executors.newSingleThreadExecutor().use { pool ->
+            val pending = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
+            await().atMost(Duration.ofSeconds(10)).until { waiters.size() > 0 }
+            publishResult(runId, transferId, TransferOutcome.POSTED)
 
-        val pending = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
-        await().atMost(Duration.ofSeconds(10)).until { waiters.size() > 0 }
-        publishResult(runId, transferId, TransferOutcome.POSTED)
-
-        val response = pending.get()
-        pool.shutdown()
-        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-        assertThat(response.body!!["status"]).isEqualTo("POSTED")
-        assertThat(waiters.size()).isZero()
+            val response = pending.get()
+            assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+            assertThat(response.body!!["status"]).isEqualTo("POSTED")
+            assertThat(waiters.size()).isZero()
+        }
     }
 
     @Test
     fun `a final answer to a waiting client is already in the database`() {
         val transferId = UUID.randomUUID()
         val runId = UUID.randomUUID()
-        val pool = Executors.newSingleThreadExecutor()
+        Executors.newSingleThreadExecutor().use { pool ->
+            val pending = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
+            await().atMost(Duration.ofSeconds(10)).until { waiters.size() > 0 }
+            // Wake the request directly, bypassing Kafka, so the recorder cannot write the status first.
+            waiters.complete(TransferResultEvent(runId, transferId, TransferOutcome.POSTED, null, Instant.now()))
 
-        val pending = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
-        await().atMost(Duration.ofSeconds(10)).until { waiters.size() > 0 }
-        // Wake the request directly, bypassing Kafka, so the recorder cannot write the status first.
-        waiters.complete(TransferResultEvent(runId, transferId, TransferOutcome.POSTED, null, Instant.now()))
-
-        val answer = pending.get()
-        pool.shutdown()
-        assertThat(answer.body!!["status"]).isEqualTo("POSTED")
-        val stored = http.getForEntity("/v1/transfers/$transferId", Map::class.java)
-        assertThat(stored.body!!["status"]).isEqualTo("POSTED")
-        assertThat(stored.body!!["resultedAt"]).isEqualTo(answer.body!!["resultedAt"])
+            val answer = pending.get()
+            assertThat(answer.body!!["status"]).isEqualTo("POSTED")
+            val stored = http.getForEntity("/v1/transfers/$transferId", Map::class.java)
+            assertThat(stored.body!!["status"]).isEqualTo("POSTED")
+            assertThat(stored.body!!["resultedAt"]).isEqualTo(answer.body!!["resultedAt"])
+        }
     }
 
     @Test
     fun `two requests waiting for the same transfer are both answered`() {
         val transferId = UUID.randomUUID()
         val runId = UUID.randomUUID()
-        val pool = Executors.newFixedThreadPool(2)
+        Executors.newFixedThreadPool(2).use { pool ->
+            val first = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT0.5S") }
+            val second = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
+            await().atMost(Duration.ofSeconds(10)).until { waiters.size() == 2 }
+            assertThat(first.get().statusCode).isEqualTo(HttpStatus.ACCEPTED) // the short wait times out first
+            await().atMost(Duration.ofSeconds(5)).until { waiters.size() == 1 }
+            publishResult(runId, transferId, TransferOutcome.POSTED)
 
-        val first = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT0.5S") }
-        val second = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
-        await().atMost(Duration.ofSeconds(10)).until { waiters.size() == 2 }
-        assertThat(first.get().statusCode).isEqualTo(HttpStatus.ACCEPTED) // the short wait times out first
-        await().atMost(Duration.ofSeconds(5)).until { waiters.size() == 1 }
-        publishResult(runId, transferId, TransferOutcome.POSTED)
-
-        val response = second.get()
-        pool.shutdown()
-        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-        assertThat(response.body!!["status"]).isEqualTo("POSTED")
-        assertThat(waiters.size()).isZero()
+            val response = second.get()
+            assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+            assertThat(response.body!!["status"]).isEqualTo("POSTED")
+            assertThat(waiters.size()).isZero()
+        }
     }
 
     @Test

@@ -9,6 +9,7 @@ gateway:
     retry-backoff: 200ms
   max-wait: 5s
   retry-after: 1s
+  close-lock-timeout: 1s
 logging:
   level:
     org.apache.kafka: WARN

@@ -34,18 +34,17 @@ class WaitFailureTest : IntegrationTest() {
         doThrow(DataAccessResourceFailureException("connection lost"))
             .`when`(service).recordResult(any(TransferResultEvent::class.java) ?: event)
         val failuresBefore = registry.counter("gateway.wait.failed").count()
-        val pool = Executors.newSingleThreadExecutor()
+        Executors.newSingleThreadExecutor().use { pool ->
+            val pending = pool.submit<ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
+            await().atMost(Duration.ofSeconds(10)).until { waiters.size() > 0 }
+            waiters.complete(event)
 
-        val pending = pool.submit<ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
-        await().atMost(Duration.ofSeconds(10)).until { waiters.size() > 0 }
-        waiters.complete(event)
-
-        val answer = pending.get()
-        pool.shutdown()
-        assertThat(answer.statusCode).isEqualTo(HttpStatus.ACCEPTED)
-        assertThat(answer.body!!["status"]).isIn("ACCEPTED", "PUBLISHED")
-        assertThat(answer.headers.getFirst("Retry-After")).isEqualTo("1")
-        assertThat(registry.counter("gateway.wait.failed").count()).isEqualTo(failuresBefore + 1)
-        assertThat(http.getForEntity("/v1/transfers/$transferId", Map::class.java).statusCode.is2xxSuccessful).isTrue()
+            val answer = pending.get()
+            assertThat(answer.statusCode).isEqualTo(HttpStatus.ACCEPTED)
+            assertThat(answer.body!!["status"]).isIn("ACCEPTED", "PUBLISHED")
+            assertThat(answer.headers.getFirst("Retry-After")).isEqualTo("1")
+            assertThat(registry.counter("gateway.wait.failed").count()).isEqualTo(failuresBefore + 1)
+            assertThat(http.getForEntity("/v1/transfers/$transferId", Map::class.java).statusCode.is2xxSuccessful).isTrue()
+        }
     }
 }

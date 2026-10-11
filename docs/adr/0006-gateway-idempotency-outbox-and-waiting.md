@@ -53,6 +53,7 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
 | 202 | accepted, not final yet: `ACCEPTED` or `PUBLISHED`; `Retry-After` hints when to ask | learns the result later |
 | 400, 404 | not accepted: invalid request, unknown or missing API version | fixes the request; a retry gets the same answer |
 | 422 | not accepted: the `transferId` was already used with another payload | has a bug; a key is never reused |
+| 409 | not accepted: the run's period is closed (ADR 0009) | stops; the statement settles what is still unknown |
 | 5xx | unknown: it may already be committed | retries with the same `transferId` and payload |
 | no answer (timeout, connection lost after sending) | unknown | same as 5xx |
 | connection not established | not received | retries |
@@ -61,7 +62,8 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
   are two payments. A client creates one key per intent to pay and keeps it before calling.
 - A retry with the same key and payload is always safe, and it settles "unknown": it either
   accepts the transfer or returns the existing one. `GET` answering 404 does not settle it,
-  because the original request may still commit afterwards.
+  because the original request may still commit afterwards. The statement of a closed period
+  does (ADR 0009): after the close nothing new commits.
 - Once any attempt for a key ended unknown, the key stays unknown until an answer arrives,
   even if later attempts cannot connect.
 - A client that gives up without an answer reports "unknown", never "failed". "Failed" invites

@@ -70,6 +70,9 @@ curl -s localhost:8081/internal/runs/$RUN/summary        # accepted, published, 
 curl -s localhost:8080/internal/runs/$RUN/reconciliation # the ledger's own checks
 # optional: stop early; the clients stop, the bank finishes what it accepted
 curl -s -X POST localhost:8082/internal/simulations/$RUN/stop # 202 while stopping, 200 if already ended
+# 4. once the generator has ended, close the period: nothing new of the run commits after this
+curl -s -X POST localhost:8081/internal/runs/$RUN/close
+curl -s "localhost:8081/v1/runs/$RUN/statement?limit=1000"   # the bank's statement, page by page via next
 ```
 
 Client-facing API of the bank (what the generator calls):
@@ -85,11 +88,13 @@ How a client reads the answer (full contract in [ADR 0006](docs/adr/0006-gateway
 |---|---|---|
 | 200 | accepted, final: `POSTED` or `REJECTED` | done |
 | 202 | accepted, not final yet | asks again later (`Retry-After`) |
-| 4xx | not accepted | fixes the request, never retries it |
+| 409 | not accepted: the run's period is closed | stops; the statement settles what is still unknown |
+| other 4xx | not accepted | fixes the request, never retries it |
 | 5xx or no answer | **unknown**: the transfer may be committed | retries with the same `transferId` |
 
 A client without an answer reports "unknown", never "failed": "failed" invites a second payment
-under a new key. Only the control console will be exposed; gateway, ledger and generator are
+under a new key. The statement of a closed period settles every unknown: listed means accepted,
+absent means never accepted ([ADR 0009](docs/adr/0009-closing-a-period-and-the-statement.md)). Only the control console will be exposed; gateway, ledger and generator are
 cluster-internal.
 
 ## Scope and non-goals

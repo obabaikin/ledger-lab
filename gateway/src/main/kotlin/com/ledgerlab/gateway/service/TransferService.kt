@@ -4,6 +4,7 @@ import com.ledgerlab.common.Observability.LATENCY_PERCENTILES
 import com.ledgerlab.common.TransferResultEvent
 import com.ledgerlab.gateway.domain.RunSummary
 import com.ledgerlab.gateway.domain.Transfer
+import com.ledgerlab.gateway.persistence.RunPeriodRepository
 import com.ledgerlab.gateway.persistence.TransferRepository
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
@@ -24,8 +25,14 @@ data class TransferRequest(
 class IdempotencyConflictException(transferId: UUID) :
     RuntimeException("Transfer $transferId was already submitted with a different payload")
 
+class PeriodClosedException(runId: UUID) : RuntimeException("The period of run $runId is closed")
+
 @Service
-class TransferService(private val transfers: TransferRepository, registry: MeterRegistry) {
+class TransferService(
+    private val transfers: TransferRepository,
+    private val periods: RunPeriodRepository,
+    registry: MeterRegistry,
+) {
 
     private val accepted = Counter.builder("gateway.transfers").tag("outcome", "accepted").register(registry)
     private val repeated = Counter.builder("gateway.transfers").tag("outcome", "repeated").register(registry)
@@ -36,17 +43,27 @@ class TransferService(private val transfers: TransferRepository, registry: Meter
 
     /**
      * Accepting a transfer is one committed row; the response goes out before Kafka is involved.
-     * A repeated submission with the same id returns the current state instead of a second transfer.
+     * A repeated submission with the same id returns the current state instead of a second transfer,
+     * also after the run's period is closed; a new id is then refused (ADR 0009).
      */
     @Transactional
     fun accept(request: TransferRequest): Transfer {
+        periods.lockShared(request.runId)
+        // A separate statement after the lock: its snapshot must see a close that committed while we waited.
+        if (periods.find(request.runId) != null) {
+            val existing = transfers.find(request.transferId) ?: throw PeriodClosedException(request.runId)
+            return repeat(existing, request)
+        }
         transfers.insertIfAbsent(
             request.transferId, request.runId, request.fromAccount, request.toAccount, request.amountCents,
         )?.let {
             accepted.increment()
             return it
         }
-        val existing = checkNotNull(transfers.find(request.transferId))
+        return repeat(checkNotNull(transfers.find(request.transferId)), request)
+    }
+
+    private fun repeat(existing: Transfer, request: TransferRequest): Transfer {
         if (!existing.matches(request)) throw IdempotencyConflictException(request.transferId)
         repeated.increment()
         return existing
@@ -71,8 +88,12 @@ class TransferService(private val transfers: TransferRepository, registry: Meter
     @Transactional(readOnly = true)
     fun summarize(runId: UUID): RunSummary = transfers.summarize(runId)
 
+    /** The period goes with the run; the answer reflects the transfers only. */
     @Transactional
-    fun deleteRun(runId: UUID): Boolean = transfers.deleteRun(runId) > 0
+    fun deleteRun(runId: UUID): Boolean {
+        periods.delete(runId)
+        return transfers.deleteRun(runId) > 0
+    }
 
     private fun Transfer.matches(request: TransferRequest) =
         runId == request.runId && fromAccount == request.fromAccount &&

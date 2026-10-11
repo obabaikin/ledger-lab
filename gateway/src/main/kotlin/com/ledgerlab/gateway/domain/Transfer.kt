@@ -37,3 +37,18 @@ data class RunSummary(
 ) {
     val pending: Long = accepted - posted - rejected
 }
+
+data class RunPeriod(val runId: UUID, val closedAt: Instant)
+
+data class StatementLine(
+    val transferId: UUID,
+    val fromAccount: Int,
+    val toAccount: Int,
+    val amountCents: Long,
+    val status: TransferStatus,
+    val rejectReason: String?,
+    val acceptedAt: Instant,
+    val resultedAt: Instant?,
+)
+
+data class Statement(val runId: UUID, val closedAt: Instant, val items: List<StatementLine>, val next: UUID?)

@@ -38,6 +38,7 @@ gateway:
     retry-backoff: 500ms
   max-wait: 10s
   retry-after: 1s
+  close-lock-timeout: 5s
 
 logging:
   pattern:

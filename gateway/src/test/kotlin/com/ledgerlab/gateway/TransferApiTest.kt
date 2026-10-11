@@ -61,20 +61,20 @@ class TransferApiTest : IntegrationTest() {
 
     @Test
     fun `submissions of one id racing on the insert all get the one transfer`() {
-        val pool = Executors.newFixedThreadPool(8)
-        repeat(10) {
-            val request = body()
-            val gate = CountDownLatch(1)
-            val responses = List(8) { pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { gate.await(); submit(request) } }
-            gate.countDown()
+        Executors.newFixedThreadPool(8).use { pool ->
+            repeat(10) {
+                val request = body()
+                val gate = CountDownLatch(1)
+                val responses = List(8) { pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { gate.await(); submit(request) } }
+                gate.countDown()
 
-            val answers = responses.map { it.get() }
-            assertThat(answers).allSatisfy { assertThat(it.statusCode.is2xxSuccessful).isTrue() }
-            assertThat(answers.map { it.body!!["acceptedAt"] }.distinct()).hasSize(1)
-            val rows = jdbc.queryForObject("SELECT count(*) FROM transfers WHERE transfer_id = ?", Int::class.java, request["transferId"])
-            assertThat(rows).isEqualTo(1)
+                val answers = responses.map { it.get() }
+                assertThat(answers).allSatisfy { assertThat(it.statusCode.is2xxSuccessful).isTrue() }
+                assertThat(answers.map { it.body!!["acceptedAt"] }.distinct()).hasSize(1)
+                val rows = jdbc.queryForObject("SELECT count(*) FROM transfers WHERE transfer_id = ?", Int::class.java, request["transferId"])
+                assertThat(rows).isEqualTo(1)
+            }
         }
-        pool.shutdown()
     }
 
     @Test

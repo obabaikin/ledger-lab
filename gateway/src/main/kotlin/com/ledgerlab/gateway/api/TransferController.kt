@@ -6,6 +6,7 @@ import com.ledgerlab.gateway.GatewayProperties
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.domain.TransferStatus
 import com.ledgerlab.gateway.service.IdempotencyConflictException
+import com.ledgerlab.gateway.service.PeriodClosedException
 import com.ledgerlab.gateway.service.ResultWaiters
 import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
@@ -126,4 +127,8 @@ class TransferController(
     @ExceptionHandler(IdempotencyConflictException::class)
     @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
     fun idempotencyConflict(e: IdempotencyConflictException): Map<String, String> = mapOf("error" to (e.message ?: "conflict"))
+
+    @ExceptionHandler(PeriodClosedException::class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    fun periodClosed(e: PeriodClosedException): Map<String, String> = mapOf("error" to "period closed")
 }

@@ -3,6 +3,7 @@ package com.ledgerlab.gateway.persistence
 import com.ledgerlab.common.TransferCommand
 import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.gateway.domain.RunSummary
+import com.ledgerlab.gateway.domain.StatementLine
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.domain.TransferStatus
 import org.springframework.jdbc.core.simple.JdbcClient
@@ -134,6 +135,43 @@ class TransferRepository(private val jdbc: JdbcClient) {
             latencyP50Ms = (totals["p50"] as Number?)?.toDouble(),
             latencyP99Ms = (totals["p99"] as Number?)?.toDouble(),
         )
+    }
+
+    fun belongsTo(transferId: UUID, runId: UUID): Boolean =
+        jdbc.sql("SELECT EXISTS (SELECT 1 FROM transfers WHERE transfer_id = :id AND run_id = :runId)")
+            .param("id", transferId)
+            .param("runId", runId)
+            .query(Boolean::class.java)
+            .single()
+
+    /** Keyset page in (accepted_at, transfer_id) order, starting after the transfer [after]. */
+    fun statementPage(runId: UUID, after: UUID?, limit: Int): List<StatementLine> {
+        val afterClause = if (after == null) "" else
+            "AND (accepted_at, transfer_id) > (SELECT accepted_at, transfer_id FROM transfers WHERE transfer_id = :after)"
+        var query = jdbc.sql(
+            """
+            SELECT transfer_id, from_account, to_account, amount_cents, status, reject_reason, accepted_at, resulted_at
+            FROM transfers
+            WHERE run_id = :runId $afterClause
+            ORDER BY accepted_at, transfer_id
+            LIMIT :limit
+            """,
+        )
+            .param("runId", runId)
+            .param("limit", limit)
+        if (after != null) query = query.param("after", after)
+        return query.query { rs, _ ->
+            StatementLine(
+                transferId = rs.getObject("transfer_id", UUID::class.java),
+                fromAccount = rs.getInt("from_account"),
+                toAccount = rs.getInt("to_account"),
+                amountCents = rs.getLong("amount_cents"),
+                status = TransferStatus.valueOf(rs.getString("status")),
+                rejectReason = rs.getString("reject_reason"),
+                acceptedAt = rs.getObject("accepted_at", Timestamp::class.java).toInstant(),
+                resultedAt = rs.getObject("resulted_at", Timestamp::class.java)?.toInstant(),
+            )
+        }.list()
     }
 
     fun deleteRun(runId: UUID): Int =
