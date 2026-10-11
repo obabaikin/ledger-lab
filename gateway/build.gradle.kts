@@ -41,8 +41,7 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-    val spec = file("openapi.json")
-    inputs.files(spec).withPropertyName("openapiSpec")
-    systemProperty("openapi.spec", spec.path)
-    systemProperty("openapi.actual", layout.buildDirectory.file("openapi.json").get().asFile.path)
+    inputs.files("openapi.json", "openapi-internal.json").withPropertyName("openapiSpecs")
+    systemProperty("openapi.dir", projectDir.path)
+    systemProperty("openapi.actualDir", layout.buildDirectory.get().asFile.path)
 }

@@ -20,6 +20,7 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    implementation(libs.springdoc.webmvc.api)
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
@@ -34,4 +35,8 @@ tasks.test {
     val bankSpec = rootProject.file("gateway/openapi.json")
     inputs.file(bankSpec).withPropertyName("bankSpec")
     systemProperty("bank.spec", bankSpec.path)
+    val spec = file("openapi.json")
+    inputs.files(spec).withPropertyName("openapiSpec")
+    systemProperty("openapi.spec", spec.path)
+    systemProperty("openapi.actual", layout.buildDirectory.file("openapi.json").get().asFile.path)
 }

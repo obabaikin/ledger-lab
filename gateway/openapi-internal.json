@@ -1,0 +1,145 @@
+{
+  "components" : {
+    "schemas" : {
+      "ClosedPeriod" : {
+        "properties" : {
+          "closedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "RunSummary" : {
+        "properties" : {
+          "accepted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "latencyP50Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "latencyP99Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "pending" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "published" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectionsByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "description" : "Run summary, period close and run deletion, for control.",
+    "title" : "Ledger Lab gateway internal API",
+    "version" : "1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/internal/runs/{runId}" : {
+      "delete" : {
+        "operationId" : "delete",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/internal/runs/{runId}/close" : {
+      "post" : {
+        "operationId" : "close",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClosedPeriod"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/internal/runs/{runId}/summary" : {
+      "get" : {
+        "operationId" : "summary",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "run-controller" ]
+      }
+    }
+  }
+}

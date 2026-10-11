@@ -1,0 +1,584 @@
+{
+  "components" : {
+    "schemas" : {
+      "ClientReconciliationReport" : {
+        "properties" : {
+          "balanced" : {
+            "type" : "boolean"
+          },
+          "breaks" : {
+            "$ref" : "#/components/schemas/ReconciliationBreaks"
+          },
+          "journal" : {
+            "$ref" : "#/components/schemas/JournalTotals"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "statement" : {
+            "$ref" : "#/components/schemas/StatementTotals"
+          },
+          "statementFinal" : {
+            "type" : "boolean"
+          },
+          "unknownResolved" : {
+            "$ref" : "#/components/schemas/UnknownResolved"
+          }
+        },
+        "type" : "object"
+      },
+      "JournalEntryView" : {
+        "properties" : {
+          "amountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "first" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Send"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "fromAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "gatewayStatus" : {
+            "enum" : [ "ACCEPTED", "PUBLISHED", "POSTED", "REJECTED" ],
+            "type" : [ "string", "null" ]
+          },
+          "outcome" : {
+            "enum" : [ "PENDING", "ACKNOWLEDGED", "FAILED", "UNKNOWN" ],
+            "type" : "string"
+          },
+          "rejectReason" : {
+            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
+            "type" : [ "string", "null" ]
+          },
+          "resends" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Resend"
+            },
+            "type" : "array"
+          },
+          "seq" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "toAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "transferId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "JournalPage" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/JournalEntryView"
+            },
+            "type" : "array"
+          },
+          "next" : {
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "JournalTotals" : {
+        "properties" : {
+          "acknowledged" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "acknowledgedAmountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "requested" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unknown" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "ReconciliationBreaks" : {
+        "properties" : {
+          "acknowledgedNotInStatement" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "failedButInStatement" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "notInJournal" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "payloadMismatch" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "statusMismatch" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          }
+        },
+        "type" : "object"
+      },
+      "Resend" : {
+        "properties" : {
+          "httpStatus" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "kind" : {
+            "enum" : [ "RETRY", "DUPLICATE" ],
+            "type" : "string"
+          },
+          "latencyMs" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "number" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "offsetMs" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "result" : {
+            "enum" : [ "RESPONSE", "NOT_CONNECTED", "NO_RESPONSE", "CANCELLED" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Send" : {
+        "properties" : {
+          "httpStatus" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "latencyMs" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "offsetMs" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "result" : {
+            "enum" : [ "RESPONSE", "NOT_CONNECTED", "NO_RESPONSE", "CANCELLED" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "SimulationStatus" : {
+        "properties" : {
+          "acknowledged" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "actualTps" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "duplicatesSent" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "durationSeconds" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "finishedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "inFlight" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectedByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          },
+          "requested" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "retries" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "startedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "state" : {
+            "enum" : [ "RUNNING", "STOPPING", "FINISHED", "STOPPED" ],
+            "type" : "string"
+          },
+          "targetTps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "unknown" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "StartSimulationRequest" : {
+        "properties" : {
+          "accountCount" : {
+            "format" : "int32",
+            "minimum" : 2,
+            "type" : "integer"
+          },
+          "blockedAccounts" : {
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "durationSeconds" : {
+            "format" : "int32",
+            "maximum" : 30,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "hotAccounts" : {
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "tps" : {
+            "format" : "int32",
+            "maximum" : 1000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "waitShare" : {
+            "format" : "double",
+            "maximum" : 1.0,
+            "minimum" : 0.0,
+            "type" : "number"
+          },
+          "waitTimeoutSeconds" : {
+            "format" : "int32",
+            "maximum" : 30,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        },
+        "required" : [ "runId" ],
+        "type" : "object"
+      },
+      "StatementTotals" : {
+        "properties" : {
+          "amountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "byStatus" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          },
+          "rows" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "TransferIds" : {
+        "properties" : {
+          "count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "transferIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "UnknownResolved" : {
+        "properties" : {
+          "accepted" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "notAccepted" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          }
+        },
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "description" : "Load runs, the client journal and client reconciliation, for control.",
+    "title" : "Ledger Lab generator internal API",
+    "version" : "1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/internal/simulations" : {
+      "post" : {
+        "operationId" : "start",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StartSimulationRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SimulationStatus"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    },
+    "/internal/simulations/{runId}" : {
+      "get" : {
+        "operationId" : "status",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SimulationStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    },
+    "/internal/simulations/{runId}/reconciliation" : {
+      "get" : {
+        "operationId" : "reconciliation",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClientReconciliationReport"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    },
+    "/internal/simulations/{runId}/stop" : {
+      "post" : {
+        "operationId" : "stop",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SimulationStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    },
+    "/internal/simulations/{runId}/transfers" : {
+      "get" : {
+        "operationId" : "transfers",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "outcome",
+          "required" : false,
+          "schema" : {
+            "enum" : [ "PENDING", "ACKNOWLEDGED", "FAILED", "UNKNOWN" ],
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "resent",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "rejectReason",
+          "required" : false,
+          "schema" : {
+            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "after",
+          "required" : false,
+          "schema" : {
+            "default" : 0,
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/JournalPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    },
+    "/internal/simulations/{runId}/transfers/{transferId}" : {
+      "get" : {
+        "operationId" : "transfer",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "transferId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/JournalEntryView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    }
+  }
+}

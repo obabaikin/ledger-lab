@@ -1,0 +1,271 @@
+{
+  "components" : {
+    "schemas" : {
+      "Account" : {
+        "properties" : {
+          "accountNo" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "balanceCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "dailyLimitCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "dailySpentCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "openingBalanceCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "ACTIVE", "BLOCKED" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CheckResult" : {
+        "properties" : {
+          "check" : {
+            "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "passed" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "OpenAccountsRequest" : {
+        "properties" : {
+          "accountCount" : {
+            "format" : "int32",
+            "maximum" : 10000,
+            "minimum" : 2,
+            "type" : "integer"
+          },
+          "blockedAccounts" : {
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "dailyLimitCents" : {
+            "format" : "int64",
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "openingBalanceCents" : {
+            "format" : "int64",
+            "minimum" : 0,
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "ReconciliationReport" : {
+        "properties" : {
+          "accounts" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "accountsOutOfBalance" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanceTotalCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanced" : {
+            "type" : "boolean"
+          },
+          "checks" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CheckResult"
+            },
+            "type" : "array"
+          },
+          "failedChecks" : {
+            "items" : {
+              "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "journalEntries" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "journalSumCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "openingTotalCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "postedTransfers" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectedTransfers" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectionsByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "transfersWithInvalidJournal" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "description" : "A run's accounts, the ledger's reconciliation and run deletion, for control.",
+    "title" : "Ledger Lab ledger internal API",
+    "version" : "1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/internal/runs/{runId}" : {
+      "delete" : {
+        "operationId" : "delete",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/internal/runs/{runId}/accounts" : {
+      "get" : {
+        "operationId" : "accounts",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/Account"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "run-controller" ]
+      },
+      "post" : {
+        "operationId" : "openAccounts",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OpenAccountsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/Account"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/internal/runs/{runId}/reconciliation" : {
+      "get" : {
+        "operationId" : "reconciliation",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReconciliationReport"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "run-controller" ]
+      }
+    }
+  }
+}

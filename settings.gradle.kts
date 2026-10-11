@@ -1,3 +1,3 @@
 rootProject.name = "ledger-lab"
 
-include("common", "ledger-service", "gateway", "generator")
+include("common", "ledger-service", "gateway", "generator", "control")

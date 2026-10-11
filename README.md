@@ -39,7 +39,7 @@ Micrometer / Prometheus / Grafana · Helm · k3s · Terraform (Contabo)
 | `ledger-service` | Double-entry ledger, Kafka consumer, reconciliation, internal API | done |
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
-| `control` | Operations console: runs, reconciliation, chaos button, UI | planned |
+| `control` | Operations console: runs, reconciliation, chaos button, UI | in progress: its models of the services' internal APIs, checked against their specs |
 
 ## Running locally
 
@@ -51,6 +51,7 @@ docker compose up -d                      # Postgres (one schema per service), K
 ./gradlew :ledger-service:bootRun         # :8080
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
+./gradlew :control:bootRun                # :8083, in progress
 ```
 
 A run by hand, until the control service exists:
@@ -78,7 +79,7 @@ curl -s localhost:8082/internal/simulations/$RUN/reconciliation # breaks by kind
 ```
 
 Client-facing API of the bank (what the generator calls). It is published as OpenAPI:
-[`gateway/openapi.json`](gateway/openapi.json) in the repository, `/v3/api-docs` on a running gateway.
+[`gateway/openapi.json`](gateway/openapi.json) in the repository, `/v3/api-docs/bank` on a running gateway.
 The generator knows the bank only through this spec ([ADR 0011](docs/adr/0011-contract-boundaries.md)).
 
 ```bash

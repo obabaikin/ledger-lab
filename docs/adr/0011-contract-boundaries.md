@@ -23,7 +23,7 @@ HTTP types, no logic. Both services are released by one team, so sharing the cla
 code fails the test instead of silently changing the wire.
 
 **Towards clients, a published API.** The gateway owns its HTTP types and publishes them as
-OpenAPI (`/v3/api-docs`, internal endpoints excluded). A copy is kept in `gateway/openapi.json`,
+OpenAPI (`/v3/api-docs/bank`, internal endpoints excluded). A copy is kept in `gateway/openapi.json`,
 and a test fails when the running gateway serves anything else. Every API change therefore shows
 up in review as a diff of the spec.
 
@@ -32,6 +32,13 @@ It has its own model of the API (package `bank`). `BankContractTest` checks that
 `gateway/openapi.json`: the path and query parameter it calls exist, every field the generator
 sends or reads is in the spec, every required field is sent, and its statuses and reasons are
 exactly the spec's. This is a light consumer-side contract test, without a contract broker.
+
+**Control reads the services' internal HTTP APIs the same way.** The ledger, the generator and
+the gateway's internal endpoints publish their own specs (`ledger-service/openapi.json`,
+`generator/openapi.json`, `gateway/openapi-internal.json`, the gateway's split into the groups
+`bank` and `internal`), each checked against the running app. Control has its own model of the
+calls it makes, and `ServiceContractsTest` checks it against those files. Only the Kafka messages
+are shared classes.
 
 **Every entry that reads an enum from the other side tolerates a value it does not know, where the
 message can still be applied, and says so.** An outcome it does not know cannot be applied.

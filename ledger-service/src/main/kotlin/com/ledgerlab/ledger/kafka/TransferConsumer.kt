@@ -23,7 +23,8 @@ class TransferConsumer(
     private val rejected = outcomeCounter(registry, "rejected")
     private val duplicates = outcomeCounter(registry, "duplicate")
 
-    @KafkaListener(topics = ["\${ledger.topic.name}"])
+    // The id lets the readiness check find this container; without idIsGroup = false it would also replace the group id.
+    @KafkaListener(id = LISTENER_ID, idIsGroup = false, topics = ["\${ledger.topic.name}"])
     fun onTransfer(payload: String) {
         val command = objectMapper.readValue(payload, TransferCommand::class.java)
         MDC.put(MDC_RUN_ID, command.runId.toString())
@@ -47,4 +48,8 @@ class TransferConsumer(
 
     private fun outcomeCounter(registry: MeterRegistry, outcome: String): Counter =
         Counter.builder("ledger.transfers").tag("outcome", outcome).register(registry)
+
+    companion object {
+        const val LISTENER_ID = "transfers"
+    }
 }

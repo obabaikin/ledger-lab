@@ -27,6 +27,10 @@ generator:
     oversized-share: 0.005
     blocked-share: 0.005
 
+springdoc:
+  # Otherwise every controller-local error handler is added to every operation as a possible answer.
+  override-with-generic-response: false
+
 logging:
   pattern:
     correlation: "[run=%X{runId:-}] "

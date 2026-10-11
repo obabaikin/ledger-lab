@@ -37,6 +37,10 @@ ledger:
   consumer:
     retry-backoff: 500ms
 
+springdoc:
+  # Otherwise every controller-local error handler is added to every operation as a possible answer.
+  override-with-generic-response: false
+
 logging:
   pattern:
     correlation: "[run=%X{runId:-}] "
@@ -49,3 +53,8 @@ management:
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState, kafkaAssignment

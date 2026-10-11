@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: control
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ledgerlab
+    username: control
+    password: control
+    hikari:
+      schema: control
+  flyway:
+    default-schema: control
+
+server:
+  port: 8083
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
