@@ -43,7 +43,7 @@ class RunRepository(private val jdbc: JdbcClient) {
             .query { rs, _ -> rs.toRun() }
             .list()
 
-    fun insertQueued(sessionId: UUID, token: String, request: RunRequest): UUID {
+    fun insertQueued(sessionId: UUID, token: String, requestId: UUID, request: RunRequest): UUID {
         val runId = UUID.randomUUID()
         jdbc.sql(
             """
@@ -54,7 +54,7 @@ class RunRepository(private val jdbc: JdbcClient) {
             .param("runId", runId)
             .param("sessionId", sessionId)
             .param("token", token)
-            .param("requestId", request.requestId)
+            .param("requestId", requestId)
             .param("tps", request.tps)
             .param("durationSeconds", request.durationSeconds)
             .param("state", RunState.QUEUED.name)
@@ -62,17 +62,23 @@ class RunRepository(private val jdbc: JdbcClient) {
         return runId
     }
 
-    fun quotaUsage(token: String, window: Duration): QuotaUsage =
+    /** The retry time is when fewer than [quota] starts remain in the window, so a lowered quota is honoured too. */
+    fun quotaUsage(token: String, window: Duration, quota: Int): QuotaUsage =
         jdbc.sql(
             """
-            SELECT count(*) AS used,
-                   ceil(extract(epoch FROM min(created_at) + CAST(:windowMillis AS bigint) * interval '1 millisecond' - clock_timestamp())) AS retry_after
-            FROM runs
-            WHERE token = :token AND created_at > clock_timestamp() - CAST(:windowMillis AS bigint) * interval '1 millisecond'
+            WITH started AS (
+                SELECT created_at FROM runs
+                WHERE token = :token AND created_at > clock_timestamp() - CAST(:windowMillis AS bigint) * interval '1 millisecond'
+            )
+            SELECT (SELECT count(*) FROM started) AS used,
+                   (SELECT ceil(extract(epoch FROM created_at + CAST(:windowMillis AS bigint) * interval '1 millisecond' - clock_timestamp()))
+                    FROM started ORDER BY created_at
+                    OFFSET greatest((SELECT count(*) FROM started) - :quota, 0) LIMIT 1) AS retry_after
             """,
         )
             .param("token", token)
             .param("windowMillis", window.toMillis())
+            .param("quota", quota)
             .query { rs, _ -> QuotaUsage(rs.getLong("used"), rs.getObject("retry_after")?.let { rs.getLong("retry_after") }) }
             .single()
 

@@ -18,23 +18,24 @@ class RunService(
     @Transactional
     fun start(sessionId: UUID, request: RunRequest): Run {
         val session = invites.findSession(sessionId) ?: throw SessionNotFoundException()
+        val requestId = request.requestId ?: throw InvalidRunRequestException(ControlErrors.REQUEST_ID_REQUIRED)
         runs.lockQueue()
-        runs.findByRequest(sessionId, request.requestId)?.let { existing ->
+        runs.findByRequest(sessionId, requestId)?.let { existing ->
             if (existing.tps != request.tps || existing.durationSeconds != request.durationSeconds) throw RequestIdConflictException()
             return existing
         }
         if (request.tps !in props.runs.tpsOptions) {
-            throw InvalidRunOptionsException(ControlErrors.tpsNotAllowed(props.runs.tpsOptions))
+            throw InvalidRunRequestException(ControlErrors.tpsNotAllowed(props.runs.tpsOptions))
         }
         if (request.durationSeconds !in props.runs.durationSecondsOptions) {
-            throw InvalidRunOptionsException(ControlErrors.durationNotAllowed(props.runs.durationSecondsOptions))
+            throw InvalidRunRequestException(ControlErrors.durationNotAllowed(props.runs.durationSecondsOptions))
         }
         val invite = invites.find(session.token)?.takeIf { it.valid } ?: throw InviteNotValidException()
-        val usage = runs.quotaUsage(session.token, QUOTA_WINDOW)
+        val usage = runs.quotaUsage(session.token, QUOTA_WINDOW, invite.quota)
         if (usage.used >= invite.quota) throw QuotaExceededException(usage.retryAfterSeconds)
         if (runs.countIn(listOf(RunState.QUEUED)) >= props.runs.maxQueued) throw QueueFullException()
 
-        val runId = runs.insertQueued(sessionId, session.token, request)
+        val runId = runs.insertQueued(sessionId, session.token, requestId, request)
         return checkNotNull(runs.find(sessionId, runId))
     }
 

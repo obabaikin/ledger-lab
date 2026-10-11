@@ -3,8 +3,10 @@ package com.ledgerlab.control
 import com.ledgerlab.control.api.ControlErrors
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import java.time.Duration
 import java.util.UUID
@@ -58,13 +60,51 @@ class RunStartTest : IntegrationTest() {
         assertThat(missing.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
     }
 
+    private fun startWithoutRequestId(sessionId: Any) =
+        http.postForEntity("/api/sessions/$sessionId/runs", mapOf("tps" to 100, "durationSeconds" to 10), Map::class.java)
+
+    private fun postRaw(path: String, body: String) =
+        http.postForEntity(path, HttpEntity(body, HttpHeaders().apply { contentType = MediaType.APPLICATION_JSON }), Map::class.java)
+
     @Test
     fun `a start without a requestId is refused`() {
-        val sessionId = sessionOf(invite())
-
-        val response = http.postForEntity("/api/sessions/$sessionId/runs", mapOf("tps" to 100, "durationSeconds" to 10), Map::class.java)
+        val response = startWithoutRequestId(sessionOf(invite()))
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.body!!["error"]).isEqualTo(ControlErrors.REQUEST_ID_REQUIRED)
+    }
+
+    @Test
+    fun `an unknown session is reported before a missing requestId`() {
+        val response = startWithoutRequestId(UUID.randomUUID())
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
+        assertThat(response.body!!["error"]).isEqualTo(ControlErrors.SESSION_NOT_FOUND)
+    }
+
+    @Test
+    fun `an unreadable body is 400 with an error body`() {
+        val sessionId = sessionOf(invite())
+
+        listOf("/api/sessions", "/api/sessions/$sessionId/runs").forEach { path ->
+            val response = postRaw(path, "{not json")
+            assertThat(response.statusCode).`as`(path).isEqualTo(HttpStatus.BAD_REQUEST)
+            assertThat(response.body!!["error"]).`as`(path).isEqualTo(ControlErrors.INVALID_REQUEST_BODY)
+        }
+    }
+
+    @Test
+    fun `an id that is not a UUID is 404, as an unknown one`() {
+        val sessionId = sessionOf(invite())
+
+        val session = http.getForEntity("/api/sessions/not-a-uuid", Map::class.java)
+        val runs = start("not-a-uuid")
+        val run = getRun(sessionId, "not-a-uuid")
+
+        assertThat(listOf(session, runs, run).map { it.statusCode }).containsOnly(HttpStatus.NOT_FOUND)
+        assertThat(session.body!!["error"]).isEqualTo(ControlErrors.SESSION_NOT_FOUND)
+        assertThat(runs.body!!["error"]).isEqualTo(ControlErrors.SESSION_NOT_FOUND)
+        assertThat(run.body!!["error"]).isEqualTo(ControlErrors.RUN_NOT_FOUND)
     }
 
     @Test
@@ -133,6 +173,19 @@ class RunStartTest : IntegrationTest() {
     }
 
     @Test
+    fun `with a quota lowered below the starts made, Retry-After waits until fewer than the quota remain`() {
+        val token = invite(quota = 5)
+        val sessionId = sessionOf(token)
+        listOf(50L, 40L, 30L, 20L).forEach { setRun(start(sessionId).body!!["runId"], createdAgo = Duration.ofMinutes(it)) }
+        jdbc.sql("UPDATE invite_tokens SET quota = 2 WHERE token = :token").param("token", token).update()
+
+        val response = start(sessionId)
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
+        assertThat(response.headers.getFirst(HttpHeaders.RETRY_AFTER)!!.toLong()).isBetween(1795L, 1800L)
+    }
+
+    @Test
     fun `starts older than an hour do not count against the quota`() {
         val token = invite(quota = 1)
         val sessionId = sessionOf(token)
@@ -149,6 +202,48 @@ class RunStartTest : IntegrationTest() {
 
         assertThat(start(sessionId, requestId).statusCode).isEqualTo(HttpStatus.ACCEPTED)
         assertThat(start(sessionId).statusCode).isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
+    }
+
+    @Test
+    fun `an invite no longer valid is reported before its used-up quota`() {
+        val token = invite(quota = 1)
+        val sessionId = sessionOf(token)
+        start(sessionId)
+        jdbc.sql("UPDATE invite_tokens SET active = false WHERE token = :token").param("token", token).update()
+
+        assertThat(start(sessionId).body!!["error"]).isEqualTo(ControlErrors.INVITE_NOT_VALID)
+    }
+
+    @Test
+    fun `a used-up quota is reported before a full queue`() {
+        val sessionId = sessionOf(invite(quota = props.runs.maxQueued))
+        repeat(props.runs.maxQueued) { start(sessionId) }
+
+        val response = start(sessionId)
+
+        assertThat(response.body!!["error"]).isEqualTo(ControlErrors.RUN_QUOTA_EXCEEDED)
+        assertThat(response.headers.getFirst(HttpHeaders.RETRY_AFTER)).isNotNull()
+    }
+
+    @Test
+    fun `a repeat is recognised before the invite is checked`() {
+        val token = invite()
+        val sessionId = sessionOf(token)
+        val requestId = UUID.randomUUID()
+        start(sessionId, requestId)
+        jdbc.sql("UPDATE invite_tokens SET active = false WHERE token = :token").param("token", token).update()
+
+        assertThat(start(sessionId, requestId).statusCode).isEqualTo(HttpStatus.ACCEPTED)
+    }
+
+    @Test
+    fun `a repeat is recognised before the options are checked`() {
+        val sessionId = sessionOf(invite())
+        val requestId = UUID.randomUUID()
+        val runId = start(sessionId, requestId).body!!["runId"]
+        jdbc.sql("UPDATE runs SET tps = 200 WHERE run_id = CAST(:runId AS uuid)").param("runId", runId.toString()).update()
+
+        assertThat(start(sessionId, requestId, tps = 200).statusCode).isEqualTo(HttpStatus.ACCEPTED)
     }
 
     @Test

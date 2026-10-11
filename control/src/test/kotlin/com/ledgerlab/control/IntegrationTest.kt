@@ -65,7 +65,7 @@ abstract class IntegrationTest {
     protected fun sessionOf(token: String): UUID = UUID.fromString(enter(token).body!!["sessionId"] as String)
 
     protected fun start(
-        sessionId: UUID,
+        sessionId: Any,
         requestId: UUID = UUID.randomUUID(),
         tps: Int? = 100,
         durationSeconds: Int? = 10,

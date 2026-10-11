@@ -29,13 +29,13 @@ data class Run(
     val position: Long?,
 )
 
-data class RunRequest(val requestId: UUID, val tps: Int?, val durationSeconds: Int?)
+data class RunRequest(val requestId: UUID?, val tps: Int?, val durationSeconds: Int?)
 
 data class QuotaUsage(val used: Long, val retryAfterSeconds: Long?)
 
 class RunNotFoundException : RuntimeException()
 
-class InvalidRunOptionsException(message: String) : RuntimeException(message)
+class InvalidRunRequestException(message: String) : RuntimeException(message)
 
 class RequestIdConflictException : RuntimeException()
 

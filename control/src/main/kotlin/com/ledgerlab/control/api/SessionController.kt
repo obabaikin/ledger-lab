@@ -47,7 +47,7 @@ class SessionController(private val entry: EntryService) {
 
     @Operation(summary = "Open a session with an invite")
     @ApiResponse(responseCode = "201", description = "Session opened")
-    @ApiResponse(responseCode = "400", description = "Invalid body", content = [Content()])
+    @ApiResponse(responseCode = "400", description = "Unreadable body", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "403", description = "Unknown, inactive or expired invite", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping
     fun create(@RequestBody request: CreateSessionRequest): ResponseEntity<SessionCreated> {

@@ -14,7 +14,8 @@ bank down. The author also wants to know which invite links were opened, without
 the database with an expiry and a quota; there is no endpoint for it. `POST /api/sessions` with the
 token opens a session. Unknown, inactive and expired invites all get the same 403. The session id
 is the key to the session; it travels in the URL, not in a cookie, and a session sees only its own
-runs (another session's run is 404, like a run that does not exist).
+runs (another session's run is 404, like a run that does not exist, and so is an id that is not
+a UUID). Every error answer listed in the spec has the body `{"error": "..."}`.
 
 **Visits.** Every opening of a known link, valid or not, adds one to `invite_visits` (first seen,
 last seen, count). An unknown token leaves no row, so random tokens cannot fill the table. No IP
@@ -22,7 +23,8 @@ address, user agent or cookie is stored.
 
 **Quota.** An invite may start `quota` runs in any hour, counted over all its sessions and in every
 state, expired runs included: the quota limits how often "start" is pressed. Over the quota the
-answer is 429 with `Retry-After`, the seconds until the oldest start leaves the hour.
+answer is 429 with `Retry-After`: the seconds until fewer than `quota` starts remain in the hour,
+which stays right when the quota was lowered below the starts already made.
 
 **Idempotent start.** The page sends a `requestId` with each start. A repeat with the same body in
 the same session returns the same run and costs no quota; a different body is 422.

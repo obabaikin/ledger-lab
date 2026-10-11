@@ -29,7 +29,9 @@ class LedgerReadiness(ledger: ControlProperties.Ledger) {
 
     fun isReady(): Boolean {
         val ready = try {
-            http.get().uri(LedgerApi.READINESS_PATH).retrieve().toBodilessEntity()
+            http.get().uri(LedgerApi.READINESS_PATH).retrieve()
+                .onStatus({ !it.is2xxSuccessful }) { _, response -> throw RestClientException("readiness answered ${response.statusCode}") }
+                .toBodilessEntity()
             true
         } catch (e: RestClientException) {
             if (lastAnswer != false) log.info("Ledger not ready, runs wait in the queue: {}", e.message)

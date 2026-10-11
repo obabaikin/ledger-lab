@@ -8,8 +8,6 @@ import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
-import jakarta.validation.Valid
-import jakarta.validation.constraints.NotNull
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -24,8 +22,8 @@ import java.util.UUID
 
 @Schema(description = "A run to start.")
 data class StartRunRequest(
-    @field:Schema(description = "Idempotency key within the session: a repeat with the same body gets the same run.")
-    @field:NotNull val requestId: UUID?,
+    @field:Schema(description = "Idempotency key within the session: a repeat with the same body gets the same run.", requiredMode = Schema.RequiredMode.REQUIRED)
+    val requestId: UUID?,
     @field:Schema(description = "Transfers per second, one of the session's tpsOptions.", requiredMode = Schema.RequiredMode.REQUIRED)
     val tps: Int?,
     @field:Schema(description = "Seconds, one of the session's durationOptions.", requiredMode = Schema.RequiredMode.REQUIRED)
@@ -57,14 +55,14 @@ class RunController(private val runs: RunService) {
     @Operation(summary = "Start a run: it joins the queue")
     @ApiResponse(responseCode = "200", description = "A repeat of a run that is final")
     @ApiResponse(responseCode = "202", description = "Queued, or a repeat of a run that is not final")
-    @ApiResponse(responseCode = "400", description = "Invalid body, tps or duration", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "400", description = "Unreadable body, no requestId, or tps or duration not allowed", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "403", description = "The invite expired or was switched off", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "404", description = "Unknown session", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "422", description = "The requestId was used with a different body", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "429", description = "Quota used up (Retry-After says when) or queue full", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping
-    fun start(@PathVariable sessionId: UUID, @Valid @RequestBody request: StartRunRequest): ResponseEntity<RunView> {
-        val run = runs.start(sessionId, RunRequest(request.requestId!!, request.tps, request.durationSeconds))
+    fun start(@PathVariable sessionId: UUID, @RequestBody request: StartRunRequest): ResponseEntity<RunView> {
+        val run = runs.start(sessionId, RunRequest(request.requestId, request.tps, request.durationSeconds))
         return ResponseEntity.status(if (run.state.isFinal) HttpStatus.OK else HttpStatus.ACCEPTED)
             .location(URI.create("${RUNS_PATH.replace("{sessionId}", sessionId.toString())}/${run.runId}"))
             .body(run.toView())

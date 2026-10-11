@@ -30,6 +30,13 @@ class LedgerReadinessTest {
     }
 
     @Test
+    fun `not ready on a redirect`() {
+        ledger.status = 302
+
+        assertThat(readiness().isReady()).isFalse()
+    }
+
+    @Test
     fun `not ready when the answer takes longer than the timeout`() {
         ledger.delay = timeout.multipliedBy(3)
 

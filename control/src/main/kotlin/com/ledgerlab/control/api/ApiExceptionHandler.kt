@@ -2,7 +2,7 @@ package com.ledgerlab.control.api
 
 import com.ledgerlab.control.entry.InviteNotValidException
 import com.ledgerlab.control.entry.SessionNotFoundException
-import com.ledgerlab.control.runs.InvalidRunOptionsException
+import com.ledgerlab.control.runs.InvalidRunRequestException
 import com.ledgerlab.control.runs.QueueFullException
 import com.ledgerlab.control.runs.QuotaExceededException
 import com.ledgerlab.control.runs.RequestIdConflictException
@@ -10,9 +10,11 @@ import com.ledgerlab.control.runs.RunNotFoundException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice
 class ApiExceptionHandler {
@@ -29,9 +31,21 @@ class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     fun runNotFound() = ApiError(ControlErrors.RUN_NOT_FOUND)
 
-    @ExceptionHandler(InvalidRunOptionsException::class)
+    @ExceptionHandler(InvalidRunRequestException::class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    fun invalidOptions(e: InvalidRunOptionsException) = ApiError(checkNotNull(e.message))
+    fun invalidRequest(e: InvalidRunRequestException) = ApiError(checkNotNull(e.message))
+
+    @ExceptionHandler(HttpMessageNotReadableException::class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    fun unreadableBody() = ApiError(ControlErrors.INVALID_REQUEST_BODY)
+
+    // An id that is not a UUID cannot name an existing session or run, so it gets the same 404.
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun malformedId(e: MethodArgumentTypeMismatchException): ResponseEntity<ApiError> = when (e.name) {
+        SESSION_ID -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiError(ControlErrors.SESSION_NOT_FOUND))
+        RUN_ID -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiError(ControlErrors.RUN_NOT_FOUND))
+        else -> throw e
+    }
 
     @ExceptionHandler(RequestIdConflictException::class)
     @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
@@ -46,4 +60,9 @@ class ApiExceptionHandler {
     @ExceptionHandler(QueueFullException::class)
     @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
     fun queueFull() = ApiError(ControlErrors.RUN_QUEUE_FULL)
+
+    private companion object {
+        const val SESSION_ID = "sessionId"
+        const val RUN_ID = "runId"
+    }
 }

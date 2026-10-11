@@ -181,7 +181,14 @@
             "description" : "Session opened"
           },
           "400" : {
-            "description" : "Invalid body"
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unreadable body"
           },
           "403" : {
             "content" : {
@@ -323,7 +330,7 @@
                 }
               }
             },
-            "description" : "Invalid body, tps or duration"
+            "description" : "Unreadable body, no requestId, or tps or duration not allowed"
           },
           "403" : {
             "content" : {

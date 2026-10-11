@@ -43,7 +43,7 @@ class EntryService(
             sessionId = sessionId,
             inviteValid = invite.valid,
             runsPerHour = invite.quota,
-            runsLastHour = runs.quotaUsage(session.token, QUOTA_WINDOW).used,
+            runsLastHour = runs.quotaUsage(session.token, QUOTA_WINDOW, invite.quota).used,
             tpsOptions = props.runs.tpsOptions,
             durationOptions = props.runs.durationSecondsOptions,
         )

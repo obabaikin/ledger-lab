@@ -10,6 +10,8 @@ object ControlErrors {
     const val REQUEST_ID_CONFLICT = "requestId already used with a different request"
     const val RUN_QUOTA_EXCEEDED = "run quota exceeded"
     const val RUN_QUEUE_FULL = "run queue full"
+    const val REQUEST_ID_REQUIRED = "requestId is required"
+    const val INVALID_REQUEST_BODY = "invalid request body"
 
     fun tpsNotAllowed(options: List<Int>) = "tps must be one of $options"
     fun durationNotAllowed(options: List<Int>) = "durationSeconds must be one of $options"
