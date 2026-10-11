@@ -61,7 +61,8 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
 - A transfer is identified by its key, not by its content: two equal payments under two keys
   are two payments. A client creates one key per intent to pay and keeps it before calling.
 - A retry with the same key and payload is always safe, and it settles "unknown": it either
-  accepts the transfer or returns the existing one. `GET` answering 404 does not settle it,
+  accepts the transfer, returns the existing one, or, once the run's period is closed, answers
+  409 for a key that was never accepted (ADR 0009). `GET` answering 404 does not settle it,
   because the original request may still commit afterwards. The statement of a closed period
   does (ADR 0009): after the close nothing new commits.
 - Once any attempt for a key ended unknown, the key stays unknown until an answer arrives,

@@ -1,10 +1,12 @@
 package com.ledgerlab.gateway
 
 import org.assertj.core.api.Assertions.assertThat
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -112,14 +114,20 @@ class StatementTest : IntegrationTest() {
                         chunk.map { it to HttpStatus.valueOf(submit(it).statusCode.value()) }
                     }
                 }
-                val closing = pool.submit<ResponseEntity<Map<*, *>>> { gate.await(); Thread.sleep(5); close(runId) }
+                val closing = pool.submit<Pair<HttpStatus, List<Any?>>> {
+                    gate.await()
+                    Thread.sleep(5)
+                    val closed = close(runId)
+                    HttpStatus.valueOf(closed.statusCode.value()) to allItems(runId, 7).flatten().map { it["transferId"] }
+                }
                 gate.countDown()
 
                 val outcomes = answers.flatMap { it.get() }
-                assertThat(closing.get().statusCode).isEqualTo(HttpStatus.OK)
+                val (closeStatus, statementAtClose) = closing.get()
+                assertThat(closeStatus).isEqualTo(HttpStatus.OK)
                 assertThat(outcomes.map { it.second }).allMatch { it == HttpStatus.ACCEPTED || it == HttpStatus.OK || it == HttpStatus.CONFLICT }
                 val acceptedIds = outcomes.filter { it.second != HttpStatus.CONFLICT }.map { it.first["transferId"].toString() }
-                assertThat(allItems(runId, 7).flatten().map { it["transferId"] }).containsExactlyInAnyOrderElementsOf(acceptedIds)
+                assertThat(statementAtClose).containsExactlyInAnyOrderElementsOf(acceptedIds)
             }
         }
     }
@@ -148,6 +156,34 @@ class StatementTest : IntegrationTest() {
         assertThat(items.map { it["transferId"] }).containsExactly(transferId.toString())
         assertThat(Instant.parse(items[0]["acceptedAt"] as String)).isBefore(Instant.parse(statement["closedAt"] as String))
     }
+
+    @Test
+    fun `a submission arriving while close waits is refused once the close commits`() {
+        val runId = UUID.randomUUID()
+        val late = body(runId = runId)
+        dataSource.connection.use { insert ->
+            insert.autoCommit = false
+            insert.holdRunLockShared(runId)
+            val waitingBefore = waitingAdvisoryLocks()
+
+            val closing = CompletableFuture.supplyAsync { close(runId) }
+            await().atMost(Duration.ofMillis(800)).until { waitingAdvisoryLocks() > waitingBefore }
+            val submitting = CompletableFuture.supplyAsync { submit(late) }
+            await().atMost(Duration.ofMillis(800)).until { waitingAdvisoryLocks() > waitingBefore + 1 }
+            insert.commit()
+
+            assertThat(closing.get().statusCode).isEqualTo(HttpStatus.OK)
+            assertThat(submitting.get().statusCode).isEqualTo(HttpStatus.CONFLICT)
+        }
+        assertThat(allItems(runId, 100).flatten()).isEmpty()
+    }
+
+    private fun waitingAdvisoryLocks(): Int =
+        dataSource.connection.use { c ->
+            c.createStatement().use { st ->
+                st.executeQuery("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted").use { it.next(); it.getInt(1) }
+            }
+        }
 
     @Test
     fun `close gives up with 503 when an insert in flight outlasts the lock timeout`() {
