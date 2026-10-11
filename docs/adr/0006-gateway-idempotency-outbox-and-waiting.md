@@ -49,7 +49,7 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
 
 | Response | The transfer is | The client |
 |---|---|---|
-| 200 | accepted and final: `POSTED`, or `REJECTED` with `rejectReason` | is done |
+| 200 | accepted and final: `POSTED`, or `REJECTED` with `rejectReason` (null only for a reason newer than the gateway, ADR 0011) | is done |
 | 202 | accepted, not final yet: `ACCEPTED` or `PUBLISHED`; `Retry-After` hints when to ask | learns the result later |
 | 400, 404 | not accepted: invalid request, unknown or missing API version | fixes the request; a retry gets the same answer |
 | 422 | not accepted: the `transferId` was already used with another payload | has a bug; a key is never reused |

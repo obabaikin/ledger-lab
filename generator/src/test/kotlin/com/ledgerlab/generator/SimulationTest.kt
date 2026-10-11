@@ -1,5 +1,7 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.TransferStatus
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
@@ -7,14 +9,14 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.entry
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
-import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.time.Duration
 import java.util.UUID
 
 class SimulationTest {
 
     private fun client(url: String, maxAttempts: Int = 3, retryBackoff: Duration = Duration.ofMillis(50)) =
-        GatewayClient(testProperties(url, maxAttempts, retryBackoff), ObjectMapper())
+        GatewayClient(testProperties(url, maxAttempts, retryBackoff), jacksonObjectMapper(), SimpleMeterRegistry())
 
     private fun SimulationStatus.assertSettledCounts() {
         assertThat(inFlight).isZero()
@@ -39,8 +41,8 @@ class SimulationTest {
         assertThat(byOutcome[JournalOutcome.UNKNOWN] ?: 0).isEqualTo(status.unknown.toInt())
         assertThat(entries.sumOf { e -> e.resends.count { it.kind == ResendKind.RETRY } }).isEqualTo(status.retries.toInt())
         assertThat(entries.sumOf { e -> e.resends.count { it.kind == ResendKind.DUPLICATE } }).isEqualTo(status.duplicatesSent.toInt())
-        assertThat(entries.count { it.gatewayStatus == GatewayApi.STATUS_POSTED }).isEqualTo(status.posted.toInt())
-        assertThat(entries.count { it.gatewayStatus == GatewayApi.STATUS_REJECTED }).isEqualTo(status.rejected.toInt())
+        assertThat(entries.count { it.gatewayStatus == TransferStatus.POSTED }).isEqualTo(status.posted.toInt())
+        assertThat(entries.count { it.gatewayStatus == TransferStatus.REJECTED }).isEqualTo(status.rejected.toInt())
         assertThat(entries.mapNotNull { it.rejectReason }.groupingBy { it }.eachCount().mapValues { it.value.toLong() })
             .isEqualTo(status.rejectedByReason)
         assertThat(status.rejectedByReason.values.sum()).isEqualTo(status.rejected)
@@ -207,7 +209,7 @@ class SimulationTest {
 
     @Test
     fun `a ledger rejection keeps its reason in the journal and in the status`() {
-        FakeGateway(rejectReason = "INSUFFICIENT_FUNDS").use { gateway ->
+        FakeGateway(rejectReason = RejectReason.INSUFFICIENT_FUNDS).use { gateway ->
             val simulation = simulation(client(gateway.url), tps = 20, seconds = 1, waitShare = 1.0)
 
             simulation.start()
@@ -215,12 +217,12 @@ class SimulationTest {
 
             val status = simulation.status()
             assertThat(status.rejected).isEqualTo(status.requested)
-            assertThat(status.rejectedByReason).containsExactly(entry("INSUFFICIENT_FUNDS", status.requested))
+            assertThat(status.rejectedByReason).containsExactly(entry(RejectReason.INSUFFICIENT_FUNDS, status.requested))
             simulation.assertJournalMatchesStatus()
             assertThat(simulation.entries()).allSatisfy {
                 assertThat(it.outcome).isEqualTo(JournalOutcome.ACKNOWLEDGED)
-                assertThat(it.gatewayStatus).isEqualTo(GatewayApi.STATUS_REJECTED)
-                assertThat(it.rejectReason).isEqualTo("INSUFFICIENT_FUNDS")
+                assertThat(it.gatewayStatus).isEqualTo(TransferStatus.REJECTED)
+                assertThat(it.rejectReason).isEqualTo(RejectReason.INSUFFICIENT_FUNDS)
             }
         }
     }

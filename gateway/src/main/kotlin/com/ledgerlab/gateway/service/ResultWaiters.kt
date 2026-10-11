@@ -1,6 +1,5 @@
 package com.ledgerlab.gateway.service
 
-import com.ledgerlab.common.TransferResultEvent
 import org.springframework.stereotype.Component
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -14,23 +13,23 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 @Component
 class ResultWaiters {
-    private val waiters = ConcurrentHashMap<UUID, CopyOnWriteArrayList<CompletableFuture<TransferResultEvent>>>()
+    private val waiters = ConcurrentHashMap<UUID, CopyOnWriteArrayList<CompletableFuture<LedgerResult>>>()
 
-    fun register(transferId: UUID): CompletableFuture<TransferResultEvent> {
-        val future = CompletableFuture<TransferResultEvent>()
+    fun register(transferId: UUID): CompletableFuture<LedgerResult> {
+        val future = CompletableFuture<LedgerResult>()
         waiters.compute(transferId) { _, list -> (list ?: CopyOnWriteArrayList()).also { it.add(future) } }
         return future
     }
 
-    fun remove(transferId: UUID, future: CompletableFuture<TransferResultEvent>) {
+    fun remove(transferId: UUID, future: CompletableFuture<LedgerResult>) {
         waiters.computeIfPresent(transferId) { _, list ->
             list.remove(future)
             list.ifEmpty { null }
         }
     }
 
-    fun complete(event: TransferResultEvent) {
-        waiters.remove(event.transferId)?.forEach { it.complete(event) }
+    fun complete(result: LedgerResult) {
+        waiters.remove(result.transferId)?.forEach { it.complete(result) }
     }
 
     fun size(): Int = waiters.values.sumOf { it.size }

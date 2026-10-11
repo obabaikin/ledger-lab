@@ -1,5 +1,6 @@
 package com.ledgerlab.ledger.domain
 
+import com.ledgerlab.common.RejectReason
 import java.util.UUID
 
 enum class ReconciliationCheck(val description: String) {

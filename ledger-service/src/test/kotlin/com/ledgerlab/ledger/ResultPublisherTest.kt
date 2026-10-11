@@ -1,5 +1,6 @@
 package com.ledgerlab.ledger
 
+import com.ledgerlab.common.RejectReason
 import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.common.TransferResultEvent
 import com.ledgerlab.ledger.service.LedgerService
@@ -52,7 +53,7 @@ class ResultPublisherTest : IntegrationTest() {
         val byTransfer = received.filter { it.runId == runId }.associateBy { it.transferId }
         assertThat(byTransfer.getValue(posted.transferId).outcome).isEqualTo(TransferOutcome.POSTED)
         assertThat(byTransfer.getValue(rejected.transferId).outcome).isEqualTo(TransferOutcome.REJECTED)
-        assertThat(byTransfer.getValue(rejected.transferId).rejectReason).isEqualTo("BLOCKED_ACCOUNT")
+        assertThat(byTransfer.getValue(rejected.transferId).rejectReason).isEqualTo(RejectReason.BLOCKED_ACCOUNT)
         await().atMost(Duration.ofSeconds(10)).untilAsserted {
             val unpublished = jdbc.sql("SELECT count(*) FROM transfers WHERE run_id = :r AND result_published_at IS NULL")
                 .param("r", runId).query(Long::class.java).single()

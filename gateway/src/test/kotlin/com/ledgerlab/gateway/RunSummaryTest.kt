@@ -1,5 +1,6 @@
 package com.ledgerlab.gateway
 
+import com.ledgerlab.common.RejectReason
 import com.ledgerlab.common.TransferOutcome
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
@@ -16,7 +17,7 @@ class RunSummaryTest : IntegrationTest() {
         val ids = List(3) { UUID.randomUUID() }
         ids.forEach { submit(body(it, runId)) }
         publishResult(runId, ids[0], TransferOutcome.POSTED)
-        publishResult(runId, ids[1], TransferOutcome.REJECTED, "BLOCKED_ACCOUNT")
+        publishResult(runId, ids[1], TransferOutcome.REJECTED, RejectReason.BLOCKED_ACCOUNT)
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted {
             val summary = http.getForEntity("/internal/runs/$runId/summary", Map::class.java).body!!
@@ -25,7 +26,7 @@ class RunSummaryTest : IntegrationTest() {
             assertThat(summary["posted"]).isEqualTo(1)
             assertThat(summary["rejected"]).isEqualTo(1)
             assertThat(summary["pending"]).isEqualTo(1)
-            assertThat(summary["rejectionsByReason"]).isEqualTo(mapOf("BLOCKED_ACCOUNT" to 1))
+            assertThat(summary["rejectionsByReason"]).isEqualTo(mapOf(RejectReason.BLOCKED_ACCOUNT.name to 1))
             assertThat(summary["latencyP50Ms"]).isNotNull()
         }
 

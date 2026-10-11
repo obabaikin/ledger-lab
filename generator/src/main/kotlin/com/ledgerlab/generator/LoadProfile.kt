@@ -1,9 +1,16 @@
 package com.ledgerlab.generator
 
-import com.ledgerlab.common.TransferCommand
-import java.time.Instant
 import java.util.UUID
 import kotlin.random.Random
+
+/** A transfer the simulated client is about to make; its id is the idempotency key. */
+data class PlannedTransfer(
+    val runId: UUID,
+    val transferId: UUID,
+    val fromAccount: Int,
+    val toAccount: Int,
+    val amountCents: Long,
+)
 
 /**
  * Shapes the traffic like a retail bank: most payments go to a few merchants (hot accounts),
@@ -40,7 +47,7 @@ data class LoadProfile(
 
     // kotlin.random.Random is not thread-safe and next() is called from many coroutines.
     @Synchronized
-    fun next(): TransferCommand {
+    fun next(): PlannedTransfer {
         val n = ++count
         val from = activeAccounts.random(random)
         val to = when {
@@ -50,7 +57,7 @@ data class LoadProfile(
             else -> anyBut(activeAccounts, from)!!
         }
         val amount = if (picked(n, oversizedPpm, 0)) oversizedAmountCents else amountRangeCents.random(random)
-        return TransferCommand(runId, UUID.randomUUID(), from, to, amount, Instant.now())
+        return PlannedTransfer(runId, UUID.randomUUID(), from, to, amount)
     }
 
     /** Integer arithmetic, so that exactly floor(n * share) of the first n transfers are picked. */

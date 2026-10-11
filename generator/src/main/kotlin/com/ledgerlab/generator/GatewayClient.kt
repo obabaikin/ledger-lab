@@ -1,10 +1,22 @@
 package com.ledgerlab.generator
 
-import com.ledgerlab.common.TransferCommand
+import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.SubmitTransferRequest
+import com.ledgerlab.generator.bank.TransferResponse
+import com.ledgerlab.generator.bank.TransferStatus
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.future.await
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatusCode
+import org.slf4j.LoggerFactory
+import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
+import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.ObjectReader
+import tools.jackson.databind.cfg.EnumFeature
 import java.io.IOException
 import java.net.ConnectException
 import java.net.URI
@@ -19,10 +31,11 @@ import kotlin.coroutines.cancellation.CancellationException
 /** Everything the generator knows about the gateway's public API. */
 object GatewayApi {
     const val TRANSFERS_PATH = "/v1/transfers"
-    const val STATUS_POSTED = "POSTED"
-    const val STATUS_REJECTED = "REJECTED"
-    val FINAL_STATUSES = setOf(STATUS_POSTED, STATUS_REJECTED)
+    const val WAIT_PARAM = "wait"
 }
+
+/** Number of the first send of a transfer; retries and duplicates count on from it. */
+const val FIRST_ATTEMPT = 1
 
 /** How a client reads the gateway's answers (client contract, ADR 0006). */
 enum class SubmissionOutcome {
@@ -36,8 +49,9 @@ enum class SubmissionOutcome {
 
 /** What the generator learns from one submission, after retries. */
 data class SubmissionResult(
-    val status: String?,
-    val rejectReason: String?,
+    /** Null when the answer could not be read, e.g. a status this client does not know yet. */
+    val status: TransferStatus?,
+    val rejectReason: RejectReason?,
     val attempts: Int,
     val outcome: SubmissionOutcome,
     val latency: Duration,
@@ -49,31 +63,37 @@ data class SubmissionResult(
  * timeout can never create a second transfer.
  */
 @Component
-class GatewayClient(private val props: GeneratorProperties, private val objectMapper: ObjectMapper) {
+class GatewayClient(
+    private val props: GeneratorProperties,
+    private val objectMapper: ObjectMapper,
+    registry: MeterRegistry,
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+    private val unreadable = Counter.builder(UNREADABLE_METRIC)
+        .description("2xx answers with a value this client does not know; the status code still decided the outcome")
+        .register(registry)
 
     private val http: HttpClient = HttpClient.newBuilder()
         .connectTimeout(props.connectTimeout)
         .build()
 
+    // A gateway one version ahead may send a status or reason this client does not know; the code still decides the outcome.
+    private val responseReader: ObjectReader = objectMapper.readerFor(TransferResponse::class.java)
+        .with(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+
     suspend fun submit(
-        command: TransferCommand,
+        transfer: PlannedTransfer,
         wait: Duration?,
         canRetry: () -> Boolean = { true },
         sends: SendRecorder = SendRecorder.NONE,
     ): SubmissionResult {
-        val url = props.gatewayUrl + GatewayApi.TRANSFERS_PATH + (wait?.let { "?wait=$it" } ?: "")
+        val url = props.gatewayUrl + GatewayApi.TRANSFERS_PATH + (wait?.let { "?${GatewayApi.WAIT_PARAM}=$it" } ?: "")
         val payload = objectMapper.writeValueAsString(
-            mapOf(
-                "transferId" to command.transferId,
-                "runId" to command.runId,
-                "fromAccount" to command.fromAccount,
-                "toAccount" to command.toAccount,
-                "amountCents" to command.amountCents,
-            ),
+            SubmitTransferRequest(transfer.transferId, transfer.runId, transfer.fromAccount, transfer.toAccount, transfer.amountCents),
         )
         val request = HttpRequest.newBuilder(URI.create(url))
             .timeout((wait ?: Duration.ZERO) + props.requestTimeout)
-            .header("content-type", "application/json")
+            .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build()
 
@@ -103,13 +123,14 @@ class GatewayClient(private val props: GeneratorProperties, private val objectMa
                 sends.record(attempt, sendStarted, System.nanoTime(), sendResult, response?.statusCode())
             }
             val elapsed = Duration.ofNanos(System.nanoTime() - started)
-            if (response != null && response.statusCode() !in 500..599) {
-                val body = runCatching { objectMapper.readValue(response.body(), Map::class.java) }.getOrNull()
+            val code = response?.let { HttpStatusCode.valueOf(it.statusCode()) }
+            if (response != null && code?.is5xxServerError == false) {
+                val body = read(response.body(), code.is2xxSuccessful)
                 return SubmissionResult(
-                    status = body?.get("status") as String?,
-                    rejectReason = body?.get("rejectReason") as String?,
+                    status = body?.status,
+                    rejectReason = body?.rejectReason,
                     attempts = attempt,
-                    outcome = if (response.statusCode() in 200..299) SubmissionOutcome.ACKNOWLEDGED else SubmissionOutcome.FAILED,
+                    outcome = if (code.is2xxSuccessful) SubmissionOutcome.ACKNOWLEDGED else SubmissionOutcome.FAILED,
                     latency = elapsed,
                 )
             }
@@ -127,9 +148,31 @@ class GatewayClient(private val props: GeneratorProperties, private val objectMa
         }
     }
 
+    /** Null when the body cannot be read; a 2xx that cannot be read in full is logged and counted. */
+    private fun read(body: String, acknowledged: Boolean): TransferResponse? {
+        val tree = runCatching { objectMapper.readTree(body) }.getOrNull()
+        val response = tree?.let { runCatching { responseReader.readValue<TransferResponse>(it) }.getOrNull() }
+        val reasonLost = response != null && response.rejectReason == null && tree.hasValue(TransferResponse::rejectReason.name)
+        if (acknowledged && (response == null || reasonLost)) {
+            unreadable.increment()
+            log.warn("Gateway answer with a value this client does not know: {}", body)
+        }
+        return response
+    }
+
+    private fun JsonNode.hasValue(field: String): Boolean = get(field)?.isNull == false
+
     /** Jitter spreads the retries of many clients that failed together, so a recovering gateway is not hit at once. */
     private fun backoff(attempt: Int): Long {
-        val base = props.retryBackoff.toMillis() shl (attempt - 1)
-        return (base * ThreadLocalRandom.current().nextDouble(0.5, 1.5)).toLong()
+        val base = props.retryBackoff.toMillis() shl (attempt - FIRST_ATTEMPT)
+        return (base * ThreadLocalRandom.current().nextDouble(JITTER_MIN, JITTER_MAX)).toLong()
+    }
+
+    companion object {
+        const val UNREADABLE_METRIC = "generator.gateway.unreadable"
+
+        /** Each pause is the base times a random factor in [JITTER_MIN, JITTER_MAX) (ADR 0006). */
+        private const val JITTER_MIN = 0.5
+        private const val JITTER_MAX = 1.5
     }
 }

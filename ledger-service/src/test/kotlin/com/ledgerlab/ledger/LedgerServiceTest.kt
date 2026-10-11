@@ -1,6 +1,6 @@
 package com.ledgerlab.ledger
 
-import com.ledgerlab.ledger.domain.RejectReason
+import com.ledgerlab.common.RejectReason
 import com.ledgerlab.ledger.domain.TransferResult
 import com.ledgerlab.ledger.service.LedgerService
 import com.ledgerlab.ledger.service.RunService

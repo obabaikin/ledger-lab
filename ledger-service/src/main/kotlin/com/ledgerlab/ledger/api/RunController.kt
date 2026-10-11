@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
 data class OpenAccountsRequest(
-    @field:Min(2) @field:Max(10_000) val accountCount: Int,
+    @field:Min(AccountSetup.MIN_ACCOUNTS) @field:Max(AccountSetup.MAX_ACCOUNTS) val accountCount: Int,
     @field:PositiveOrZero val openingBalanceCents: Long,
     @field:PositiveOrZero val blockedAccounts: Int,
     @field:PositiveOrZero val dailyLimitCents: Long,

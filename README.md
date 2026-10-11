@@ -35,7 +35,7 @@ Micrometer / Prometheus / Grafana · Helm · k3s · Terraform (Contabo)
 
 | Module | Purpose | Status |
 |---|---|---|
-| `common` | Kafka message contracts shared by producer and consumer | done |
+| `common` | The bank's internal Kafka messages, shared by ledger and gateway; no logic | done |
 | `ledger-service` | Double-entry ledger, Kafka consumer, reconciliation, internal API | done |
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
@@ -75,7 +75,9 @@ curl -s -X POST localhost:8081/internal/runs/$RUN/close
 curl -s "localhost:8081/v1/runs/$RUN/statement?limit=1000"   # the bank's statement, page by page via next
 ```
 
-Client-facing API of the bank (what the generator calls):
+Client-facing API of the bank (what the generator calls). It is published as OpenAPI:
+[`gateway/openapi.json`](gateway/openapi.json) in the repository, `/v3/api-docs` on a running gateway.
+The generator knows the bank only through this spec ([ADR 0011](docs/adr/0011-contract-boundaries.md)).
 
 ```bash
 curl -s -X POST 'localhost:8081/v1/transfers?wait=PT5S' -H 'content-type: application/json' \
@@ -107,6 +109,9 @@ What is deliberately left out, and what production would add:
   acknowledged.
 - **No reversals or compensating postings.** Outcomes are reported, not undone. Production would
   add refunds and authorise-then-capture, so money is only taken once the merchant confirms.
+- **No schema registry or contract broker.** Contracts are pinned by tests, and every reader
+  tolerates values it does not know yet, logging and counting them. Production would add a schema
+  registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
 - **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
   the status. Production would add signed webhooks with retried delivery.
 

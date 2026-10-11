@@ -19,10 +19,16 @@ data class AccountSetup(
     val dailyLimitCents: Long,
 ) {
     init {
-        require(accountCount >= 2) { "accountCount must be at least 2" }
+        require(accountCount >= MIN_ACCOUNTS) { "accountCount must be at least $MIN_ACCOUNTS" }
         require(blockedAccounts in 0..<accountCount) { "blockedAccounts must leave at least one active account" }
         require(openingBalanceCents >= 0) { "openingBalanceCents must not be negative" }
         require(dailyLimitCents >= 0) { "dailyLimitCents must not be negative" }
+    }
+
+    companion object {
+        /** A transfer needs a sender and a different receiver. */
+        const val MIN_ACCOUNTS = 2L
+        const val MAX_ACCOUNTS = 10_000L
     }
 }
 

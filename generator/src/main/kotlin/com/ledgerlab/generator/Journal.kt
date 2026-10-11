@@ -1,7 +1,9 @@
 package com.ledgerlab.generator
 
-import com.ledgerlab.common.TransferCommand
+import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.TransferStatus
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /** How one send of a transfer ended, as the client saw it. */
 enum class SendResult {
@@ -41,8 +43,8 @@ data class JournalEntryView(
     val toAccount: Int,
     val amountCents: Long,
     val outcome: JournalOutcome,
-    val gatewayStatus: String?,
-    val rejectReason: String?,
+    val gatewayStatus: TransferStatus?,
+    val rejectReason: RejectReason?,
     /** The first attempt of the submission, even when a duplicate ended earlier; null while it waits for its answer. */
     val first: Send?,
     val resends: List<Resend>,
@@ -53,7 +55,7 @@ data class JournalPage(val items: List<JournalEntryView>, val next: Long?)
 data class JournalFilter(
     val outcome: JournalOutcome? = null,
     val resent: Boolean? = null,
-    val rejectReason: String? = null,
+    val rejectReason: RejectReason? = null,
 ) {
     fun matches(entry: JournalEntryView): Boolean =
         (outcome == null || entry.outcome == outcome) &&
@@ -76,23 +78,23 @@ fun interface SendRecorder {
  */
 class JournalEntry(
     val seq: Long,
-    private val command: TransferCommand,
+    private val transfer: PlannedTransfer,
     private val runStartNanos: Long,
 ) {
     @Volatile var outcome: JournalOutcome = JournalOutcome.PENDING
         private set
-    @Volatile private var gatewayStatus: String? = null
-    @Volatile private var rejectReason: String? = null
+    @Volatile private var gatewayStatus: TransferStatus? = null
+    @Volatile private var rejectReason: RejectReason? = null
     @Volatile private var first: Send? = null
     @Volatile private var resends: List<Resend> = emptyList()
 
-    val transferId: UUID get() = command.transferId
+    val transferId: UUID get() = transfer.transferId
 
     /** Resends are numbered in the order they end, so the list only grows at its end while it is read. */
     @Synchronized
     fun record(kind: SendKind, startedNanos: Long, endedNanos: Long, result: SendResult, httpStatus: Int?) {
-        val offsetMs = (startedNanos - runStartNanos) / 1_000_000
-        val latencyMs = (endedNanos - startedNanos) / 1_000_000
+        val offsetMs = TimeUnit.NANOSECONDS.toMillis(startedNanos - runStartNanos)
+        val latencyMs = TimeUnit.NANOSECONDS.toMillis(endedNanos - startedNanos)
         val resendKind = when (kind) {
             SendKind.FIRST -> {
                 first = Send(offsetMs, result, httpStatus, latencyMs)
@@ -101,17 +103,17 @@ class JournalEntry(
             SendKind.RETRY -> ResendKind.RETRY
             SendKind.DUPLICATE -> ResendKind.DUPLICATE
         }
-        resends = resends + Resend(resendKind, resends.size + 2, offsetMs, result, httpStatus, latencyMs)
+        resends = resends + Resend(resendKind, FIRST_ATTEMPT + resends.size + 1, offsetMs, result, httpStatus, latencyMs)
     }
 
-    fun settle(outcome: JournalOutcome, gatewayStatus: String? = null, rejectReason: String? = null) {
+    fun settle(outcome: JournalOutcome, gatewayStatus: TransferStatus? = null, rejectReason: RejectReason? = null) {
         this.gatewayStatus = gatewayStatus
         this.rejectReason = rejectReason
         this.outcome = outcome
     }
 
     fun view() = JournalEntryView(
-        seq, command.transferId, command.fromAccount, command.toAccount, command.amountCents,
+        seq, transfer.transferId, transfer.fromAccount, transfer.toAccount, transfer.amountCents,
         outcome, gatewayStatus, rejectReason, first, resends,
     )
 }
@@ -122,10 +124,10 @@ class Journal(private val runStartNanos: Long) {
     private val byId = HashMap<UUID, JournalEntry>()
 
     @Synchronized
-    fun add(command: TransferCommand): JournalEntry {
-        val entry = JournalEntry(entries.size + 1L, command, runStartNanos)
+    fun add(transfer: PlannedTransfer): JournalEntry {
+        val entry = JournalEntry(entries.size + 1L, transfer, runStartNanos)
         entries.add(entry)
-        byId[command.transferId] = entry
+        byId[transfer.transferId] = entry
         return entry
     }
 

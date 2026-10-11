@@ -1,6 +1,7 @@
 package com.ledgerlab.generator
 
-import com.ledgerlab.common.TransferCommand
+import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.TransferStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -12,7 +13,7 @@ class JournalTest {
     private val journal = Journal(start)
 
     private fun add(): JournalEntry =
-        journal.add(TransferCommand(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100, Instant.now()))
+        journal.add(PlannedTransfer(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100))
 
     private fun respond(entry: JournalEntry, httpStatus: Int, kind: SendKind = SendKind.FIRST) =
         entry.record(kind, start, start + 1_000_000, SendResult.RESPONSE, httpStatus)
@@ -41,15 +42,15 @@ class JournalTest {
     @Test
     fun `filters combine and skip entries without losing the cursor`() {
         val pending = add()
-        val retried = add().also { respond(it, 503); respond(it, 202, SendKind.RETRY); it.settle(JournalOutcome.ACKNOWLEDGED, "ACCEPTED") }
-        val rejected = add().also { respond(it, 200); it.settle(JournalOutcome.ACKNOWLEDGED, "REJECTED", "BLOCKED_ACCOUNT") }
+        val retried = add().also { respond(it, 503); respond(it, 202, SendKind.RETRY); it.settle(JournalOutcome.ACKNOWLEDGED, TransferStatus.ACCEPTED) }
+        val rejected = add().also { respond(it, 200); it.settle(JournalOutcome.ACKNOWLEDGED, TransferStatus.REJECTED, RejectReason.BLOCKED_ACCOUNT) }
         val failed = add().also { respond(it, 422); it.settle(JournalOutcome.FAILED) }
 
         fun ids(filter: JournalFilter) = journal.page(filter, 0, 100, complete = true).items.map { it.transferId }
 
         assertThat(ids(JournalFilter(outcome = JournalOutcome.PENDING))).containsExactly(pending.transferId)
         assertThat(ids(JournalFilter(resent = true))).containsExactly(retried.transferId)
-        assertThat(ids(JournalFilter(rejectReason = "BLOCKED_ACCOUNT"))).containsExactly(rejected.transferId)
+        assertThat(ids(JournalFilter(rejectReason = RejectReason.BLOCKED_ACCOUNT))).containsExactly(rejected.transferId)
         assertThat(ids(JournalFilter(outcome = JournalOutcome.ACKNOWLEDGED, resent = false))).containsExactly(rejected.transferId)
         assertThat(ids(JournalFilter(outcome = JournalOutcome.FAILED))).containsExactly(failed.transferId)
 

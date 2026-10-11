@@ -1,7 +1,9 @@
 package com.ledgerlab.gateway
 
+import com.ledgerlab.common.RejectReason
+import com.ledgerlab.gateway.domain.TransferStatus
 import com.ledgerlab.common.TransferOutcome
-import com.ledgerlab.common.TransferResultEvent
+import com.ledgerlab.gateway.service.LedgerResult
 import com.ledgerlab.gateway.service.ResultWaiters
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
@@ -9,7 +11,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -23,13 +24,13 @@ class ResultHandlingTest : IntegrationTest() {
         val runId = UUID.randomUUID()
         submit(body(transferId, runId))
 
-        publishResult(runId, transferId, TransferOutcome.REJECTED, "INSUFFICIENT_FUNDS")
+        publishResult(runId, transferId, TransferOutcome.REJECTED, RejectReason.INSUFFICIENT_FUNDS)
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted {
             val response = http.getForEntity("/v1/transfers/$transferId", Map::class.java)
             assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-            assertThat(response.body!!["status"]).isEqualTo("REJECTED")
-            assertThat(response.body!!["rejectReason"]).isEqualTo("INSUFFICIENT_FUNDS")
+            assertThat(response.body!!["status"]).isEqualTo(TransferStatus.REJECTED.name)
+            assertThat(response.body!!["rejectReason"]).isEqualTo(RejectReason.INSUFFICIENT_FUNDS.name)
         }
     }
 
@@ -44,7 +45,7 @@ class ResultHandlingTest : IntegrationTest() {
 
             val response = pending.get()
             assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-            assertThat(response.body!!["status"]).isEqualTo("POSTED")
+            assertThat(response.body!!["status"]).isEqualTo(TransferStatus.POSTED.name)
             assertThat(waiters.size()).isZero()
         }
     }
@@ -57,12 +58,12 @@ class ResultHandlingTest : IntegrationTest() {
             val pending = pool.submit<org.springframework.http.ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }
             await().atMost(Duration.ofSeconds(10)).until { waiters.size() > 0 }
             // Wake the request directly, bypassing Kafka, so the recorder cannot write the status first.
-            waiters.complete(TransferResultEvent(runId, transferId, TransferOutcome.POSTED, null, Instant.now()))
+            waiters.complete(LedgerResult(runId, transferId, TransferOutcome.POSTED, null))
 
             val answer = pending.get()
-            assertThat(answer.body!!["status"]).isEqualTo("POSTED")
+            assertThat(answer.body!!["status"]).isEqualTo(TransferStatus.POSTED.name)
             val stored = http.getForEntity("/v1/transfers/$transferId", Map::class.java)
-            assertThat(stored.body!!["status"]).isEqualTo("POSTED")
+            assertThat(stored.body!!["status"]).isEqualTo(TransferStatus.POSTED.name)
             assertThat(stored.body!!["resultedAt"]).isEqualTo(answer.body!!["resultedAt"])
         }
     }
@@ -81,7 +82,7 @@ class ResultHandlingTest : IntegrationTest() {
 
             val response = second.get()
             assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-            assertThat(response.body!!["status"]).isEqualTo("POSTED")
+            assertThat(response.body!!["status"]).isEqualTo(TransferStatus.POSTED.name)
             assertThat(waiters.size()).isZero()
         }
     }
@@ -91,7 +92,7 @@ class ResultHandlingTest : IntegrationTest() {
         val response = submit(body(), wait = "PT0.3S")
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.ACCEPTED)
-        assertThat(response.body!!["status"]).isIn("ACCEPTED", "PUBLISHED")
+        assertThat(response.body!!["status"]).isIn(TransferStatus.ACCEPTED.name, TransferStatus.PUBLISHED.name)
         assertThat(response.headers.getFirst("Retry-After")).isEqualTo("1")
         assertThat(waiters.size()).isZero()
     }
@@ -104,13 +105,13 @@ class ResultHandlingTest : IntegrationTest() {
         submit(request)
         publishResult(runId, transferId, TransferOutcome.POSTED)
         await().atMost(Duration.ofSeconds(30)).until {
-            http.getForEntity("/v1/transfers/$transferId", Map::class.java).body!!["status"] == "POSTED"
+            http.getForEntity("/v1/transfers/$transferId", Map::class.java).body!!["status"] == TransferStatus.POSTED.name
         }
 
         val again = submit(request, wait = "PT5S")
 
         assertThat(again.statusCode).isEqualTo(HttpStatus.OK)
-        assertThat(again.body!!["status"]).isEqualTo("POSTED")
+        assertThat(again.body!!["status"]).isEqualTo(TransferStatus.POSTED.name)
     }
 
     @Test
@@ -122,9 +123,9 @@ class ResultHandlingTest : IntegrationTest() {
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted {
             val response = http.getForEntity("/v1/transfers/$transferId", Map::class.java).body!!
-            assertThat(response["status"]).isEqualTo("POSTED")
+            assertThat(response["status"]).isEqualTo(TransferStatus.POSTED.name)
         }
         Thread.sleep(300) // give the outbox publisher time to run after the result
-        assertThat(http.getForEntity("/v1/transfers/$transferId", Map::class.java).body!!["status"]).isEqualTo("POSTED")
+        assertThat(http.getForEntity("/v1/transfers/$transferId", Map::class.java).body!!["status"]).isEqualTo(TransferStatus.POSTED.name)
     }
 }

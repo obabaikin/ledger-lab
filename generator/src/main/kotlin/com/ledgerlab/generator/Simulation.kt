@@ -1,7 +1,7 @@
 package com.ledgerlab.generator
 
-import com.ledgerlab.common.Observability.LATENCY_PERCENTILES
-import com.ledgerlab.common.TransferCommand
+import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.TransferStatus
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpStatus
+import org.springframework.http.HttpStatusCode
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -48,7 +50,7 @@ data class SimulationStatus(
     val acknowledged: Long,
     val posted: Long,
     val rejected: Long,
-    val rejectedByReason: Map<String, Long>,
+    val rejectedByReason: Map<RejectReason, Long>,
     val failed: Long,
     /** Sent, but no answer settled it: the gateway may have the transfer. */
     val unknown: Long,
@@ -90,7 +92,7 @@ class Simulation(
     private val acknowledged = LongAdder()
     private val posted = LongAdder()
     private val rejected = LongAdder()
-    private val rejectedByReason = ConcurrentHashMap<String, LongAdder>()
+    private val rejectedByReason = ConcurrentHashMap<RejectReason, LongAdder>()
     private val failed = LongAdder()
     private val unknown = LongAdder()
     private val retries = LongAdder()
@@ -140,14 +142,17 @@ class Simulation(
         /** How often the pacer checks whether more submissions are due. */
         val PACER_TICK = Duration.ofMillis(1)
         /** A send that ended without an answer, possibly after the request went out: it cannot count as failed. */
-        val CUT_SHORT = SubmissionResult(null, null, 1, SubmissionOutcome.UNKNOWN, Duration.ZERO)
+        val CUT_SHORT = SubmissionResult(null, null, FIRST_ATTEMPT, SubmissionOutcome.UNKNOWN, Duration.ZERO)
         /** How often the pacer checks for the last open requests after the run time is over. */
         val DRAIN_POLL = Duration.ofMillis(10)
+        val NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1)
+        /** Same percentiles as the bank's services publish, so dashboards can put them side by side. */
+        val LATENCY_PERCENTILES = doubleArrayOf(0.5, 0.95, 0.99)
     }
 
     fun start() {
         pacer = scope.launch {
-            val intervalNanos = 1_000_000_000L / targetTps
+            val intervalNanos = NANOS_PER_SECOND / targetTps
             val endNanos = startNanos + duration.toNanos()
             var launched = 0L
             // The interval is rounded down, so without the capacity check one more could be due before the end.
@@ -208,8 +213,8 @@ class Simulation(
     private suspend fun submitOne() {
         // A submission launched just before a stop may start after it; it must not send.
         if (state != SimulationState.RUNNING) return
-        val command = profile.next()
-        val entry = checkNotNull(journal) { "journal released while the run is active" }.add(command)
+        val transfer = profile.next()
+        val entry = checkNotNull(journal) { "journal released while the run is active" }.add(transfer)
         // Counted only once the entry exists, so that every request ends up in exactly one outcome.
         requested.increment()
         val random = ThreadLocalRandom.current()
@@ -219,10 +224,10 @@ class Simulation(
         val answers = ConcurrentLinkedQueue<Answer>()
         try {
             coroutineScope {
-                duplicateDelay?.let { launch { sendDuplicate(command, wait, entry, it)?.let(answers::add) } }
-                val main = client.submit(command, wait, { state == SimulationState.RUNNING }, recorder(entry, wait != null, duplicate = false))
+                duplicateDelay?.let { launch { sendDuplicate(transfer, wait, entry, it)?.let(answers::add) } }
+                val main = client.submit(transfer, wait, { state == SimulationState.RUNNING }, recorder(entry, wait != null, duplicate = false))
                 answers.add(Answer(main, System.nanoTime()))
-                retries.add((main.attempts - 1).toLong())
+                retries.add((main.attempts - FIRST_ATTEMPT).toLong())
                 recordSubmissionLatency(main, wait, SendKind.FIRST)
             }
         } catch (e: CancellationException) {
@@ -239,12 +244,12 @@ class Simulation(
     private fun inOrder(answers: Collection<Answer>): List<SubmissionResult> =
         answers.sortedBy { it.endedNanos }.map { it.result }
 
-    private suspend fun sendDuplicate(command: TransferCommand, wait: Duration?, entry: JournalEntry, delay: Duration): Answer? {
+    private suspend fun sendDuplicate(transfer: PlannedTransfer, wait: Duration?, entry: JournalEntry, delay: Duration): Answer? {
         val stopped = withTimeoutOrNull(delay.toMillis()) { stopSignal.join() } != null
         if (stopped || state != SimulationState.RUNNING) return null
         duplicatesSent.increment()
         val result = try {
-            client.submit(command, wait, { false }, recorder(entry, wait != null, duplicate = true))
+            client.submit(transfer, wait, { false }, recorder(entry, wait != null, duplicate = true))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -260,18 +265,18 @@ class Simulation(
         SendRecorder { attempt, startedNanos, endedNanos, result, httpStatus ->
             val kind = when {
                 duplicate -> SendKind.DUPLICATE
-                attempt == 1 -> SendKind.FIRST
+                attempt == FIRST_ATTEMPT -> SendKind.FIRST
                 else -> SendKind.RETRY
             }
             entry.record(kind, startedNanos, endedNanos, result, httpStatus)
-            if (httpStatus != null && httpStatus in 200..299) {
-                sendLatency.getValue(SendTimerKey(waited, kind, httpStatus == 200))
+            if (httpStatus != null && HttpStatusCode.valueOf(httpStatus).is2xxSuccessful) {
+                sendLatency.getValue(SendTimerKey(waited, kind, final = httpStatus == HttpStatus.OK.value()))
                     .record(endedNanos - startedNanos, TimeUnit.NANOSECONDS)
             }
         }
 
     private fun recordSubmissionLatency(result: SubmissionResult, wait: Duration?, kind: SendKind) {
-        if (wait != null && result.outcome == SubmissionOutcome.ACKNOWLEDGED && result.status in GatewayApi.FINAL_STATUSES) {
+        if (wait != null && result.outcome == SubmissionOutcome.ACKNOWLEDGED && result.status?.isFinal == true) {
             submissionLatency.getValue(kind).record(result.latency)
         }
     }
@@ -289,11 +294,12 @@ class Simulation(
             SubmissionOutcome.ACKNOWLEDGED -> {
                 acknowledged.increment()
                 when (result.status) {
-                    GatewayApi.STATUS_POSTED -> posted.increment()
-                    GatewayApi.STATUS_REJECTED -> {
+                    TransferStatus.POSTED -> posted.increment()
+                    TransferStatus.REJECTED -> {
                         rejected.increment()
                         result.rejectReason?.let { rejectedByReason.computeIfAbsent(it) { LongAdder() }.increment() }
                     }
+                    TransferStatus.ACCEPTED, TransferStatus.PUBLISHED, null -> {}
                 }
                 entry.settle(JournalOutcome.ACKNOWLEDGED, result.status, result.rejectReason)
             }
@@ -307,7 +313,7 @@ class Simulation(
 
     fun status(): SimulationStatus {
         val end = finishedAt ?: Instant.now()
-        val seconds = Duration.between(startedAt, end).toMillis().coerceAtLeast(1) / 1000.0
+        val seconds = Duration.between(startedAt, end).toNanos().coerceAtLeast(1).toDouble() / NANOS_PER_SECOND
         return SimulationStatus(
             runId, state, targetTps, duration.toSeconds().toInt(), startedAt, finishedAt,
             requested.sum(), acknowledged.sum(), posted.sum(), rejected.sum(),
@@ -326,6 +332,6 @@ private val SendKind.tag: String get() = name.lowercase()
  */
 internal fun combine(results: List<SubmissionResult>): SubmissionResult {
     val acknowledged = results.filter { it.outcome == SubmissionOutcome.ACKNOWLEDGED }
-    if (acknowledged.isNotEmpty()) return acknowledged.lastOrNull { it.status in GatewayApi.FINAL_STATUSES } ?: acknowledged.last()
+    if (acknowledged.isNotEmpty()) return acknowledged.lastOrNull { it.status?.isFinal == true } ?: acknowledged.last()
     return results.firstOrNull { it.outcome == SubmissionOutcome.UNKNOWN } ?: results.last()
 }

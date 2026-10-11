@@ -1,5 +1,6 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.RejectReason
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMax
@@ -26,15 +27,23 @@ import java.util.concurrent.ConcurrentHashMap
 
 data class StartSimulationRequest(
     @field:NotNull val runId: UUID?,
-    @field:Min(1) @field:Max(1_000) val tps: Int,
-    @field:Min(1) @field:Max(30) val durationSeconds: Int,
-    @field:Min(2) val accountCount: Int,
+    @field:Min(1) @field:Max(MAX_TPS) val tps: Int,
+    @field:Min(1) @field:Max(MAX_DURATION_SECONDS) val durationSeconds: Int,
+    @field:Min(MIN_ACCOUNTS) val accountCount: Int,
     @field:Min(0) val blockedAccounts: Int = 0,
     @field:Min(0) val hotAccounts: Int = 5,
     @field:DecimalMin("0.0") @field:DecimalMax("1.0") val waitShare: Double = 0.1,
-    @field:Min(1) @field:Max(30) val waitTimeoutSeconds: Int = 5,
+    @field:Min(1) @field:Max(MAX_WAIT_TIMEOUT_SECONDS) val waitTimeoutSeconds: Int = 5,
 )
 
+/** Run limits of the public demo (shared vCPUs, a person waiting on the page); raise only with a recorded reason. */
+private const val MAX_TPS = 1_000L
+private const val MAX_DURATION_SECONDS = 30L
+private const val MAX_WAIT_TIMEOUT_SECONDS = 30L
+/** A transfer needs a sender and a different receiver. */
+private const val MIN_ACCOUNTS = 2L
+
+private const val DEFAULT_PAGE = 100
 private const val MAX_PAGE = 1_000
 
 /** Time for a request that has just timed out to finish its coroutine. */
@@ -117,16 +126,17 @@ class SimulationController(
         @PathVariable runId: UUID,
         @RequestParam outcome: JournalOutcome?,
         @RequestParam resent: Boolean?,
-        @RequestParam rejectReason: String?,
+        @RequestParam rejectReason: RejectReason?,
         @RequestParam(defaultValue = "0") after: Long,
-        @RequestParam(defaultValue = "100") limit: Int,
+        @RequestParam limit: Int?,
     ): JournalPage {
-        require(limit in 1..MAX_PAGE) { "limit must be between 1 and $MAX_PAGE" }
+        val pageSize = limit ?: DEFAULT_PAGE
+        require(pageSize in 1..MAX_PAGE) { "limit must be between 1 and $MAX_PAGE" }
         require(after >= 0) { "after must not be negative" }
         val simulation = simulationOf(runId)
         // Read before the page: a run that is already over adds no entries, so the page may say there is no next one.
         val complete = !simulation.state.active
-        return journalOf(simulation).page(JournalFilter(outcome, resent, rejectReason), after, limit, complete)
+        return journalOf(simulation).page(JournalFilter(outcome, resent, rejectReason), after, pageSize, complete)
     }
 
     private fun simulationOf(runId: UUID): Simulation =

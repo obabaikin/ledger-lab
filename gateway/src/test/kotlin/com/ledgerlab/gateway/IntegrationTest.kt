@@ -1,5 +1,6 @@
 package com.ledgerlab.gateway
 
+import com.ledgerlab.common.RejectReason
 import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.common.TransferResultEvent
 import org.apache.kafka.clients.admin.NewTopic
@@ -44,8 +45,13 @@ abstract class IntegrationTest {
     protected fun submit(body: Map<String, Any>, wait: String? = null): ResponseEntity<Map<*, *>> =
         http.postForEntity("/v1/transfers" + (wait?.let { "?wait=$it" } ?: ""), body, Map::class.java)
 
-    protected fun publishResult(runId: UUID, transferId: UUID, outcome: TransferOutcome, reason: String? = null) {
+    protected fun publishResult(runId: UUID, transferId: UUID, outcome: TransferOutcome, reason: RejectReason? = null) {
         val event = TransferResultEvent(runId, transferId, outcome, reason, Instant.now())
         kafka.send(props.resultsTopic, event.partitionKey(), objectMapper.writeValueAsString(event)).get()
+    }
+
+    /** A result event as a newer ledger might write it, with values this gateway may not know. */
+    protected fun publishRawResult(runId: UUID, transferId: UUID, json: String) {
+        kafka.send(props.resultsTopic, "$runId:$transferId", json).get()
     }
 }

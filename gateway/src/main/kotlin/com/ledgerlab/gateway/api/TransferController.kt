@@ -1,17 +1,24 @@
 package com.ledgerlab.gateway.api
 
 import com.ledgerlab.common.Observability.MDC_RUN_ID
-import com.ledgerlab.common.TransferResultEvent
+import com.ledgerlab.common.RejectReason
 import com.ledgerlab.gateway.GatewayProperties
+import com.ledgerlab.gateway.domain.REJECT_REASON_DESCRIPTION
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.domain.TransferStatus
 import com.ledgerlab.gateway.service.IdempotencyConflictException
+import com.ledgerlab.gateway.service.LedgerResult
 import com.ledgerlab.gateway.service.PeriodClosedException
 import com.ledgerlab.gateway.service.ResultWaiters
 import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.responses.ApiResponse
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotNull
@@ -36,7 +43,9 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
+@Schema(description = "A transfer to submit.")
 data class SubmitTransferRequest(
+    @field:Schema(description = "Idempotency key: a repeat with the same body gets the same transfer.")
     @field:NotNull val transferId: UUID?,
     @field:NotNull val runId: UUID?,
     @field:Min(1) val fromAccount: Int,
@@ -44,18 +53,17 @@ data class SubmitTransferRequest(
     @field:Min(1) val amountCents: Long,
 )
 
+@Schema(description = "A transfer as the bank sees it now.")
 data class TransferResponse(
     val transferId: UUID,
     val runId: UUID,
     val status: TransferStatus,
-    val rejectReason: String?,
+    @field:Schema(description = REJECT_REASON_DESCRIPTION)
+    val rejectReason: RejectReason?,
     val acceptedAt: Instant,
+    @field:Schema(description = "When the final status was recorded; null while not final.")
     val resultedAt: Instant?,
-) {
-    companion object {
-        fun of(t: Transfer) = TransferResponse(t.transferId, t.runId, t.status, t.rejectReason, t.acceptedAt, t.resultedAt)
-    }
-}
+)
 
 /** Public API of the bank: this is what clients (and the load generator) call. */
 @RestController
@@ -76,9 +84,16 @@ class TransferController(
      * open until the ledger's result arrives (200) or the wait expires (202 with current state).
      * Once the transfer is committed the answer is 2xx, never 5xx (client contract, ADR 0006).
      */
-    @PostMapping(version = "1")
+    @Operation(summary = "Submit a transfer")
+    @ApiResponse(responseCode = "200", description = "Final status")
+    @ApiResponse(responseCode = "202", description = "Accepted, not final yet; Retry-After says when to ask again")
+    @ApiResponse(responseCode = "400", description = "Invalid body", content = [Content()])
+    @ApiResponse(responseCode = "409", description = "The run's period is closed", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "422", description = "The key was used with a different body", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @PostMapping(version = "v1")
     fun submit(
         @Valid @RequestBody request: SubmitTransferRequest,
+        @Parameter(description = "ISO-8601 duration to wait for the final status, capped by the bank")
         @RequestParam(required = false) wait: Duration?,
     ): ResponseEntity<TransferResponse> {
         val transferId = request.transferId!!
@@ -104,31 +119,37 @@ class TransferController(
         }
     }
 
-    private fun awaitResult(transfer: Transfer, future: CompletableFuture<TransferResultEvent>, timeout: Duration): Transfer =
+    private fun awaitResult(transfer: Transfer, future: CompletableFuture<LedgerResult>, timeout: Duration): Transfer =
         try {
             service.recordResult(future.get(timeout.toMillis(), TimeUnit.MILLISECONDS)) ?: transfer
         } catch (e: TimeoutException) {
             service.find(transfer.transferId) ?: transfer
         }
 
-    @GetMapping("/{transferId}", version = "1")
+    @Operation(summary = "A transfer's current status")
+    @ApiResponse(responseCode = "200", description = "Final status")
+    @ApiResponse(responseCode = "202", description = "Not final yet; Retry-After says when to ask again")
+    @ApiResponse(responseCode = "404", description = "Unknown transfer", content = [Content()])
+    @GetMapping("/{transferId}", version = "v1")
     fun status(@PathVariable transferId: UUID): ResponseEntity<TransferResponse> =
         service.find(transferId)?.let { respond(it) } ?: ResponseEntity.notFound().build()
 
     private fun respond(transfer: Transfer): ResponseEntity<TransferResponse> =
         if (transfer.status.isFinal) {
-            ResponseEntity.ok(TransferResponse.of(transfer))
+            ResponseEntity.ok(transfer.toResponse())
         } else {
             ResponseEntity.status(HttpStatus.ACCEPTED)
                 .header(HttpHeaders.RETRY_AFTER, props.retryAfter.toSeconds().coerceAtLeast(1).toString())
-                .body(TransferResponse.of(transfer))
+                .body(transfer.toResponse())
         }
 
     @ExceptionHandler(IdempotencyConflictException::class)
     @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
-    fun idempotencyConflict(e: IdempotencyConflictException): Map<String, String> = mapOf("error" to (e.message ?: "conflict"))
+    fun idempotencyConflict(e: IdempotencyConflictException) = ApiError(e.message ?: GatewayErrors.CONFLICT)
 
     @ExceptionHandler(PeriodClosedException::class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    fun periodClosed(e: PeriodClosedException): Map<String, String> = mapOf("error" to "period closed")
+    fun periodClosed(e: PeriodClosedException) = ApiError(GatewayErrors.PERIOD_CLOSED)
 }
+
+private fun Transfer.toResponse() = TransferResponse(transferId, runId, status, rejectReason, acceptedAt, resultedAt)

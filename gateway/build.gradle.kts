@@ -25,6 +25,7 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    implementation(libs.springdoc.webmvc.api)
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
@@ -40,4 +41,8 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    val spec = file("openapi.json")
+    inputs.files(spec).withPropertyName("openapiSpec")
+    systemProperty("openapi.spec", spec.path)
+    systemProperty("openapi.actual", layout.buildDirectory.file("openapi.json").get().asFile.path)
 }

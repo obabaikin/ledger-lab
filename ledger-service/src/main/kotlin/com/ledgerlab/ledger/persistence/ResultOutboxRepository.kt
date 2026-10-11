@@ -1,5 +1,6 @@
 package com.ledgerlab.ledger.persistence
 
+import com.ledgerlab.common.RejectReason
 import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.common.TransferResultEvent
 import org.springframework.jdbc.core.simple.JdbcClient
@@ -28,7 +29,7 @@ class ResultOutboxRepository(private val jdbc: JdbcClient) {
                     runId = rs.getObject("run_id", UUID::class.java),
                     transferId = rs.getObject("transfer_id", UUID::class.java),
                     outcome = TransferOutcome.valueOf(rs.getString("outcome")),
-                    rejectReason = rs.getString("reject_reason"),
+                    rejectReason = rs.getString("reject_reason")?.let(RejectReason::valueOf),
                     processedAt = rs.getObject("processed_at", Timestamp::class.java).toInstant(),
                 )
             }

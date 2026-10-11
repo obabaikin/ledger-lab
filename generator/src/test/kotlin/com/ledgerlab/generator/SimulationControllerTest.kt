@@ -5,7 +5,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
-import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.time.Duration
 import java.util.UUID
 
@@ -13,7 +13,7 @@ class SimulationControllerTest {
 
     private fun controller(gateway: FakeGateway, journal: JournalProperties): SimulationController {
         val props = testProperties(gateway.url, journal = journal)
-        return SimulationController(GatewayClient(props, ObjectMapper()), props, SimpleMeterRegistry())
+        return SimulationController(GatewayClient(props, jacksonObjectMapper(), SimpleMeterRegistry()), props, SimpleMeterRegistry())
     }
 
     private fun request(tps: Int, seconds: Int) =

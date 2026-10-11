@@ -1,5 +1,6 @@
 package com.ledgerlab.gateway
 
+import com.ledgerlab.gateway.domain.TransferStatus
 import com.ledgerlab.common.TransferCommand
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.assertj.core.api.Assertions.assertThat
@@ -31,7 +32,7 @@ class TransferApiTest : IntegrationTest() {
             val response = submit(body(transferId, runId, from = 3, to = 7, amount = 250))
 
             assertThat(response.statusCode).isEqualTo(HttpStatus.ACCEPTED)
-            assertThat(response.body!!["status"]).isEqualTo("ACCEPTED")
+            assertThat(response.body!!["status"]).isEqualTo(TransferStatus.ACCEPTED.name)
             val published = mutableListOf<TransferCommand>()
             await().atMost(Duration.ofSeconds(30)).untilAsserted {
                 consumer.poll(Duration.ofMillis(200)).forEach { published += objectMapper.readValue(it.value(), TransferCommand::class.java) }
@@ -42,7 +43,7 @@ class TransferApiTest : IntegrationTest() {
                 .isEqualTo(TransferCommand(runId, transferId, 3, 7, 250, command.createdAt))
         }
         await().atMost(Duration.ofSeconds(10)).untilAsserted {
-            assertThat(http.getForEntity("/v1/transfers/$transferId", Map::class.java).body!!["status"]).isEqualTo("PUBLISHED")
+            assertThat(http.getForEntity("/v1/transfers/$transferId", Map::class.java).body!!["status"]).isEqualTo(TransferStatus.PUBLISHED.name)
         }
     }
 

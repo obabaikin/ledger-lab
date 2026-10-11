@@ -1,7 +1,7 @@
 package com.ledgerlab.gateway.service
 
 import com.ledgerlab.common.Observability.LATENCY_PERCENTILES
-import com.ledgerlab.common.TransferResultEvent
+import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.gateway.domain.RunSummary
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.persistence.RunPeriodRepository
@@ -21,6 +21,12 @@ data class TransferRequest(
     val toAccount: Int,
     val amountCents: Long,
 )
+
+/**
+ * A result as the ledger sent it. The reason stays text: a ledger one version ahead may send one this gateway
+ * does not know yet, and it is kept as received rather than lost (ADR 0011).
+ */
+data class LedgerResult(val runId: UUID, val transferId: UUID, val outcome: TransferOutcome, val rejectReason: String?)
 
 class IdempotencyConflictException(transferId: UUID) :
     RuntimeException("Transfer $transferId was already submitted with a different payload")
@@ -75,12 +81,12 @@ class TransferService(
      * timestamps only, because JVM and database clocks may drift apart.
      */
     @Transactional
-    fun recordResult(event: TransferResultEvent): Transfer? {
-        transfers.applyResult(event.transferId, event.outcome, event.rejectReason)?.let { applied ->
+    fun recordResult(result: LedgerResult): Transfer? {
+        transfers.applyResult(result.transferId, result.outcome, result.rejectReason)?.let { applied ->
             latency.record(Duration.between(applied.acceptedAt, checkNotNull(applied.resultedAt)))
             return applied
         }
-        return transfers.find(event.transferId)
+        return transfers.find(result.transferId)
     }
 
     fun find(transferId: UUID): Transfer? = transfers.find(transferId)

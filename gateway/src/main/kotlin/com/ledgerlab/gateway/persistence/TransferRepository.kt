@@ -6,6 +6,7 @@ import com.ledgerlab.gateway.domain.RunSummary
 import com.ledgerlab.gateway.domain.StatementLine
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.domain.TransferStatus
+import com.ledgerlab.gateway.domain.rejectReasonOf
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 import java.sql.Timestamp
@@ -167,7 +168,7 @@ class TransferRepository(private val jdbc: JdbcClient) {
                 toAccount = rs.getInt("to_account"),
                 amountCents = rs.getLong("amount_cents"),
                 status = TransferStatus.valueOf(rs.getString("status")),
-                rejectReason = rs.getString("reject_reason"),
+                rejectReason = rs.getString("reject_reason")?.let(::rejectReasonOf),
                 acceptedAt = rs.getObject("accepted_at", Timestamp::class.java).toInstant(),
                 resultedAt = rs.getObject("resulted_at", Timestamp::class.java)?.toInstant(),
             )
@@ -184,7 +185,7 @@ class TransferRepository(private val jdbc: JdbcClient) {
         toAccount = getInt("to_account"),
         amountCents = getLong("amount_cents"),
         status = TransferStatus.valueOf(getString("status")),
-        rejectReason = getString("reject_reason"),
+        rejectReason = getString("reject_reason")?.let(::rejectReasonOf),
         acceptedAt = getObject("accepted_at", Timestamp::class.java).toInstant(),
         publishedAt = getObject("published_at", Timestamp::class.java)?.toInstant(),
         resultedAt = getObject("resulted_at", Timestamp::class.java)?.toInstant(),

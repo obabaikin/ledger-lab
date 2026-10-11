@@ -1,17 +1,19 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.TransferStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
 
 class OutcomeRuleTest {
 
-    private fun result(outcome: SubmissionOutcome, status: String? = null, rejectReason: String? = null) =
+    private fun result(outcome: SubmissionOutcome, status: TransferStatus? = null, rejectReason: RejectReason? = null) =
         SubmissionResult(status, rejectReason, attempts = 1, outcome = outcome, latency = Duration.ZERO)
 
-    private val accepted = result(SubmissionOutcome.ACKNOWLEDGED, "ACCEPTED")
-    private val posted = result(SubmissionOutcome.ACKNOWLEDGED, GatewayApi.STATUS_POSTED)
-    private val rejected = result(SubmissionOutcome.ACKNOWLEDGED, GatewayApi.STATUS_REJECTED, "BLOCKED_ACCOUNT")
+    private val accepted = result(SubmissionOutcome.ACKNOWLEDGED, TransferStatus.ACCEPTED)
+    private val posted = result(SubmissionOutcome.ACKNOWLEDGED, TransferStatus.POSTED)
+    private val rejected = result(SubmissionOutcome.ACKNOWLEDGED, TransferStatus.REJECTED, RejectReason.BLOCKED_ACCOUNT)
     private val unknown = result(SubmissionOutcome.UNKNOWN)
     private val failed = result(SubmissionOutcome.FAILED)
 
@@ -34,7 +36,7 @@ class OutcomeRuleTest {
     fun `a final status outranks an accepted one, and a later answer an earlier one`() {
         assertThat(combine(listOf(rejected, accepted))).isSameAs(rejected)
         assertThat(combine(listOf(accepted, posted))).isSameAs(posted)
-        val laterAccepted = result(SubmissionOutcome.ACKNOWLEDGED, "ACCEPTED")
+        val laterAccepted = result(SubmissionOutcome.ACKNOWLEDGED, TransferStatus.ACCEPTED)
         assertThat(combine(listOf(accepted, laterAccepted))).isSameAs(laterAccepted)
     }
 }

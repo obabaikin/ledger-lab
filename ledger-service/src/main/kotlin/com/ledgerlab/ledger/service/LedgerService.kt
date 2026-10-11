@@ -3,7 +3,7 @@ package com.ledgerlab.ledger.service
 import com.ledgerlab.common.TransferCommand
 import com.ledgerlab.ledger.domain.Account
 import com.ledgerlab.ledger.domain.AccountStatus
-import com.ledgerlab.ledger.domain.RejectReason
+import com.ledgerlab.common.RejectReason
 import com.ledgerlab.ledger.domain.TransferResult
 import com.ledgerlab.ledger.persistence.AccountRepository
 import com.ledgerlab.ledger.persistence.JournalRepository

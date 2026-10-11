@@ -40,6 +40,12 @@ gateway:
   retry-after: 1s
   close-lock-timeout: 5s
 
+springdoc:
+  # Only the client-facing API is published: /internal has no outside consumers.
+  paths-to-exclude: /internal/**
+  # Each endpoint lists its own answers; otherwise every controller-local error handler is added to every operation.
+  override-with-generic-response: false
+
 logging:
   pattern:
     correlation: "[run=%X{runId:-}] "

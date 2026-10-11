@@ -18,7 +18,6 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation(project(":common"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("tools.jackson.module:jackson-module-kotlin")
 
@@ -31,4 +30,8 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // The bank's published API: the generator's model of it is checked against this file, not against the bank's classes.
+    val bankSpec = rootProject.file("gateway/openapi.json")
+    inputs.file(bankSpec).withPropertyName("bankSpec")
+    systemProperty("bank.spec", bankSpec.path)
 }

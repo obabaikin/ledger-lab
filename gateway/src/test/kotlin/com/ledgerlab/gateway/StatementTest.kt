@@ -1,5 +1,6 @@
 package com.ledgerlab.gateway
 
+import com.ledgerlab.gateway.api.GatewayErrors
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
@@ -65,7 +66,7 @@ class StatementTest : IntegrationTest() {
         val unknown = statement(UUID.randomUUID())
 
         assertThat(open.statusCode).isEqualTo(HttpStatus.CONFLICT)
-        assertThat(open.body!!["error"]).isEqualTo("period not closed")
+        assertThat(open.body!!["error"]).isEqualTo(GatewayErrors.PERIOD_NOT_CLOSED)
         assertThat(unknown.statusCode).isEqualTo(HttpStatus.CONFLICT)
     }
 
@@ -97,7 +98,7 @@ class StatementTest : IntegrationTest() {
         assertThat(repeated.statusCode.is2xxSuccessful).isTrue()
         assertThat(otherPayload.statusCode).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT)
         assertThat(newKey.statusCode).isEqualTo(HttpStatus.CONFLICT)
-        assertThat(newKey.body!!["error"]).isEqualTo("period closed")
+        assertThat(newKey.body!!["error"]).isEqualTo(GatewayErrors.PERIOD_CLOSED)
         assertThat(allItems(runId, 100).flatten().map { it["transferId"] }).containsExactly(known["transferId"].toString())
     }
 
