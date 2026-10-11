@@ -15,13 +15,21 @@ import kotlin.reflect.full.primaryConstructor
 /** The generator's model of the bank (package bank) against the bank's published spec, gateway/openapi.json (ADR 0011). */
 class BankContractTest {
 
-    private val schemas: JsonNode = jacksonObjectMapper().readTree(File(System.getProperty("bank.spec"))).get("components").get("schemas")
+    private val spec: JsonNode = jacksonObjectMapper().readTree(File(System.getProperty("bank.spec")))
+    private val schemas: JsonNode = spec.get("components").get("schemas")
 
     private fun schemaOf(type: KClass<*>): JsonNode = checkNotNull(schemas.get(type.simpleName)) { "no schema ${type.simpleName} in the spec" }
 
     private fun fieldsOf(type: KClass<*>): List<String> = type.primaryConstructor!!.parameters.map { it.name!! }
 
     private fun JsonNode.names(): List<String> = values().map { it.asString() }
+
+    @Test
+    fun `the path and query parameter the generator calls are in the spec`() {
+        val submit = checkNotNull(spec.get("paths").get(GatewayApi.TRANSFERS_PATH)?.get("post")) { "no POST ${GatewayApi.TRANSFERS_PATH} in the spec" }
+
+        assertThat(submit.get("parameters").values().map { it.get("name").asString() }).contains(GatewayApi.WAIT_PARAM)
+    }
 
     @Test
     fun `every field the generator sends or reads is in the spec`() {

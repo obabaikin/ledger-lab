@@ -29,11 +29,12 @@ up in review as a diff of the spec.
 
 **The client knows the bank only through that spec.** The generator does not depend on `common`.
 It has its own model of the API (package `bank`). `BankContractTest` checks that model against
-`gateway/openapi.json`: every field the generator sends or reads is in the spec, every required
-field is sent, and its statuses and reasons are exactly the spec's. This is a light
-consumer-side contract test, without a contract broker.
+`gateway/openapi.json`: the path and query parameter it calls exist, every field the generator
+sends or reads is in the spec, every required field is sent, and its statuses and reasons are
+exactly the spec's. This is a light consumer-side contract test, without a contract broker.
 
-**Every entry that reads an enum from the other side reads it tolerantly, and says so.**
+**Every entry that reads an enum from the other side tolerates a value it does not know, where the
+message can still be applied, and says so.** An outcome it does not know cannot be applied.
 
 | Entry | Value it does not know | Result | Visible as |
 |---|---|---|---|
@@ -48,14 +49,16 @@ event would stop its partition. The text also loses nothing: once the gateway kn
 value, the stored reason reads as known.
 
 A service reads its own database strictly (the ledger's outbox, for example): only that service
-writes it.
+writes it. A new value is therefore released in two steps: first a version that can read it, then
+one that writes it. Rolling back below a version that can read the stored data is not allowed; a
+strict read makes such a rollback fail loudly instead of quietly dropping the value.
 
 ## Consequences
 
 - A new reject reason can be released by the ledger before the gateway, and by the gateway
   before the generator. A new outcome needs the gateway first.
 - Tolerance never hides a contract change: the contract tests fail on a renamed field or value,
-  and at runtime every value that was not understood is logged and counted.
+  and at runtime every value that was not understood is logged; the tolerated ones are also counted.
 - Production would add a schema registry with compatibility rules for the Kafka messages, a
   contract broker for client tests, and a dead-letter topic for messages no version can read.
   None of these is here.

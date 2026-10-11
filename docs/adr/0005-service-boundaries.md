@@ -30,5 +30,5 @@ that are not part of the money flow, through internal HTTP endpoints under `/int
 - Reconciliation stays inside the ledger because it needs one snapshot of the ledger's tables.
 - The generator knows nothing about Kafka or the database. If it did, the demo would not prove
   anything about the gateway.
-- The build enforces this: the generator does not depend on `common`, and it knows the gateway
-  only through its published spec, `gateway/openapi.json` (ADR 0011).
+- The generator has no dependency on `common`; it knows the gateway only through its published
+  spec, `gateway/openapi.json`, and a test checks its model against that spec (ADR 0011).

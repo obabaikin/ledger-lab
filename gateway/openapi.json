@@ -217,7 +217,7 @@
             "minimum" : 1
           }
         },
-        "required" : [ "runId", "transferId" ]
+        "required" : [ "amountCents", "fromAccount", "runId", "toAccount", "transferId" ]
       },
       "ApiError" : {
         "type" : "object",

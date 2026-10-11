@@ -109,8 +109,8 @@ What is deliberately left out, and what production would add:
   acknowledged.
 - **No reversals or compensating postings.** Outcomes are reported, not undone. Production would
   add refunds and authorise-then-capture, so money is only taken once the merchant confirms.
-- **No schema registry or contract broker.** Contracts are pinned by tests, and every reader
-  tolerates values it does not know yet, logging and counting them. Production would add a schema
+- **No schema registry or contract broker.** Contracts are pinned by tests. A reader that meets a
+  status or reason it does not know yet keeps what it can apply, and logs and counts the rest. Production would add a schema
   registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
 - **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
   the status. Production would add signed webhooks with retried delivery.

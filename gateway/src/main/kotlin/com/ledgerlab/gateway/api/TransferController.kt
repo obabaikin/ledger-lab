@@ -48,9 +48,9 @@ data class SubmitTransferRequest(
     @field:Schema(description = "Idempotency key: a repeat with the same body gets the same transfer.")
     @field:NotNull val transferId: UUID?,
     @field:NotNull val runId: UUID?,
-    @field:Min(1) val fromAccount: Int,
-    @field:Min(1) val toAccount: Int,
-    @field:Min(1) val amountCents: Long,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED) @field:Min(1) val fromAccount: Int,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED) @field:Min(1) val toAccount: Int,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED) @field:Min(1) val amountCents: Long,
 )
 
 @Schema(description = "A transfer as the bank sees it now.")

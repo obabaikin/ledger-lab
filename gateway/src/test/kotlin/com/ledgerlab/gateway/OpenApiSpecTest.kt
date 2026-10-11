@@ -26,6 +26,15 @@ class OpenApiSpecTest : IntegrationTest() {
         }
     }
 
+    @Test
+    fun `every field of a submission is required, because a missing one is refused`() {
+        val schema = objectMapper.readTree(http.getForObject("/v3/api-docs", String::class.java))
+            .get("components").get("schemas").get("SubmitTransferRequest")
+
+        assertThat(schema.get("required").values().map { it.asString() })
+            .containsExactlyInAnyOrderElementsOf(schema.get("properties").propertyNames())
+    }
+
     /** The server URL carries the test's random port; it is not part of the contract. */
     private fun normalized(spec: JsonNode): JsonNode = (spec.deepCopy() as ObjectNode).apply { remove(SERVERS) }
 
