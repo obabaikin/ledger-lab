@@ -35,6 +35,32 @@ waited for a pooled connection, and it does not cover the commit itself.
   which would churn multixacts at every submission. The key is a 64-bit hash of the
   run id; a collision with another run only adds waiting, never a wrong answer.
 
+A close racing two submissions of the run with new keys: one already in flight, one arriving
+while the close waits.
+
+```mermaid
+sequenceDiagram
+    participant A as submission A (in flight)
+    participant DB as PostgreSQL
+    participant C as close
+    participant B as submission B (late)
+
+    A->>DB: advisory lock, shared
+    A->>DB: period closed? no
+    C->>DB: advisory lock, exclusive
+    Note over C,DB: waits for A
+    B->>DB: advisory lock, shared
+    Note over B,DB: queues behind the close
+    A->>DB: insert transfer, commit, lock released
+    DB-->>C: lock granted
+    C->>DB: closed_at = clock_timestamp(), commit
+    DB-->>B: lock granted
+    B->>DB: period closed? yes
+    B-->>B: 409 period closed, no row
+```
+
+A is in the statement with `acceptedAt` before `closedAt`; B never commits a row.
+
 **After the close a new key is refused, a known key is answered as before.** A submission with a
 new `transferId` gets 409 `period closed` and leaves no row. A repeat of an accepted key still
 gets its current state, and another payload under it still gets 422. To the client, 409 means
