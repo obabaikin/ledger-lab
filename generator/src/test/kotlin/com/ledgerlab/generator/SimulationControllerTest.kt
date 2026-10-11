@@ -135,7 +135,7 @@ class SimulationControllerTest {
             val controller = controller(gateway)
             val runId = controller.finished()
 
-            assertThatThrownBy { controller.reconciliation(runId) }.isInstanceOf(GatewayAnswerException::class.java)
+            assertThatThrownBy { controller.reconciliation(runId) }.isInstanceOf(BadGatewayAnswerException::class.java)
         }
     }
 
@@ -163,7 +163,7 @@ class SimulationControllerTest {
                 val controller = controller(gateway)
                 val runId = controller.finished()
 
-                assertThatThrownBy { controller.reconciliation(runId) }.`as`(body).isInstanceOf(GatewayAnswerException::class.java)
+                assertThatThrownBy { controller.reconciliation(runId) }.`as`(body).isInstanceOf(BadGatewayAnswerException::class.java)
             }
         }
     }
@@ -199,7 +199,7 @@ class SimulationControllerTest {
             val runId = controller.finished()
 
             assertThatThrownBy { controller.reconciliation(runId) }
-                .isInstanceOf(GatewayAnswerException::class.java)
+                .isInstanceOf(BadGatewayAnswerException::class.java)
                 .hasMessageContaining("pages back")
         }
     }

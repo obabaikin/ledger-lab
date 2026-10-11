@@ -6,24 +6,17 @@ import com.ledgerlab.generator.bank.TransferStatus
 import java.util.EnumMap
 import java.util.UUID
 
-/** Transfers of one kind: [count] is exact, [transferIds] holds at most the first [MAX_LISTED_IDS]. */
 data class TransferIds(val count: Long, val transferIds: List<UUID>)
 
-/** Any transfer here makes the run unbalanced (ADR 0010). */
+/** Each kind is defined in ADR 0010; any transfer here makes the report unbalanced. */
 data class ReconciliationBreaks(
-    /** In the bank's statement, unknown to the client. */
     val notInJournal: TransferIds,
-    /** Acknowledged to the client with a 2xx, absent from the statement. */
     val acknowledgedNotInStatement: TransferIds,
-    /** Refused to the client with a 4xx, yet accepted by the bank. */
     val failedButInStatement: TransferIds,
-    /** Amount or accounts differ between the client's record and the bank's. */
     val payloadMismatch: TransferIds,
-    /** The client was told a final status, and the bank has another status or reject reason. */
     val statusMismatch: TransferIds,
 )
 
-/** Transfers the client could not settle, settled by the statement; informational, never a break. */
 data class UnknownResolved(val accepted: TransferIds, val notAccepted: TransferIds)
 
 data class JournalTotals(
@@ -40,10 +33,6 @@ data class StatementTotals(val rows: Long, val amountCents: Long, val byStatus: 
 data class ClientReconciliationReport(
     val runId: UUID,
     val balanced: Boolean,
-    /**
-     * False while the ledger is still applying transfers, or while a line's status cannot be read;
-     * the verdict is final only when this is true (ADR 0010).
-     */
     val statementFinal: Boolean,
     val journal: JournalTotals,
     val statement: StatementTotals,
@@ -65,19 +54,11 @@ private class IdCollector {
     fun result() = TransferIds(count, ids.toList())
 }
 
-/**
- * Matches the client's journal against the bank's statement by transfer id. Statement lines are
- * fed page by page, so only the ids seen so far are held, not the statement.
- */
-/**
- * Pending only remains if the run ended while the transfer was being sent, e.g. by a stop: the
- * request may have reached the bank, so the statement settles it like an unknown.
- */
-private val JournalOutcome.unsettled: Boolean get() = this == JournalOutcome.UNKNOWN || this == JournalOutcome.PENDING
+private val JournalOutcome.settledByStatement: Boolean get() = this == JournalOutcome.UNKNOWN || this == JournalOutcome.PENDING
 
-/** A side with no reason either has none or could not read it, as between versions; only two known reasons are compared. */
-private fun reasonsDiffer(client: RejectReason?, bank: RejectReason?): Boolean = client != null && bank != null && client != bank
+private fun knownReasonsDiffer(client: RejectReason?, bank: RejectReason?): Boolean = client != null && bank != null && client != bank
 
+/** Statement lines are fed page by page: only the ids seen so far are held, not the statement. */
 class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryView>) {
     private val entries = journal.associateBy { it.transferId }
     private val inStatement = HashSet<UUID>()
@@ -104,7 +85,7 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
             JournalOutcome.FAILED -> failedButInStatement.add(line.transferId)
             JournalOutcome.UNKNOWN, JournalOutcome.PENDING -> unknownAccepted.add(line.transferId)
             JournalOutcome.ACKNOWLEDGED -> if (entry.gatewayStatus?.isFinal == true && line.status != null &&
-                (entry.gatewayStatus != line.status || reasonsDiffer(entry.rejectReason, line.rejectReason))
+                (entry.gatewayStatus != line.status || knownReasonsDiffer(entry.rejectReason, line.rejectReason))
             ) {
                 statusMismatch.add(line.transferId)
             }
@@ -138,7 +119,7 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
                 requested = entries.size.toLong(),
                 acknowledged = acknowledged.size.toLong(),
                 failed = entries.values.count { it.outcome == JournalOutcome.FAILED }.toLong(),
-                unknown = entries.values.count { it.outcome.unsettled }.toLong(),
+                unknown = entries.values.count { it.outcome.settledByStatement }.toLong(),
                 acknowledgedAmountCents = acknowledged.sumOf { it.amountCents },
             ),
             statement = StatementTotals(rows, amountCents, byStatus.toMap()),

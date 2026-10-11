@@ -139,7 +139,6 @@ class Simulation(
     }
 
     companion object {
-        /** Journal entries a run may take; reserved against the generator-wide cap at start. */
         fun journalCapacity(targetTps: Int, duration: Duration): Long = targetTps.toLong() * duration.toSeconds()
 
         /** How often the pacer checks whether more submissions are due. */

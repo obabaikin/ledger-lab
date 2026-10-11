@@ -61,7 +61,6 @@ class SimulationAlreadyRunningException(runId: UUID) : ConflictException("Simula
 
 class JournalCapacityException(message: String) : ConflictException(message)
 
-/** The client may still send, so the journal is not final. */
 class RunStillActiveException : ConflictException(GeneratorErrors.RUN_STILL_ACTIVE)
 
 class NotFoundException(message: String) : RuntimeException(message)
@@ -89,11 +88,10 @@ class SimulationController(
         synchronized(simulations) {
             val existing = simulations[runId]
             if (existing?.state?.active == true) throw SimulationAlreadyRunningException(runId)
-            // A finished run under the same id is replaced below, so its journal does not count.
-            val reserved = simulations.filterKeys { it != runId }.values.filter { it.journal != null }.sumOf { it.journalCapacity }
-            if (reserved + capacity > props.journal.maxEntries) {
+            val reservedByOtherRuns = simulations.filterKeys { it != runId }.values.filter { it.journal != null }.sumOf { it.journalCapacity }
+            if (reservedByOtherRuns + capacity > props.journal.maxEntries) {
                 throw JournalCapacityException(
-                    "journals in memory hold $reserved of ${props.journal.maxEntries} entries; retry after older journals are released",
+                    "journals in memory hold $reservedByOtherRuns of ${props.journal.maxEntries} entries; retry after older journals are released",
                 )
             }
             val profile = LoadProfile(
@@ -152,11 +150,6 @@ class SimulationController(
         return journalOf(simulation).page(JournalFilter(outcome, resent, rejectReason), after, pageSize, complete)
     }
 
-    /**
-     * Client reconciliation (ADR 0010): the journal against the gateway's statement of the closed
-     * period. Read-only, computed on every call; the caller drains the ledger first, or reads
-     * [ClientReconciliationReport.statementFinal] as false.
-     */
     @GetMapping("/{runId}/reconciliation")
     fun reconciliation(@PathVariable runId: UUID): ClientReconciliationReport {
         val simulation = simulationOf(runId)
@@ -168,7 +161,7 @@ class SimulationController(
             val page = client.statement(runId, after)
             page.items.forEach(reconciliation::add)
             after = page.next
-            if (after != null && !cursors.add(after)) throw GatewayAnswerException("The statement of run $runId pages back to $after")
+            if (after != null && !cursors.add(after)) throw BadGatewayAnswerException("The statement of run $runId pages back to $after")
         } while (after != null)
         return reconciliation.report()
     }
@@ -206,9 +199,9 @@ class SimulationController(
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
     fun gatewayUnavailable(e: GatewayUnavailableException): Map<String, String> = mapOf("error" to (e.message ?: "gateway unavailable"))
 
-    @ExceptionHandler(GatewayAnswerException::class)
+    @ExceptionHandler(BadGatewayAnswerException::class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY)
-    fun gatewayAnswer(e: GatewayAnswerException): Map<String, String> = mapOf("error" to (e.message ?: "bad gateway"))
+    fun gatewayAnswer(e: BadGatewayAnswerException): Map<String, String> = mapOf("error" to (e.message ?: "bad gateway"))
 
     @ExceptionHandler(NotFoundException::class)
     @ResponseStatus(HttpStatus.NOT_FOUND)

@@ -38,8 +38,7 @@ object GatewayApi {
     const val WAIT_PARAM = "wait"
     const val AFTER_PARAM = "after"
     const val LIMIT_PARAM = "limit"
-    /** The largest page the statement serves (ADR 0009). */
-    const val STATEMENT_PAGE = 1_000
+    const val STATEMENT_MAX_PAGE = 1_000
 
     const val STATEMENT_PATH = "/v1/runs/{runId}/statement"
     private const val RUN_ID_VARIABLE = "{runId}"
@@ -47,14 +46,11 @@ object GatewayApi {
     fun statementPath(runId: UUID) = STATEMENT_PATH.replace(RUN_ID_VARIABLE, runId.toString())
 }
 
-/** The gateway has not closed the run's period, so it has no statement yet. */
 class PeriodNotClosedException : ConflictException(GeneratorErrors.PERIOD_NOT_CLOSED)
 
-/** No answer or a 5xx: asking again may work. */
 class GatewayUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-/** An answer the client contract does not allow for: asking again will not help. */
-class GatewayAnswerException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+class BadGatewayAnswerException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /** Number of the first send of a transfer; retries and duplicates count on from it. */
 const val FIRST_ATTEMPT = 1
@@ -105,9 +101,8 @@ class GatewayClient(
     private val statementReader: ObjectReader = objectMapper.readerFor(Statement::class.java)
         .with(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
 
-    /** One page of a closed period's statement, the largest the gateway serves; no retries, the caller decides. */
     fun statement(runId: UUID, after: UUID?): Statement {
-        val query = "?${GatewayApi.LIMIT_PARAM}=${GatewayApi.STATEMENT_PAGE}" + (after?.let { "&${GatewayApi.AFTER_PARAM}=$it" } ?: "")
+        val query = "?${GatewayApi.LIMIT_PARAM}=${GatewayApi.STATEMENT_MAX_PAGE}" + (after?.let { "&${GatewayApi.AFTER_PARAM}=$it" } ?: "")
         val request = HttpRequest.newBuilder(URI.create(props.gatewayUrl + GatewayApi.statementPath(runId) + query))
             .timeout(props.requestTimeout)
             .GET()
@@ -120,10 +115,10 @@ class GatewayClient(
         val code = HttpStatusCode.valueOf(response.statusCode())
         return when {
             code.is2xxSuccessful -> readStatement(response.body())
-                ?: throw GatewayAnswerException("Unreadable statement page of run $runId")
+                ?: throw BadGatewayAnswerException("Unreadable statement page of run $runId")
             code == HttpStatus.CONFLICT -> throw PeriodNotClosedException()
             code.is5xxServerError -> throw GatewayUnavailableException("The gateway answered ${code.value()} to the statement of run $runId")
-            else -> throw GatewayAnswerException("The gateway answered ${code.value()} to the statement of run $runId")
+            else -> throw BadGatewayAnswerException("The gateway answered ${code.value()} to the statement of run $runId")
         }
     }
 
