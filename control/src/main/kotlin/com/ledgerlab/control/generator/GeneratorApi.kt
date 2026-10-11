@@ -17,12 +17,14 @@ data class StartSimulationRequest(
     val durationSeconds: Int,
     val accountCount: Int,
     val blockedAccounts: Int,
-    val hotAccounts: Int,
-    val waitShare: Double,
-    val waitTimeoutSeconds: Int,
 )
 
-enum class SimulationState { RUNNING, STOPPING, FINISHED, STOPPED }
+enum class SimulationState(val active: Boolean) {
+    RUNNING(active = true),
+    STOPPING(active = true),
+    FINISHED(active = false),
+    STOPPED(active = false),
+}
 
 data class SimulationStatus(
     val runId: UUID,

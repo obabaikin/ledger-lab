@@ -1,6 +1,10 @@
 control:
   queue:
-    # Tests drive the queue themselves.
+    # Tests drive the queue and the conductor themselves.
     poll-interval: 1h
   ledger:
     readiness-timeout: 300ms
+  services:
+    request-timeout: 500ms
+  generator:
+    reconciliation-timeout: 500ms

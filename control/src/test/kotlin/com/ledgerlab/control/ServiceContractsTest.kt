@@ -44,6 +44,10 @@ class ServiceContractsTest {
     private val gateway = Spec("gateway.spec")
     private val generator = Spec("generator.spec")
 
+    private companion object {
+        const val NULL_TYPE = "null"
+    }
+
     private fun fieldsOf(type: KClass<*>): List<String> = type.primaryConstructor!!.parameters.map { it.name!! }
 
     private fun JsonNode.names(): List<String> = values().map { it.asString() }
@@ -83,6 +87,48 @@ class ServiceContractsTest {
         models.forEach { (spec, types) ->
             types.forEach { type ->
                 assertThat(spec.schemaOf(type).get("properties").propertyNames()).`as`(type.simpleName).containsAll(fieldsOf(type))
+            }
+        }
+    }
+
+    @Test
+    fun `every answer control tells apart is a code the service declares`() {
+        val answers = listOf(
+            Triple(ledger, HttpMethod.POST to LedgerApi.ACCOUNTS_PATH, listOf("201", "400", "409")),
+            Triple(ledger, HttpMethod.GET to LedgerApi.RECONCILIATION_PATH, listOf("200")),
+            Triple(ledger, HttpMethod.DELETE to LedgerApi.RUN_PATH, listOf("204", "404")),
+            Triple(gateway, HttpMethod.GET to GatewayApi.SUMMARY_PATH, listOf("200")),
+            Triple(gateway, HttpMethod.POST to GatewayApi.CLOSE_PATH, listOf("200")),
+            Triple(gateway, HttpMethod.DELETE to GatewayApi.RUN_PATH, listOf("204", "404")),
+            Triple(generator, HttpMethod.POST to GeneratorApi.SIMULATIONS_PATH, listOf("201", "400", "409")),
+            Triple(generator, HttpMethod.GET to GeneratorApi.SIMULATION_PATH, listOf("200", "404")),
+            Triple(generator, HttpMethod.POST to GeneratorApi.STOP_PATH, listOf("200", "202")),
+            Triple(generator, HttpMethod.GET to GeneratorApi.RECONCILIATION_PATH, listOf("200", "404", "409", "502", "503")),
+        )
+        answers.forEach { (spec, call, codes) ->
+            val (method, path) = call
+            assertThat(spec.operation(method, path).get("responses").propertyNames()).`as`("$method $path").containsAll(codes)
+        }
+    }
+
+    @Test
+    fun `a field control reads as never null is never null in the spec`() {
+        val models = mapOf(
+            ledger to listOf(ReconciliationReport::class),
+            gateway to listOf(RunSummary::class, ClosedPeriod::class),
+            generator to listOf(
+                SimulationStatus::class, ClientReconciliationReport::class, JournalTotals::class, StatementTotals::class,
+                ReconciliationBreaks::class, TransferIds::class, UnknownResolved::class,
+            ),
+        )
+        models.forEach { (spec, types) ->
+            types.forEach { type ->
+                val properties = spec.schemaOf(type).get("properties")
+                type.primaryConstructor!!.parameters.filterNot { it.type.isMarkedNullable }.forEach { field ->
+                    val types = properties.get(field.name).get("type")
+                    val nullable = types != null && types.isArray && types.names().contains(NULL_TYPE)
+                    assertThat(nullable).`as`("${type.simpleName}.${field.name}").isFalse()
+                }
             }
         }
     }

@@ -41,6 +41,8 @@ abstract class IntegrationTest {
     fun cleanDatabase() {
         jdbc.sql("TRUNCATE runs, sessions, invite_visits, invite_tokens").update()
         ledger.reset()
+        gateway.reset()
+        generator.reset()
     }
 
     protected fun invite(quota: Int = 100, expiresIn: Duration = Duration.ofDays(1), active: Boolean = true): String {
@@ -95,12 +97,16 @@ abstract class IntegrationTest {
     }
 
     companion object {
-        val ledger = StubLedger()
+        val ledger = StubService()
+        val gateway = StubService()
+        val generator = StubService()
 
         @JvmStatic
         @DynamicPropertySource
-        fun ledgerUrl(registry: DynamicPropertyRegistry) {
+        fun serviceUrls(registry: DynamicPropertyRegistry) {
             registry.add("control.ledger.base-url") { ledger.baseUrl }
+            registry.add("control.gateway.base-url") { gateway.baseUrl }
+            registry.add("control.generator.base-url") { generator.baseUrl }
         }
     }
 }

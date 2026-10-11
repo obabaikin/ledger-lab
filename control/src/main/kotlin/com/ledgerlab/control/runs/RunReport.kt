@@ -1,0 +1,102 @@
+package com.ledgerlab.control.runs
+
+import com.ledgerlab.control.gateway.RunSummary
+import com.ledgerlab.control.generator.ClientReconciliationReport
+import com.ledgerlab.control.generator.JournalTotals
+import com.ledgerlab.control.generator.ReconciliationBreaks
+import com.ledgerlab.control.generator.UnknownResolved
+import com.ledgerlab.control.ledger.ReconciliationCheck
+import com.ledgerlab.control.ledger.ReconciliationReport
+import io.swagger.v3.oas.annotations.media.Schema
+
+object RunOutcomes {
+    const val SETUP_TIMED_OUT = "setup timed out"
+    const val SETUP_REJECTED = "setup rejected"
+    const val PERIOD_NOT_CLOSED = "period not closed"
+    const val BANK_UNAVAILABLE = "bank unavailable"
+    const val CLIENT_LOST = "client lost"
+    const val CLIENT_RECONCILIATION_UNAVAILABLE = "client reconciliation unavailable"
+    const val STATEMENT_NOT_FINAL = "statement not final"
+
+    fun drainTimedOut(applied: Long, accepted: Long) = "drain timed out: applied $applied of $accepted"
+
+    fun clientReconciliationFailed(error: String) = "client reconciliation failed: $error"
+}
+
+@Schema(description = "What the gateway counted for the run.")
+data class GatewayCounts(val accepted: Long, val published: Long, val posted: Long, val rejected: Long)
+
+@Schema(description = "What the ledger applied for the run.")
+data class LedgerCounts(val posted: Long, val rejected: Long)
+
+@Schema(description = "The verdict of a run and what it rests on.")
+data class RunReport(
+    val result: RunResult,
+    @field:Schema(description = "Why the verdict is incomplete; empty otherwise.")
+    val reasons: List<String>,
+    @field:Schema(description = "The ledger's books: balances, journal and transfer log agree.")
+    val ledgerBalanced: Boolean,
+    val ledgerFailedChecks: List<ReconciliationCheck>,
+    @field:Schema(description = "Gateway and ledger count the same posted and rejected transfers and reasons; null if the drain did not finish.")
+    val bankViewsAgree: Boolean?,
+    @field:Schema(description = "The clients' journal matches the statement; null without a client reconciliation.")
+    val clientBalanced: Boolean?,
+    @field:Schema(description = "No statement line was still in flight; null without a client reconciliation.")
+    val statementFinal: Boolean?,
+    @field:Schema(description = "What the clients were told; null without a client reconciliation.")
+    val client: JournalTotals?,
+    val gateway: GatewayCounts,
+    val ledger: LedgerCounts,
+    @field:Schema(description = "Rejections by reason, as the ledger decided them.")
+    val rejectionsByReason: Map<String, Long>,
+    @field:Schema(description = "Discrepancies between journal and statement, by kind, with up to 1000 ids each.")
+    val breaks: ReconciliationBreaks?,
+    @field:Schema(description = "Transfers the clients did not know the outcome of, settled by the statement.")
+    val unknownResolved: UnknownResolved?,
+)
+
+sealed interface ClientSide {
+    data class Reconciled(val report: ClientReconciliationReport) : ClientSide
+
+    data class Missing(val reason: String) : ClientSide
+}
+
+fun drainFinished(gateway: RunSummary, ledger: ReconciliationReport): Boolean =
+    gateway.posted + gateway.rejected == gateway.accepted && gateway.accepted == ledger.postedTransfers + ledger.rejectedTransfers
+
+fun verdictOf(gateway: RunSummary, ledger: ReconciliationReport, client: ClientSide): RunReport {
+    val drained = drainFinished(gateway, ledger)
+    // Before the drain ends the gateway's counts trail the ledger's: a difference then is lag, not a break.
+    val bankViewsAgree = if (drained) {
+        gateway.posted == ledger.postedTransfers && gateway.rejected == ledger.rejectedTransfers &&
+            gateway.rejectionsByReason == ledger.rejectionsByReason
+    } else {
+        null
+    }
+    val clientReport = (client as? ClientSide.Reconciled)?.report
+    val reasons = buildList {
+        if (!drained) add(RunOutcomes.drainTimedOut(ledger.postedTransfers + ledger.rejectedTransfers, gateway.accepted))
+        if (client is ClientSide.Missing) add(client.reason)
+        if (clientReport?.statementFinal == false) add(RunOutcomes.STATEMENT_NOT_FINAL)
+    }
+    val result = when {
+        !ledger.balanced || bankViewsAgree == false || clientReport?.balanced == false -> RunResult.BREAKS
+        reasons.isNotEmpty() -> RunResult.INCOMPLETE
+        else -> RunResult.BALANCED
+    }
+    return RunReport(
+        result = result,
+        reasons = reasons,
+        ledgerBalanced = ledger.balanced,
+        ledgerFailedChecks = ledger.failedChecks,
+        bankViewsAgree = bankViewsAgree,
+        clientBalanced = clientReport?.balanced,
+        statementFinal = clientReport?.statementFinal,
+        client = clientReport?.journal,
+        gateway = GatewayCounts(gateway.accepted, gateway.published, gateway.posted, gateway.rejected),
+        ledger = LedgerCounts(ledger.postedTransfers, ledger.rejectedTransfers),
+        rejectionsByReason = ledger.rejectionsByReason,
+        breaks = clientReport?.breaks,
+        unknownResolved = clientReport?.unknownResolved,
+    )
+}

@@ -1,0 +1,413 @@
+package com.ledgerlab.control
+
+import com.ledgerlab.control.RunFixtures.books
+import com.ledgerlab.control.RunFixtures.clientReport
+import com.ledgerlab.control.RunFixtures.simulation
+import com.ledgerlab.control.RunFixtures.summary
+import com.ledgerlab.control.gateway.GatewayApi
+import com.ledgerlab.control.generator.GeneratorApi
+import com.ledgerlab.control.http.forRun
+import com.ledgerlab.control.ledger.LedgerApi
+import com.ledgerlab.control.runs.Conductor
+import com.ledgerlab.control.runs.RunQueue
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import java.time.Duration
+import java.util.UUID
+
+class ConductorTest : IntegrationTest() {
+
+    @Autowired lateinit var conductor: Conductor
+    @Autowired lateinit var queue: RunQueue
+
+    private val closedAt = "2026-10-12T01:00:00Z"
+
+    private fun admitted(): UUID {
+        val runId = UUID.fromString(start(sessionOf(invite())).body!!["runId"] as String)
+        queue.advance(ledgerReady = true)
+        return runId
+    }
+
+    private fun running(): UUID = admitted().also {
+        jdbc.sql("UPDATE runs SET state = 'RUNNING', started_at = clock_timestamp() WHERE run_id = :id").param("id", it).update()
+    }
+
+    private fun draining(closed: Boolean = true, clientLost: Boolean = false): UUID = running().also {
+        jdbc.sql(
+            """
+            UPDATE runs SET state = 'DRAINING', drain_started_at = clock_timestamp(), client_lost = :clientLost,
+                closed_at = CASE WHEN :closed THEN clock_timestamp() END,
+                drain_applied = CASE WHEN :closed THEN 0 END,
+                drain_progress_at = CASE WHEN :closed THEN clock_timestamp() END
+            WHERE run_id = :id
+            """,
+        ).param("id", it).param("closed", closed).param("clientLost", clientLost).update()
+    }
+
+    private fun backdate(runId: UUID, column: String, by: Duration) {
+        jdbc.sql("UPDATE runs SET $column = $column - CAST(:millis AS bigint) * interval '1 millisecond' WHERE run_id = :id")
+            .param("millis", by.toMillis())
+            .param("id", runId)
+            .update()
+    }
+
+    private fun column(runId: UUID, column: String): Any? =
+        jdbc.sql("SELECT $column FROM runs WHERE run_id = :id").param("id", runId).query { rs, _ -> rs.getObject(1) }.list().single()
+
+    private fun bank(runId: UUID, summary: Map<String, Any?> = summary(runId), books: Map<String, Any?> = books(runId)) {
+        gateway.answer("GET", GatewayApi.SUMMARY_PATH.forRun(runId), 200, summary)
+        ledger.answer("GET", LedgerApi.RECONCILIATION_PATH.forRun(runId), 200, books)
+    }
+
+    private fun clientReconciles(runId: UUID, status: Int = 200, body: Any? = clientReport(runId)) =
+        generator.answer("GET", GeneratorApi.RECONCILIATION_PATH.forRun(runId), status, body)
+
+    private fun reportOf(sessionRun: UUID): Map<*, *> {
+        val sessionId = jdbc.sql("SELECT session_id FROM runs WHERE run_id = :id").param("id", sessionRun).query(UUID::class.java).single()
+        return http.getForEntity("/api/sessions/$sessionId/runs/$sessionRun/report", Map::class.java).body!!
+    }
+
+    @Test
+    fun `a created run gets its accounts, then its clients, and runs`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404, mapOf("error" to "No simulation $runId"))
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 201, simulation(runId, "RUNNING"))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RUNNING")
+        assertThat(column(runId, "started_at")).isNotNull()
+        val accounts = objectMapper.readTree(ledger.callsTo("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId)).single().body)
+        assertThat(accounts.get("accountCount").asInt()).isEqualTo(100)
+        assertThat(accounts.get("openingBalanceCents").asLong()).isEqualTo(1_000_000)
+        assertThat(accounts.get("blockedAccounts").asInt()).isEqualTo(2)
+        assertThat(accounts.get("dailyLimitCents").asLong()).isEqualTo(5_000_000)
+        val simulation = objectMapper.readTree(generator.callsTo("POST", GeneratorApi.SIMULATIONS_PATH).single().body)
+        assertThat(simulation.propertyNames()).containsExactlyInAnyOrder("runId", "tps", "durationSeconds", "accountCount", "blockedAccounts")
+        assertThat(simulation.get("accountCount").asInt()).isEqualTo(100)
+        assertThat(simulation.get("blockedAccounts").asInt()).isEqualTo(2)
+    }
+
+    @Test
+    fun `accounts an earlier attempt already opened count as opened`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 409, mapOf("error" to "Run $runId already has accounts"))
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 201, simulation(runId, "RUNNING"))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RUNNING")
+    }
+
+    @Test
+    fun `clients the generator already runs are not started again`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200, simulation(runId, "FINISHED"))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RUNNING")
+        assertThat(generator.callsTo("POST", GeneratorApi.SIMULATIONS_PATH)).isEmpty()
+        assertThat(ledger.callsTo("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId))).isEmpty()
+    }
+
+    @Test
+    fun `a setup the ledger rejects fails the run`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 400, mapOf("error" to "invalid"))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("FAILED")
+        assertThat(column(runId, "failure")).isEqualTo("setup rejected")
+        assertThat(generator.callsTo("POST", GeneratorApi.SIMULATIONS_PATH)).isEmpty()
+    }
+
+    @Test
+    fun `a setup the generator rejects fails the run`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 400, mapOf("error" to "invalid"))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("FAILED")
+        assertThat(column(runId, "failure")).isEqualTo("setup rejected")
+    }
+
+    @Test
+    fun `a setup that keeps failing is retried, then fails after the setup timeout`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 409, mapOf("error" to "journals in memory hold 300000"))
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("CREATED")
+
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 503)
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("CREATED")
+
+        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("FAILED")
+        assertThat(column(runId, "failure")).isEqualTo("setup timed out")
+    }
+
+    @Test
+    fun `a generator that does not answer in time is asked again, not started over`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        generator.delay = props.services.requestTimeout.plusMillis(300)
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("CREATED")
+        assertThat(ledger.callsTo("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId))).isEmpty()
+        assertThat(generator.callsTo("POST", GeneratorApi.SIMULATIONS_PATH)).isEmpty()
+    }
+
+    @Test
+    fun `clients that finished or were stopped hand the run over to the drain`() {
+        val finished = running()
+        val stopped = running()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(finished), 200, simulation(finished, "FINISHED"))
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(stopped), 200, simulation(stopped, "STOPPED"))
+
+        conductor.tick()
+
+        assertThat(listOf(stateOf(finished), stateOf(stopped))).containsOnly("DRAINING")
+        assertThat(column(finished, "client_lost")).isEqualTo(false)
+    }
+
+    @Test
+    fun `active clients keep the run running`() {
+        val runId = running()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200, simulation(runId, "STOPPING"))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RUNNING")
+    }
+
+    @Test
+    fun `clients the generator no longer knows are lost, and the run still drains`() {
+        val runId = running()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+        assertThat(column(runId, "client_lost")).isEqualTo(true)
+    }
+
+    @Test
+    fun `clients still active past the duration and the grace are stopped and the run drains`() {
+        val runId = running()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200, simulation(runId, "RUNNING"))
+        backdate(runId, "started_at", Duration.ofSeconds(10).plus(props.runs.runningGrace))
+
+        conductor.tick()
+
+        assertThat(generator.callsTo("POST", GeneratorApi.STOP_PATH.forRun(runId))).hasSize(1)
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+    }
+
+    @Test
+    fun `a requested stop is passed to the generator on the next tick`() {
+        val runId = running()
+        val sessionId = column(runId, "session_id")
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200, simulation(runId, "STOPPING"))
+
+        val answer = http.postForEntity("/api/sessions/$sessionId/runs/$runId/stop", null, Map::class.java)
+        assertThat(answer.statusCode.value()).isEqualTo(202)
+        assertThat(answer.body!!["stopRequested"]).isEqualTo(true)
+
+        conductor.tick()
+
+        assertThat(generator.callsTo("POST", GeneratorApi.STOP_PATH.forRun(runId))).hasSize(1)
+    }
+
+    @Test
+    fun `the drain starts by closing the period`() {
+        val runId = draining(closed = false)
+        gateway.answer("POST", GatewayApi.CLOSE_PATH.forRun(runId), 200, mapOf("runId" to runId, "closedAt" to closedAt))
+
+        conductor.tick()
+
+        assertThat(column(runId, "closed_at")).isNotNull()
+        assertThat(column(runId, "drain_applied")).isEqualTo(0L)
+    }
+
+    @Test
+    fun `a close that keeps failing fails the run after the drain timeout`() {
+        val runId = draining(closed = false)
+        gateway.answer("POST", GatewayApi.CLOSE_PATH.forRun(runId), 503, mapOf("error" to "lock timeout"))
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        backdate(runId, "drain_started_at", props.runs.drainTimeout)
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("FAILED")
+        assertThat(column(runId, "failure")).isEqualTo("period not closed")
+    }
+
+    @Test
+    fun `a drained run is reconciled once and its report kept`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId)
+
+        conductor.tick()
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RECONCILED")
+        assertThat(column(runId, "result")).isEqualTo("BALANCED")
+        assertThat(generator.callsTo("GET", GeneratorApi.RECONCILIATION_PATH.forRun(runId))).hasSize(1)
+        val report = reportOf(runId)
+        assertThat(report["result"]).isEqualTo("BALANCED")
+        assertThat(report["reasons"] as List<*>).isEmpty()
+        assertThat(report["bankViewsAgree"]).isEqualTo(true)
+        assertThat(report["rejectionsByReason"]).isEqualTo(mapOf("BLOCKED_ACCOUNT" to 15))
+    }
+
+    @Test
+    fun `the client is asked only once the gateway knows every result`() {
+        val runId = draining()
+        bank(runId, summary = summary(runId, posted = 900, rejected = 15))
+        clientReconciles(runId)
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+        assertThat(generator.callsTo("GET", GeneratorApi.RECONCILIATION_PATH.forRun(runId))).isEmpty()
+    }
+
+    @Test
+    fun `a drain that stops making progress ends incomplete, with how far it got`() {
+        val runId = draining()
+        bank(runId, books = books(runId, posted = 700, rejected = 10))
+        clientReconciles(runId)
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        backdate(runId, "drain_progress_at", props.runs.drainStallTimeout)
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RECONCILED")
+        val report = reportOf(runId)
+        assertThat(report["result"]).isEqualTo("INCOMPLETE")
+        assertThat(report["reasons"]).isEqualTo(listOf("drain timed out: applied 710 of 995"))
+        assertThat(report["bankViewsAgree"]).isNull()
+    }
+
+    @Test
+    fun `progress in the ledger keeps the drain waiting`() {
+        val runId = draining()
+        bank(runId, books = books(runId, posted = 700, rejected = 10))
+        backdate(runId, "drain_progress_at", props.runs.drainStallTimeout)
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+        assertThat(column(runId, "drain_applied")).isEqualTo(710L)
+    }
+
+    @Test
+    fun `a drain past its deadline ends incomplete even while it progresses`() {
+        val runId = draining()
+        bank(runId, books = books(runId, posted = 700, rejected = 10))
+        clientReconciles(runId)
+        backdate(runId, "drain_started_at", props.runs.drainTimeout)
+
+        conductor.tick()
+
+        assertThat(column(runId, "result")).isEqualTo("INCOMPLETE")
+    }
+
+    @Test
+    fun `an empty ledger run against accepted transfers is never balanced`() {
+        val runId = draining()
+        bank(runId, books = books(runId, posted = 0, rejected = 0, accounts = 0, reasons = emptyMap()))
+        clientReconciles(runId)
+        backdate(runId, "drain_started_at", props.runs.drainTimeout)
+
+        conductor.tick()
+
+        assertThat(column(runId, "result")).isNotEqualTo("BALANCED")
+    }
+
+    @Test
+    fun `a lost client leaves the bank's verdict and says the client side is missing`() {
+        val runId = draining(clientLost = true)
+        bank(runId)
+
+        conductor.tick()
+
+        assertThat(generator.callsTo("GET", GeneratorApi.RECONCILIATION_PATH.forRun(runId))).isEmpty()
+        val report = reportOf(runId)
+        assertThat(report["result"]).isEqualTo("INCOMPLETE")
+        assertThat(report["reasons"]).isEqualTo(listOf("client lost"))
+        assertThat(report["bankViewsAgree"]).isEqualTo(true)
+    }
+
+    @Test
+    fun `a client reconciliation that cannot succeed ends incomplete with the generator's words`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, 409, mapOf("error" to "run still active"))
+
+        conductor.tick()
+
+        assertThat(reportOf(runId)["reasons"]).isEqualTo(listOf("client reconciliation failed: run still active"))
+    }
+
+    @Test
+    fun `an inconsistent statement ends incomplete at once`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, 502, mapOf("error" to "statement incomplete"))
+
+        conductor.tick()
+
+        assertThat(reportOf(runId)["reasons"]).isEqualTo(listOf("client reconciliation failed: statement incomplete"))
+    }
+
+    @Test
+    fun `an unavailable client reconciliation is retried until the drain deadline`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, 503, mapOf("error" to "gateway unavailable"))
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        backdate(runId, "drain_started_at", props.runs.drainTimeout)
+        conductor.tick()
+        assertThat(reportOf(runId)["reasons"]).isEqualTo(listOf("client reconciliation unavailable"))
+    }
+
+    @Test
+    fun `a bank that does not answer until the deadline fails the run without a verdict`() {
+        val runId = draining()
+        gateway.answer("GET", GatewayApi.SUMMARY_PATH.forRun(runId), 200, summary(runId))
+        ledger.answer("GET", LedgerApi.RECONCILIATION_PATH.forRun(runId), 503)
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        backdate(runId, "drain_started_at", props.runs.drainTimeout)
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("FAILED")
+        assertThat(column(runId, "failure")).isEqualTo("bank unavailable")
+        assertThat(column(runId, "result")).isNull()
+    }
+}

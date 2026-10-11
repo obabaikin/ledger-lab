@@ -34,6 +34,16 @@
         },
         "type" : "object"
       },
+      "ApiError" : {
+        "description" : "Body of an error answer.",
+        "properties" : {
+          "error" : {
+            "description" : "Names the case.",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "CheckResult" : {
         "properties" : {
           "check" : {
@@ -73,6 +83,7 @@
             "type" : "integer"
           }
         },
+        "required" : [ "accountCount", "blockedAccounts", "dailyLimitCents", "openingBalanceCents" ],
         "type" : "object"
       },
       "ReconciliationReport" : {
@@ -165,8 +176,11 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Deleted"
+          },
+          "404" : {
+            "description" : "Unknown run"
           }
         },
         "tags" : [ "run-controller" ]
@@ -196,7 +210,7 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "The run's accounts"
           }
         },
         "tags" : [ "run-controller" ]
@@ -234,7 +248,27 @@
                 }
               }
             },
-            "description" : "Created"
+            "description" : "Accounts opened"
+          },
+          "400" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Invalid setup"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The run already has accounts"
           }
         },
         "tags" : [ "run-controller" ]
@@ -261,7 +295,7 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "The ledger's checks; an unknown run has no accounts and zeros"
           }
         },
         "tags" : [ "run-controller" ]

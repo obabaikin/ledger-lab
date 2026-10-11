@@ -2,9 +2,11 @@ package com.ledgerlab.control.runs
 
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
+import tools.jackson.databind.ObjectMapper
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -12,7 +14,9 @@ import java.util.UUID
  * which may lie before a wait for the lock and would order runs differently from their admission.
  */
 @Repository
-class RunRepository(private val jdbc: JdbcClient) {
+class RunRepository(private val jdbc: JdbcClient, private val objectMapper: ObjectMapper) {
+
+    fun now(): Instant = jdbc.sql("SELECT clock_timestamp()").query(Timestamp::class.java).single().toInstant()
 
     fun lockQueue() {
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:name, 0))")
@@ -36,6 +40,126 @@ class RunRepository(private val jdbc: JdbcClient) {
             .query { rs, _ -> rs.toRun() }
             .optional()
             .orElse(null)
+
+    fun findForUpdate(sessionId: UUID, runId: UUID): Run? =
+        jdbc.sql("SELECT r.*, NULL AS position FROM runs r WHERE r.session_id = :sessionId AND r.run_id = :runId FOR UPDATE")
+            .param("sessionId", sessionId)
+            .param("runId", runId)
+            .query { rs, _ -> rs.toRun() }
+            .optional()
+            .orElse(null)
+
+    fun inProgress(): List<Run> =
+        jdbc.sql("SELECT r.*, NULL AS position FROM runs r WHERE r.state IN (:states) ORDER BY r.admitted_at, r.run_id")
+            .param("states", listOf(RunState.CREATED, RunState.RUNNING, RunState.DRAINING).map { it.name })
+            .query { rs, _ -> rs.toRun() }
+            .list()
+
+    fun reportOf(runId: UUID): RunReport? =
+        jdbc.sql("SELECT report::text FROM runs WHERE run_id = :runId")
+            .param("runId", runId)
+            .query(String::class.java)
+            .optional()
+            .map { objectMapper.readValue(it, RunReport::class.java) }
+            .orElse(null)
+
+    fun requestStop(runId: UUID): Int =
+        jdbc.sql("UPDATE runs SET stop_requested_at = coalesce(stop_requested_at, clock_timestamp()) WHERE run_id = :runId AND state = :running")
+            .param("runId", runId)
+            .param("running", RunState.RUNNING.name)
+            .update()
+
+    fun markStarted(runId: UUID): Int = move(runId, RunState.CREATED, RunState.RUNNING, "started_at = clock_timestamp()")
+
+    fun startDraining(runId: UUID, clientLost: Boolean): Int =
+        jdbc.sql(
+            """
+            UPDATE runs SET state = :draining, drain_started_at = clock_timestamp(), client_lost = :clientLost
+            WHERE run_id = :runId AND state = :running
+            """,
+        )
+            .param("draining", RunState.DRAINING.name)
+            .param("running", RunState.RUNNING.name)
+            .param("clientLost", clientLost)
+            .param("runId", runId)
+            .update()
+
+    fun markClosed(runId: UUID, closedAt: Instant): Int =
+        jdbc.sql(
+            """
+            UPDATE runs SET closed_at = :closedAt, drain_applied = 0, drain_progress_at = clock_timestamp()
+            WHERE run_id = :runId AND state = :draining AND closed_at IS NULL
+            """,
+        )
+            .param("closedAt", Timestamp.from(closedAt))
+            .param("draining", RunState.DRAINING.name)
+            .param("runId", runId)
+            .update()
+
+    fun recordDrainProgress(runId: UUID, applied: Long): Int =
+        jdbc.sql(
+            """
+            UPDATE runs SET drain_applied = :applied, drain_progress_at = clock_timestamp()
+            WHERE run_id = :runId AND state = :draining AND drain_applied < :applied
+            """,
+        )
+            .param("applied", applied)
+            .param("draining", RunState.DRAINING.name)
+            .param("runId", runId)
+            .update()
+
+    fun markReconciled(runId: UUID, report: RunReport): Int =
+        jdbc.sql(
+            """
+            UPDATE runs SET state = :reconciled, result = :result, report = CAST(:report AS jsonb), finished_at = clock_timestamp()
+            WHERE run_id = :runId AND state = :draining
+            """,
+        )
+            .param("reconciled", RunState.RECONCILED.name)
+            .param("result", report.result.name)
+            .param("report", objectMapper.writeValueAsString(report))
+            .param("draining", RunState.DRAINING.name)
+            .param("runId", runId)
+            .update()
+
+    fun markFailed(runId: UUID, from: RunState, failure: String): Int =
+        jdbc.sql(
+            """
+            UPDATE runs SET state = :failed, failure = :failure, finished_at = clock_timestamp()
+            WHERE run_id = :runId AND state = :from
+            """,
+        )
+            .param("failed", RunState.FAILED.name)
+            .param("failure", failure)
+            .param("from", from.name)
+            .param("runId", runId)
+            .update()
+
+    fun purgeable(retention: Duration): List<UUID> =
+        jdbc.sql(
+            """
+            SELECT run_id FROM runs
+            WHERE state IN (:states) AND purged_at IS NULL
+              AND finished_at <= clock_timestamp() - CAST(:retentionMillis AS bigint) * interval '1 millisecond'
+            ORDER BY finished_at
+            """,
+        )
+            .param("states", listOf(RunState.RECONCILED, RunState.FAILED).map { it.name })
+            .param("retentionMillis", retention.toMillis())
+            .query { rs, _ -> rs.getObject("run_id", UUID::class.java) }
+            .list()
+
+    fun markPurged(runId: UUID): Int =
+        jdbc.sql("UPDATE runs SET purged_at = clock_timestamp() WHERE run_id = :runId AND purged_at IS NULL")
+            .param("runId", runId)
+            .update()
+
+    private fun move(runId: UUID, from: RunState, to: RunState, also: String): Int =
+        jdbc.sql("UPDATE runs SET state = :to, $also WHERE run_id = :runId AND state = :from")
+            .param("to", to.name)
+            .param("from", from.name)
+            .param("runId", runId)
+            .update()
 
     fun listOf(sessionId: UUID): List<Run> =
         jdbc.sql("$SELECT_WITH_POSITION WHERE r.session_id = :sessionId ORDER BY r.created_at DESC, r.run_id DESC")
@@ -123,6 +247,15 @@ class RunRepository(private val jdbc: JdbcClient) {
         admittedAt = getObject("admitted_at", Timestamp::class.java)?.toInstant(),
         finishedAt = getObject("finished_at", Timestamp::class.java)?.toInstant(),
         position = getObject("position")?.let { getLong("position") },
+        startedAt = getObject("started_at", Timestamp::class.java)?.toInstant(),
+        stopRequested = getObject("stop_requested_at") != null,
+        clientLost = getBoolean("client_lost"),
+        drainStartedAt = getObject("drain_started_at", Timestamp::class.java)?.toInstant(),
+        closedAt = getObject("closed_at", Timestamp::class.java)?.toInstant(),
+        drainApplied = getObject("drain_applied")?.let { getLong("drain_applied") },
+        drainProgressAt = getObject("drain_progress_at", Timestamp::class.java)?.toInstant(),
+        result = getString("result")?.let { RunResult.valueOf(it) },
+        failure = getString("failure"),
     )
 
     private companion object {

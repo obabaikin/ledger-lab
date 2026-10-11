@@ -1,6 +1,7 @@
 package com.ledgerlab.control.entry
 
 import com.ledgerlab.control.ControlProperties
+import com.ledgerlab.control.api.CHAOS_AVAILABLE
 import com.ledgerlab.control.runs.QUOTA_WINDOW
 import com.ledgerlab.control.runs.RunRepository
 import org.springframework.stereotype.Service
@@ -14,6 +15,7 @@ data class SessionOverview(
     val runsLastHour: Long,
     val tpsOptions: List<Int>,
     val durationOptions: List<Int>,
+    val chaosAvailable: Boolean,
 )
 
 class InviteNotValidException : RuntimeException()
@@ -46,6 +48,7 @@ class EntryService(
             runsLastHour = runs.quotaUsage(session.token, QUOTA_WINDOW, invite.quota).used,
             tpsOptions = props.runs.tpsOptions,
             durationOptions = props.runs.durationSecondsOptions,
+            chaosAvailable = CHAOS_AVAILABLE,
         )
     }
 }

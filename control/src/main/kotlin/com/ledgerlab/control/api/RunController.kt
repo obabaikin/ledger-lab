@@ -1,7 +1,9 @@
 package com.ledgerlab.control.api
 
 import com.ledgerlab.control.runs.Run
+import com.ledgerlab.control.runs.RunReport
 import com.ledgerlab.control.runs.RunRequest
+import com.ledgerlab.control.runs.RunResult
 import com.ledgerlab.control.runs.RunService
 import com.ledgerlab.control.runs.RunState
 import io.swagger.v3.oas.annotations.Operation
@@ -43,6 +45,16 @@ data class RunView(
     val finishedAt: Instant?,
     @field:Schema(description = "Place in the queue, from 1; only while queued.")
     val position: Long?,
+    @field:Schema(description = "When the clients started sending; null before.")
+    val startedAt: Instant?,
+    @field:Schema(description = "A stop was asked for while the run was running.")
+    val stopRequested: Boolean,
+    @field:Schema(description = "When the bank closed the run's period, by the bank's clock; null before.")
+    val closedAt: Instant?,
+    @field:Schema(description = "The verdict; only once reconciled. Only BALANCED is green.")
+    val result: RunResult?,
+    @field:Schema(description = "Why the run failed without a verdict; only when failed.")
+    val failure: String?,
 )
 
 @Schema(description = "A session's runs, newest first.")
@@ -80,9 +92,29 @@ class RunController(private val runs: RunService) {
     @GetMapping("/{runId}")
     fun get(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunView = runs.find(sessionId, runId).toView()
 
+    @Operation(summary = "Stop a running run early; the bank still finishes and reconciles it")
+    @ApiResponse(responseCode = "200", description = "The run had already ended")
+    @ApiResponse(responseCode = "202", description = "Stopping")
+    @ApiResponse(responseCode = "404", description = "Unknown session, or no such run in it", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "The run has not started yet", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @PostMapping("/{runId}/stop")
+    fun stop(@PathVariable sessionId: UUID, @PathVariable runId: UUID): ResponseEntity<RunView> {
+        val run = runs.stop(sessionId, runId)
+        return ResponseEntity.status(if (run.state == RunState.RUNNING) HttpStatus.ACCEPTED else HttpStatus.OK).body(run.toView())
+    }
+
+    @Operation(summary = "The verdict of a reconciled run")
+    @ApiResponse(responseCode = "200", description = "The report")
+    @ApiResponse(responseCode = "404", description = "Unknown session, or no such run in it", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "The run is not reconciled", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @GetMapping("/{runId}/report")
+    fun report(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunReport = runs.report(sessionId, runId)
+
     companion object {
         const val RUNS_PATH = "/api/sessions/{sessionId}/runs"
     }
 }
 
-private fun Run.toView() = RunView(runId, state, tps, durationSeconds, createdAt, admittedAt, finishedAt, position)
+private fun Run.toView() = RunView(
+    runId, state, tps, durationSeconds, createdAt, admittedAt, finishedAt, position, startedAt, stopRequested, closedAt, result, failure,
+)

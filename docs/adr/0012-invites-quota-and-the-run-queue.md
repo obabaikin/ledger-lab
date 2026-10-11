@@ -52,7 +52,7 @@ interleave: concurrent starts get exactly the free places of the queue and of th
 
 ## Consequences
 
-- A run admitted from the queue stays `CREATED` until orchestration takes it further; runs, their
-  accounts and their cleanup after 24 hours are the next step.
+- A run admitted from the queue is `CREATED`; orchestration takes it from there
+  ([ADR 0013](0013-orchestrating-a-run-and-the-verdict.md)).
 - An email scanner that fetches the link without running the page's script does not count as a
   visit; one that runs it does.

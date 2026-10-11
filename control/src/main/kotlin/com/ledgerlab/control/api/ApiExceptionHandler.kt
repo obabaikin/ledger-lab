@@ -5,8 +5,10 @@ import com.ledgerlab.control.entry.SessionNotFoundException
 import com.ledgerlab.control.runs.InvalidRunRequestException
 import com.ledgerlab.control.runs.QueueFullException
 import com.ledgerlab.control.runs.QuotaExceededException
+import com.ledgerlab.control.runs.ReportNotReadyException
 import com.ledgerlab.control.runs.RequestIdConflictException
 import com.ledgerlab.control.runs.RunNotFoundException
+import com.ledgerlab.control.runs.RunNotStartedException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -60,6 +62,18 @@ class ApiExceptionHandler {
     @ExceptionHandler(QueueFullException::class)
     @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
     fun queueFull() = ApiError(ControlErrors.RUN_QUEUE_FULL)
+
+    @ExceptionHandler(RunNotStartedException::class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    fun runNotStarted() = ApiError(ControlErrors.RUN_NOT_STARTED)
+
+    @ExceptionHandler(ReportNotReadyException::class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    fun reportNotReady() = ApiError(ControlErrors.REPORT_NOT_READY)
+
+    @ExceptionHandler(ChaosNotAvailableException::class)
+    @ResponseStatus(HttpStatus.NOT_IMPLEMENTED)
+    fun chaosNotAvailable() = ApiError(ControlErrors.CHAOS_NOT_AVAILABLE)
 
     private companion object {
         const val SESSION_ID = "sessionId"

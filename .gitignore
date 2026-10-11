@@ -5,6 +5,7 @@ docs/*.md
 # Build
 build/
 .gradle/
+.kotlin/
 out/
 *.class
 

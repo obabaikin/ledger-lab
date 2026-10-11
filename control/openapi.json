@@ -22,6 +22,87 @@
         "required" : [ "token" ],
         "type" : "object"
       },
+      "GatewayCounts" : {
+        "description" : "What the gateway counted for the run.",
+        "properties" : {
+          "accepted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "published" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "JournalTotals" : {
+        "properties" : {
+          "acknowledged" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "acknowledgedAmountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "requested" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unknown" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "LedgerCounts" : {
+        "description" : "What the ledger applied for the run.",
+        "properties" : {
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "ReconciliationBreaks" : {
+        "properties" : {
+          "acknowledgedNotInStatement" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "failedButInStatement" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "notInJournal" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "payloadMismatch" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "statusMismatch" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          }
+        },
+        "type" : "object"
+      },
       "RunList" : {
         "description" : "A session's runs, newest first.",
         "properties" : {
@@ -34,11 +115,94 @@
         },
         "type" : "object"
       },
+      "RunReport" : {
+        "description" : "The verdict of a run and what it rests on.",
+        "properties" : {
+          "bankViewsAgree" : {
+            "description" : "Gateway and ledger count the same posted and rejected transfers and reasons; null if the drain did not finish.",
+            "type" : [ "boolean", "null" ]
+          },
+          "breaks" : {
+            "description" : "Discrepancies between journal and statement, by kind, with up to 1000 ids each.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ReconciliationBreaks"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "client" : {
+            "description" : "What the clients were told; null without a client reconciliation.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/JournalTotals"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "clientBalanced" : {
+            "description" : "The clients' journal matches the statement; null without a client reconciliation.",
+            "type" : [ "boolean", "null" ]
+          },
+          "gateway" : {
+            "$ref" : "#/components/schemas/GatewayCounts"
+          },
+          "ledger" : {
+            "$ref" : "#/components/schemas/LedgerCounts"
+          },
+          "ledgerBalanced" : {
+            "description" : "The ledger's books: balances, journal and transfer log agree.",
+            "type" : "boolean"
+          },
+          "ledgerFailedChecks" : {
+            "items" : {
+              "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "reasons" : {
+            "description" : "Why the verdict is incomplete; empty otherwise.",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "rejectionsByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "description" : "Rejections by reason, as the ledger decided them.",
+            "type" : "object"
+          },
+          "result" : {
+            "enum" : [ "BALANCED", "BREAKS", "INCOMPLETE" ],
+            "type" : "string"
+          },
+          "statementFinal" : {
+            "description" : "No statement line was still in flight; null without a client reconciliation.",
+            "type" : [ "boolean", "null" ]
+          },
+          "unknownResolved" : {
+            "description" : "Transfers the clients did not know the outcome of, settled by the statement.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/UnknownResolved"
+            }, {
+              "type" : "null"
+            } ]
+          }
+        },
+        "type" : "object"
+      },
       "RunView" : {
         "description" : "A run as control sees it now.",
         "properties" : {
           "admittedAt" : {
             "description" : "When the run left the queue; null while queued or if it expired.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "closedAt" : {
+            "description" : "When the bank closed the run's period, by the bank's clock; null before.",
             "format" : "date-time",
             "type" : [ "string", "null" ]
           },
@@ -50,6 +214,10 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "failure" : {
+            "description" : "Why the run failed without a verdict; only when failed.",
+            "type" : [ "string", "null" ]
+          },
           "finishedAt" : {
             "description" : "When the run reached a final state; null before.",
             "format" : "date-time",
@@ -60,13 +228,27 @@
             "format" : "int64",
             "type" : [ "integer", "null" ]
           },
+          "result" : {
+            "description" : "The verdict; only once reconciled. Only BALANCED is green.",
+            "enum" : [ "BALANCED", "BREAKS", "INCOMPLETE" ],
+            "type" : [ "string", "null" ]
+          },
           "runId" : {
             "format" : "uuid",
             "type" : "string"
           },
+          "startedAt" : {
+            "description" : "When the clients started sending; null before.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
           "state" : {
             "enum" : [ "QUEUED", "CREATED", "RUNNING", "DRAINING", "RECONCILED", "FAILED", "EXPIRED" ],
             "type" : "string"
+          },
+          "stopRequested" : {
+            "description" : "A stop was asked for while the run was running.",
+            "type" : "boolean"
           },
           "tps" : {
             "format" : "int32",
@@ -88,6 +270,10 @@
       "SessionView" : {
         "description" : "What a session may do now.",
         "properties" : {
+          "chaosAvailable" : {
+            "description" : "Whether the chaos button works in this deployment.",
+            "type" : "boolean"
+          },
           "durationOptions" : {
             "description" : "Allowed run durations, seconds.",
             "items" : {
@@ -145,6 +331,33 @@
           }
         },
         "required" : [ "durationSeconds", "requestId", "tps" ],
+        "type" : "object"
+      },
+      "TransferIds" : {
+        "properties" : {
+          "count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "transferIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "UnknownResolved" : {
+        "properties" : {
+          "accepted" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          },
+          "notAccepted" : {
+            "$ref" : "#/components/schemas/TransferIds"
+          }
+        },
         "type" : "object"
       }
     }
@@ -241,6 +454,44 @@
         },
         "summary" : "A session's quota and run options",
         "tags" : [ "session-controller" ]
+      }
+    },
+    "/api/sessions/{sessionId}/chaos" : {
+      "post" : {
+        "operationId" : "chaos",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session"
+          },
+          "501" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not available in this deployment"
+          }
+        },
+        "summary" : "Delete the ledger pod during a run",
+        "tags" : [ "chaos-controller" ]
       }
     },
     "/api/sessions/{sessionId}/runs" : {
@@ -420,6 +671,128 @@
           }
         },
         "summary" : "A run of the session",
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/api/sessions/{sessionId}/runs/{runId}/report" : {
+      "get" : {
+        "operationId" : "report",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunReport"
+                }
+              }
+            },
+            "description" : "The report"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session, or no such run in it"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The run is not reconciled"
+          }
+        },
+        "summary" : "The verdict of a reconciled run",
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/api/sessions/{sessionId}/runs/{runId}/stop" : {
+      "post" : {
+        "operationId" : "stop",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description" : "The run had already ended"
+          },
+          "202" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description" : "Stopping"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session, or no such run in it"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The run has not started yet"
+          }
+        },
+        "summary" : "Stop a running run early; the bank still finishes and reconciles it",
         "tags" : [ "run-controller" ]
       }
     }

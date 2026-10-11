@@ -45,6 +45,26 @@ class RunService(
         return runs.find(sessionId, runId) ?: throw RunNotFoundException()
     }
 
+    /** The answer's run is RUNNING when the stop was taken; any later state means the run had already ended. */
+    @Transactional
+    fun stop(sessionId: UUID, runId: UUID): Run {
+        invites.findSession(sessionId) ?: throw SessionNotFoundException()
+        val run = runs.findForUpdate(sessionId, runId) ?: throw RunNotFoundException()
+        when (run.state) {
+            RunState.QUEUED, RunState.CREATED -> throw RunNotStartedException()
+            RunState.RUNNING -> runs.requestStop(runId)
+            else -> Unit
+        }
+        return checkNotNull(runs.find(sessionId, runId))
+    }
+
+    @Transactional(readOnly = true)
+    fun report(sessionId: UUID, runId: UUID): RunReport {
+        val run = find(sessionId, runId)
+        if (run.state != RunState.RECONCILED) throw ReportNotReadyException()
+        return checkNotNull(runs.reportOf(runId))
+    }
+
     @Transactional(readOnly = true)
     fun listOf(sessionId: UUID): List<Run> {
         invites.findSession(sessionId) ?: throw SessionNotFoundException()

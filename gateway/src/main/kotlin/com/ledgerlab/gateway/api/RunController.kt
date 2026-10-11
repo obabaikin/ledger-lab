@@ -3,6 +3,9 @@ package com.ledgerlab.gateway.api
 import com.ledgerlab.gateway.domain.RunSummary
 import com.ledgerlab.gateway.service.PeriodService
 import com.ledgerlab.gateway.service.TransferService
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.responses.ApiResponse
 import org.springframework.dao.CannotAcquireLockException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -21,12 +24,17 @@ import java.util.UUID
 @RequestMapping("/internal/runs/{runId}")
 class RunController(private val service: TransferService, private val periods: PeriodService) {
 
+    @ApiResponse(responseCode = "200", description = "The run's counts; an unknown run has zeros")
     @GetMapping("/summary")
     fun summary(@PathVariable runId: UUID): RunSummary = service.summarize(runId)
 
+    @ApiResponse(responseCode = "200", description = "Closed; a repeat returns the same closedAt")
+    @ApiResponse(responseCode = "503", description = "Transfers of the run kept the lock past the timeout", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping("/close")
     fun close(@PathVariable runId: UUID): ClosedPeriod = periods.close(runId).let { ClosedPeriod(it.runId, it.closedAt) }
 
+    @ApiResponse(responseCode = "204", description = "Deleted")
+    @ApiResponse(responseCode = "404", description = "Unknown run")
     @DeleteMapping
     fun delete(@PathVariable runId: UUID): ResponseEntity<Void> =
         if (service.deleteRun(runId)) ResponseEntity.noContent().build() else ResponseEntity.notFound().build()

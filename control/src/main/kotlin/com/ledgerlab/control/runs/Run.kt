@@ -16,6 +16,8 @@ enum class RunState(val isFinal: Boolean, val holdsSlot: Boolean) {
     EXPIRED(isFinal = true, holdsSlot = false),
 }
 
+enum class RunResult { BALANCED, BREAKS, INCOMPLETE }
+
 data class Run(
     val runId: UUID,
     val sessionId: UUID,
@@ -27,6 +29,15 @@ data class Run(
     val admittedAt: Instant?,
     val finishedAt: Instant?,
     val position: Long?,
+    val startedAt: Instant? = null,
+    val stopRequested: Boolean = false,
+    val clientLost: Boolean = false,
+    val drainStartedAt: Instant? = null,
+    val closedAt: Instant? = null,
+    val drainApplied: Long? = null,
+    val drainProgressAt: Instant? = null,
+    val result: RunResult? = null,
+    val failure: String? = null,
 )
 
 data class RunRequest(val requestId: UUID?, val tps: Int?, val durationSeconds: Int?)
@@ -42,3 +53,7 @@ class RequestIdConflictException : RuntimeException()
 class QuotaExceededException(val retryAfterSeconds: Long?) : RuntimeException()
 
 class QueueFullException : RuntimeException()
+
+class RunNotStartedException : RuntimeException()
+
+class ReportNotReadyException : RuntimeException()

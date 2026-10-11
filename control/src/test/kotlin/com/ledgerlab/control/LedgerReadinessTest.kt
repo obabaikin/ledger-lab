@@ -10,7 +10,7 @@ import java.time.Duration
 class LedgerReadinessTest {
 
     private val timeout = Duration.ofMillis(300)
-    private val ledger = StubLedger()
+    private val ledger = StubService()
 
     @AfterEach
     fun stop() = ledger.close()

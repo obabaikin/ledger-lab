@@ -6,8 +6,9 @@ Pick a transaction rate, run it for up to a minute, kill the ledger mid-run, and
 still balance. Built to answer one question properly: *how do you prove no money was lost or
 duplicated when consumers crash?*
 
-> Status: work in progress. Ledger, gateway and generator are done and reconcile end to end;
-> the control UI, Kubernetes deployment and the load investigation follow.
+> Status: work in progress. Ledger, gateway and generator are done; control takes a run from the
+> queue through the bank to a stored verdict. The page, Kubernetes deployment and the load
+> investigation follow.
 
 ## What it does
 
@@ -23,7 +24,8 @@ duplicated when consumers crash?*
   at the same time against the same cluster.
 - **Reconciliation** cross-checks what the clients were told, what the gateway accepted,
   what Kafka carried and what the ledger posted, and inside the ledger the balances, the
-  journal and the transfer log. Any disagreement turns the run red.
+  journal and the transfer log. Any disagreement turns the run red, and so does a verdict that
+  could not be completed.
 - A **chaos button** deletes the ledger pod during a run. Reconciliation must still pass.
 
 ## Stack
@@ -39,7 +41,7 @@ Micrometer / Prometheus / Grafana · Helm · k3s · Terraform (Contabo)
 | `ledger-service` | Double-entry ledger, Kafka consumer, reconciliation, internal API | done |
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
-| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota and run queue; its models of the services' internal APIs, checked against their specs |
+| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota, run queue, orchestration and the verdict; page and chaos button follow |
 
 ## Running locally
 
@@ -51,10 +53,22 @@ docker compose up -d                      # Postgres (one schema per service), K
 ./gradlew :ledger-service:bootRun         # :8080
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
-./gradlew :control:bootRun                # :8083, invites and the run queue (needs the ledger to admit runs)
+./gradlew :control:bootRun                # :8083, invites, the run queue and orchestration (needs the other three)
 ```
 
-A run by hand, until the control service exists:
+A run through control, once an invite exists (see below):
+
+```bash
+SESSION=$(curl -s -X POST localhost:8083/api/sessions -H 'content-type: application/json' \
+  -d '{"token":"<invite token>"}' | jq -r .sessionId)
+RUN=$(curl -s -X POST localhost:8083/api/sessions/$SESSION/runs -H 'content-type: application/json' \
+  -d "{\"requestId\":\"$(uuidgen)\",\"tps\":100,\"durationSeconds\":10}" | jq -r .runId)
+curl -s localhost:8083/api/sessions/$SESSION/runs/$RUN          # QUEUED, CREATED, RUNNING, DRAINING, RECONCILED
+curl -s -X POST localhost:8083/api/sessions/$SESSION/runs/$RUN/stop # optional: stop the clients early
+curl -s localhost:8083/api/sessions/$SESSION/runs/$RUN/report   # the verdict and what it rests on
+```
+
+The same steps by hand, as control takes them:
 
 ```bash
 RUN=$(uuidgen)
@@ -122,9 +136,14 @@ key to it, no cookie is set. `POST /api/sessions/{sessionId}/runs {"requestId", 
 `requestId` and body returns the same run, a different body is 422. Over the invite's hourly quota,
 or with the queue full, the answer is 429. At most three runs hold a place at once, and a run that
 waits more than five minutes expires ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
-The API is described in `control/openapi.json`, checked against the running service. For now a run
-that leaves the queue stays `CREATED`: opening its accounts and driving the services is the next
-step.
+The API is described in `control/openapi.json`, checked against the running service.
+
+A run that leaves the queue gets 100 accounts in the ledger, its clients in the generator, a closed
+period and a drained bank, then both reconciliations. Its report says `BALANCED`, `BREAKS` or
+`INCOMPLETE` with the reasons; only `BALANCED` is green. Control never waits forever: a step that
+cannot finish ends the run, and a restart of control resumes every run where it stood. The bank's
+data of a run is deleted a day after it ended; control keeps the run and its report
+([ADR 0013](docs/adr/0013-orchestrating-a-run-and-the-verdict.md)).
 
 ## Scope and non-goals
 

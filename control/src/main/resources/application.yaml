@@ -23,11 +23,30 @@ control:
     queue-timeout: 5m
     tps-options: 100, 500, 1000
     duration-options: 10s, 20s, 30s
+    setup-timeout: 30s
+    running-grace: 60s
+    drain-stall-timeout: 60s
+    drain-timeout: 3m
+    accounts:
+      count: 100
+      opening-balance-cents: 1000000
+      blocked: 2
+      daily-limit-cents: 5000000
   queue:
     poll-interval: 1s
   ledger:
     base-url: http://localhost:8080
     readiness-timeout: 2s
+  gateway:
+    base-url: http://localhost:8081
+  generator:
+    base-url: http://localhost:8082
+    reconciliation-timeout: 30s
+  services:
+    request-timeout: 5s
+  cleanup:
+    interval: 1h
+    retention: 24h
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every error handler is added to every operation.

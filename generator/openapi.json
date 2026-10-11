@@ -1,6 +1,16 @@
 {
   "components" : {
     "schemas" : {
+      "ApiError" : {
+        "description" : "Body of an error answer.",
+        "properties" : {
+          "error" : {
+            "description" : "Names the case.",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "ClientReconciliationReport" : {
         "properties" : {
           "balanced" : {
@@ -310,7 +320,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "runId" ],
+        "required" : [ "accountCount", "durationSeconds", "runId", "tps" ],
         "type" : "object"
       },
       "StatementTotals" : {
@@ -391,7 +401,27 @@
                 }
               }
             },
-            "description" : "Created"
+            "description" : "Started"
+          },
+          "400" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Invalid request, or the run alone exceeds the journal cap"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Already running, or journals in memory leave no room"
           }
         },
         "tags" : [ "simulation-controller" ]
@@ -418,7 +448,17 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "The simulation's state and counts"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown run, or evicted after the retention"
           }
         },
         "tags" : [ "simulation-controller" ]
@@ -445,7 +485,47 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "The report"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown run, or its journal released"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The run is still active, or the period is not closed"
+          },
+          "502" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The gateway's statement is inconsistent or unreadable"
+          },
+          "503" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The gateway did not answer"
           }
         },
         "tags" : [ "simulation-controller" ]
@@ -472,7 +552,27 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Already ended"
+          },
+          "202" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SimulationStatus"
+                }
+              }
+            },
+            "description" : "Stopping; poll the status"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown run"
           }
         },
         "tags" : [ "simulation-controller" ]

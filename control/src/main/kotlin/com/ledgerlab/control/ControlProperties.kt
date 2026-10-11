@@ -4,18 +4,41 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 
 @ConfigurationProperties("control")
-data class ControlProperties(val runs: Runs, val queue: Queue, val ledger: Ledger) {
+data class ControlProperties(
+    val runs: Runs,
+    val queue: Queue,
+    val ledger: Ledger,
+    val gateway: Gateway,
+    val generator: Generator,
+    val services: Services,
+    val cleanup: Cleanup,
+) {
     data class Runs(
         val maxActive: Int,
         val maxQueued: Int,
         val queueTimeout: Duration,
         val tpsOptions: List<Int>,
         val durationOptions: List<Duration>,
+        val setupTimeout: Duration,
+        val runningGrace: Duration,
+        val drainStallTimeout: Duration,
+        val drainTimeout: Duration,
+        val accounts: Accounts,
     ) {
         val durationSecondsOptions: List<Int> get() = durationOptions.map { it.toSeconds().toInt() }
     }
 
+    data class Accounts(val count: Int, val openingBalanceCents: Long, val blocked: Int, val dailyLimitCents: Long)
+
     data class Queue(val pollInterval: Duration)
 
     data class Ledger(val baseUrl: String, val readinessTimeout: Duration)
+
+    data class Gateway(val baseUrl: String)
+
+    data class Generator(val baseUrl: String, val reconciliationTimeout: Duration)
+
+    data class Services(val requestTimeout: Duration)
+
+    data class Cleanup(val interval: Duration, val retention: Duration)
 }

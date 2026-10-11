@@ -2,6 +2,9 @@ package com.ledgerlab.generator
 
 import com.ledgerlab.generator.bank.RejectReason
 import io.micrometer.core.instrument.MeterRegistry
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.responses.ApiResponse
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMax
 import jakarta.validation.constraints.DecimalMin
@@ -27,8 +30,11 @@ import java.util.concurrent.ConcurrentHashMap
 
 data class StartSimulationRequest(
     @field:NotNull val runId: UUID?,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:Min(1) @field:Max(MAX_TPS) val tps: Int,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:Min(1) @field:Max(MAX_DURATION_SECONDS) val durationSeconds: Int,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:Min(MIN_ACCOUNTS) val accountCount: Int,
     @field:Min(0) val blockedAccounts: Int = 0,
     @field:Min(0) val hotAccounts: Int = 5,
@@ -65,6 +71,9 @@ class RunStillActiveException : ConflictException(GeneratorErrors.RUN_STILL_ACTI
 
 class NotFoundException(message: String) : RuntimeException(message)
 
+@Schema(description = "Body of an error answer.")
+data class ApiError(@field:Schema(description = "Names the case.") val error: String)
+
 @RestController
 @RequestMapping("/internal/simulations")
 class SimulationController(
@@ -74,6 +83,9 @@ class SimulationController(
 ) {
     private val simulations = ConcurrentHashMap<UUID, Simulation>()
 
+    @ApiResponse(responseCode = "201", description = "Started")
+    @ApiResponse(responseCode = "400", description = "Invalid request, or the run alone exceeds the journal cap", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "Already running, or journals in memory leave no room", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     fun start(@Valid @RequestBody request: StartSimulationRequest): SimulationStatus {
@@ -122,6 +134,8 @@ class SimulationController(
         }
     }
 
+    @ApiResponse(responseCode = "200", description = "The simulation's state and counts")
+    @ApiResponse(responseCode = "404", description = "Unknown run, or evicted after the retention", content = [Content(schema = Schema(implementation = ApiError::class))])
     @GetMapping("/{runId}")
     fun status(@PathVariable runId: UUID): SimulationStatus = simulationOf(runId).status()
 
@@ -149,6 +163,11 @@ class SimulationController(
         return journalOf(simulation).page(JournalFilter(outcome, resent, rejectReason), after, pageSize, complete)
     }
 
+    @ApiResponse(responseCode = "200", description = "The report")
+    @ApiResponse(responseCode = "404", description = "Unknown run, or its journal released", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "The run is still active, or the period is not closed", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "502", description = "The gateway's statement is inconsistent or unreadable", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "503", description = "The gateway did not answer", content = [Content(schema = Schema(implementation = ApiError::class))])
     @GetMapping("/{runId}/reconciliation")
     fun reconciliation(@PathVariable runId: UUID): ClientReconciliationReport {
         val simulation = simulationOf(runId)
@@ -186,6 +205,9 @@ class SimulationController(
      * Starts a graceful stop. 202 while the run is still stopping: poll the status until it is no
      * longer active. 200 if the run has already ended, on its own or by an earlier stop.
      */
+    @ApiResponse(responseCode = "200", description = "Already ended")
+    @ApiResponse(responseCode = "202", description = "Stopping; poll the status")
+    @ApiResponse(responseCode = "404", description = "Unknown run", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping("/{runId}/stop")
     fun stop(@PathVariable runId: UUID): ResponseEntity<SimulationStatus> {
         val simulation = simulationOf(runId)
@@ -203,21 +225,21 @@ class SimulationController(
 
     @ExceptionHandler(ConflictException::class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    fun conflict(e: ConflictException): Map<String, String> = mapOf("error" to (e.message ?: "conflict"))
+    fun conflict(e: ConflictException) = ApiError(e.message ?: "conflict")
 
     @ExceptionHandler(GatewayUnavailableException::class)
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
-    fun gatewayUnavailable(e: GatewayUnavailableException): Map<String, String> = mapOf("error" to (e.message ?: "gateway unavailable"))
+    fun gatewayUnavailable(e: GatewayUnavailableException) = ApiError(e.message ?: "gateway unavailable")
 
     @ExceptionHandler(BadGatewayAnswerException::class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY)
-    fun gatewayAnswer(e: BadGatewayAnswerException): Map<String, String> = mapOf("error" to (e.message ?: "bad gateway"))
+    fun gatewayAnswer(e: BadGatewayAnswerException) = ApiError(e.message ?: "bad gateway")
 
     @ExceptionHandler(NotFoundException::class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    fun notFound(e: NotFoundException): Map<String, String> = mapOf("error" to (e.message ?: "not found"))
+    fun notFound(e: NotFoundException) = ApiError(e.message ?: "not found")
 
     @ExceptionHandler(IllegalArgumentException::class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    fun invalid(e: IllegalArgumentException): Map<String, String> = mapOf("error" to (e.message ?: "bad request"))
+    fun invalid(e: IllegalArgumentException) = ApiError(e.message ?: "bad request")
 }

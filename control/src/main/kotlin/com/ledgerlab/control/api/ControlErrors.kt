@@ -12,6 +12,9 @@ object ControlErrors {
     const val RUN_QUEUE_FULL = "run queue full"
     const val REQUEST_ID_REQUIRED = "requestId is required"
     const val INVALID_REQUEST_BODY = "invalid request body"
+    const val RUN_NOT_STARTED = "run not started"
+    const val REPORT_NOT_READY = "report not ready"
+    const val CHAOS_NOT_AVAILABLE = "chaos not available"
 
     fun tpsNotAllowed(options: List<Int>) = "tps must be one of $options"
     fun durationNotAllowed(options: List<Int>) = "durationSeconds must be one of $options"
