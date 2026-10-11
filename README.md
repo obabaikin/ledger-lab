@@ -73,6 +73,8 @@ curl -s -X POST localhost:8082/internal/simulations/$RUN/stop # 202 while stoppi
 # 4. once the generator has ended, close the period: nothing new of the run commits after this
 curl -s -X POST localhost:8081/internal/runs/$RUN/close
 curl -s "localhost:8081/v1/runs/$RUN/statement?limit=1000"   # the bank's statement, page by page via next
+# 5. once the ledger has applied everything, match what the clients were told against the statement
+curl -s localhost:8082/internal/simulations/$RUN/reconciliation # breaks by kind, unknowns settled
 ```
 
 Client-facing API of the bank (what the generator calls). It is published as OpenAPI:
@@ -96,7 +98,9 @@ How a client reads the answer (full contract in [ADR 0006](docs/adr/0006-gateway
 
 A client without an answer reports "unknown", never "failed": "failed" invites a second payment
 under a new key. The statement of a closed period settles every unknown: listed means accepted,
-absent means never accepted ([ADR 0009](docs/adr/0009-closing-a-period-and-the-statement.md)). Only the control console will be exposed; gateway, ledger and generator are
+absent means never accepted ([ADR 0009](docs/adr/0009-closing-a-period-and-the-statement.md)).
+The generator does this matching by transfer id; any discrepancy fails the run and is listed by id
+([ADR 0010](docs/adr/0010-client-reconciliation.md)). Only the control console will be exposed; gateway, ledger and generator are
 cluster-internal.
 
 ## Scope and non-goals

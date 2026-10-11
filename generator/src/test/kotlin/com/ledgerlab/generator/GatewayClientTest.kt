@@ -1,5 +1,6 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.SubmitTransferRequest
 import com.ledgerlab.generator.bank.TransferStatus
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -104,5 +105,42 @@ class GatewayClientTest {
         }
 
         assertThat(unreadable()).isZero()
+    }
+
+    private fun statementPage(status: String, rejectReason: String?) =
+        """{"items":[{"transferId":"${UUID.randomUUID()}","fromAccount":1,"toAccount":2,"amountCents":100,""" +
+            """"status":"$status","rejectReason":${rejectReason?.let { "\"$it\"" }}}],"next":null}"""
+
+    @Test
+    fun `a statement line with a status this client does not know is read without it and counted`() {
+        FakeGateway(rawStatement = statementPage("SETTLED", null)).use { gateway ->
+            val line = client(gateway.url, maxAttempts = 1).statement(UUID.randomUUID(), after = null).items.single()
+
+            assertThat(line.status).isNull()
+            assertThat(unreadable()).isEqualTo(1.0)
+        }
+    }
+
+    @Test
+    fun `a statement line with a reject reason this client does not know keeps its status and is counted`() {
+        FakeGateway(rawStatement = statementPage(TransferStatus.REJECTED.name, "CARD_EXPIRED")).use { gateway ->
+            val line = client(gateway.url, maxAttempts = 1).statement(UUID.randomUUID(), after = null).items.single()
+
+            assertThat(line.status).isEqualTo(TransferStatus.REJECTED)
+            assertThat(line.rejectReason).isNull()
+            assertThat(unreadable()).isEqualTo(1.0)
+        }
+    }
+
+    @Test
+    fun `a statement page it can read in full is not counted as unreadable`(): Unit = runBlocking {
+        FakeGateway(rejectReason = RejectReason.BLOCKED_ACCOUNT).use { gateway ->
+            val client = client(gateway.url, maxAttempts = 1)
+            val transfer = transfer()
+            client.submit(transfer, wait = Duration.ofSeconds(1))
+
+            assertThat(client.statement(transfer.runId, after = null).items.single().rejectReason).isEqualTo(RejectReason.BLOCKED_ACCOUNT)
+            assertThat(unreadable()).isZero()
+        }
     }
 }

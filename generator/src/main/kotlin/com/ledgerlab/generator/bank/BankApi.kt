@@ -42,3 +42,18 @@ enum class RejectReason {
     INSUFFICIENT_FUNDS,
     DAILY_LIMIT_EXCEEDED,
 }
+
+data class Statement(
+    val items: List<StatementLine>,
+    val next: UUID?,
+)
+
+data class StatementLine(
+    val transferId: UUID,
+    val fromAccount: Int,
+    val toAccount: Int,
+    val amountCents: Long,
+    /** Null if the bank is newer than this client and sent a status it does not know (ADR 0010). */
+    val status: TransferStatus?,
+    val rejectReason: RejectReason?,
+)

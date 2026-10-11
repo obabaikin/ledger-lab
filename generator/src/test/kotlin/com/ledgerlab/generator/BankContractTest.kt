@@ -1,6 +1,8 @@
 package com.ledgerlab.generator
 
 import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.Statement
+import com.ledgerlab.generator.bank.StatementLine
 import com.ledgerlab.generator.bank.SubmitTransferRequest
 import com.ledgerlab.generator.bank.TransferResponse
 import com.ledgerlab.generator.bank.TransferStatus
@@ -32,8 +34,16 @@ class BankContractTest {
     }
 
     @Test
+    fun `the statement path and its paging parameters are in the spec`() {
+        val statement = checkNotNull(spec.get("paths").get(GatewayApi.STATEMENT_PATH)?.get("get")) { "no GET ${GatewayApi.STATEMENT_PATH} in the spec" }
+
+        assertThat(statement.get("parameters").values().map { it.get("name").asString() })
+            .contains(GatewayApi.AFTER_PARAM, GatewayApi.LIMIT_PARAM)
+    }
+
+    @Test
     fun `every field the generator sends or reads is in the spec`() {
-        listOf(SubmitTransferRequest::class, TransferResponse::class).forEach { type ->
+        listOf(SubmitTransferRequest::class, TransferResponse::class, Statement::class, StatementLine::class).forEach { type ->
             assertThat(schemaOf(type).get("properties").propertyNames()).`as`(type.simpleName).containsAll(fieldsOf(type))
         }
     }
@@ -45,10 +55,14 @@ class BankContractTest {
     }
 
     @Test
-    fun `statuses and reject reasons are the ones the spec lists`() {
-        val properties = schemaOf(TransferResponse::class).get("properties")
+    fun `statuses and reject reasons are the ones the spec lists, in answers and in the statement`() {
+        listOf(TransferResponse::class, StatementLine::class).forEach { type ->
+            val properties = schemaOf(type).get("properties")
 
-        assertThat(TransferStatus.entries.map { it.name }).containsExactlyInAnyOrderElementsOf(properties.get("status").get("enum").names())
-        assertThat(RejectReason.entries.map { it.name }).containsExactlyInAnyOrderElementsOf(properties.get("rejectReason").get("enum").names())
+            assertThat(TransferStatus.entries.map { it.name }).`as`(type.simpleName)
+                .containsExactlyInAnyOrderElementsOf(properties.get("status").get("enum").names())
+            assertThat(RejectReason.entries.map { it.name }).`as`(type.simpleName)
+                .containsExactlyInAnyOrderElementsOf(properties.get("rejectReason").get("enum").names())
+        }
     }
 }

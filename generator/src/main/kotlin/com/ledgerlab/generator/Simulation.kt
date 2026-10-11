@@ -117,13 +117,13 @@ class Simulation(
     /** Completed by a stop, so that duplicates still waiting for their moment are not sent. */
     private val stopSignal = Job()
 
-    val startedAt: Instant = Instant.now()
-    private val startNanos = System.nanoTime()
-    /** Released some time after the run ends, while the status stays; dropping the reference is what frees the memory. */
-    @Volatile var journal: Journal? = Journal(startNanos)
+    lateinit var startedAt: Instant
         private set
-    /** Journal entries this run may take; reserved against the generator-wide cap at start. */
-    val journalCapacity: Long = targetTps.toLong() * duration.toSeconds()
+    private var startNanos = 0L
+    /** Created at start; released some time after the run ends, while the status stays. Dropping the reference is what frees the memory. */
+    @Volatile var journal: Journal? = null
+        private set
+    val journalCapacity: Long = journalCapacity(targetTps, duration)
     @Volatile var finishedAt: Instant? = null
     @Volatile var state: SimulationState = SimulationState.RUNNING
         private set
@@ -138,19 +138,26 @@ class Simulation(
         require(duplicateShare == 0.0 || duplicateDelays.isNotEmpty()) { "duplicates need at least one delay" }
     }
 
-    private companion object {
+    companion object {
+        /** Journal entries a run may take; reserved against the generator-wide cap at start. */
+        fun journalCapacity(targetTps: Int, duration: Duration): Long = targetTps.toLong() * duration.toSeconds()
+
         /** How often the pacer checks whether more submissions are due. */
-        val PACER_TICK = Duration.ofMillis(1)
+        private val PACER_TICK = Duration.ofMillis(1)
         /** A send that ended without an answer, possibly after the request went out: it cannot count as failed. */
-        val CUT_SHORT = SubmissionResult(null, null, FIRST_ATTEMPT, SubmissionOutcome.UNKNOWN, Duration.ZERO)
+        private val CUT_SHORT = SubmissionResult(null, null, FIRST_ATTEMPT, SubmissionOutcome.UNKNOWN, Duration.ZERO)
         /** How often the pacer checks for the last open requests after the run time is over. */
-        val DRAIN_POLL = Duration.ofMillis(10)
-        val NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1)
+        private val DRAIN_POLL = Duration.ofMillis(10)
+        private val NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1)
         /** Same percentiles as the bank's services publish, so dashboards can put them side by side. */
-        val LATENCY_PERCENTILES = doubleArrayOf(0.5, 0.95, 0.99)
+        private val LATENCY_PERCENTILES = doubleArrayOf(0.5, 0.95, 0.99)
     }
 
+    /** The run's clock starts here, not at construction, so the first tick has no backlog to catch up. */
     fun start() {
+        startedAt = Instant.now()
+        startNanos = System.nanoTime()
+        journal = Journal(startNanos)
         pacer = scope.launch {
             val intervalNanos = NANOS_PER_SECOND / targetTps
             val endNanos = startNanos + duration.toNanos()
@@ -305,6 +312,8 @@ class Simulation(
             }
         }
     }
+
+    fun finishedBefore(instant: Instant): Boolean = !state.active && finishedAt?.isBefore(instant) == true
 
     fun releaseJournal() {
         check(!state.active) { "journal of an active run cannot be released" }

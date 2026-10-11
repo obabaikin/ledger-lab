@@ -134,6 +134,9 @@ class Journal(private val runStartNanos: Long) {
     @Synchronized
     fun get(transferId: UUID): JournalEntryView? = byId[transferId]?.view()
 
+    @Synchronized
+    fun entries(): List<JournalEntryView> = entries.map { it.view() }
+
     /** [complete]: no entry will be added any more, so reaching the end means there is no next page. */
     @Synchronized
     fun page(filter: JournalFilter, after: Long, limit: Int, complete: Boolean): JournalPage {

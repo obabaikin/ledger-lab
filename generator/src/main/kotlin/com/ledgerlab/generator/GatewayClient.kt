@@ -1,6 +1,8 @@
 package com.ledgerlab.generator
 
 import com.ledgerlab.generator.bank.RejectReason
+import com.ledgerlab.generator.bank.Statement
+import com.ledgerlab.generator.bank.StatementLine
 import com.ledgerlab.generator.bank.SubmitTransferRequest
 import com.ledgerlab.generator.bank.TransferResponse
 import com.ledgerlab.generator.bank.TransferStatus
@@ -9,6 +11,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.future.await
 import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
 import org.springframework.http.HttpStatusCode
 import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
@@ -25,6 +28,7 @@ import java.net.http.HttpConnectTimeoutException
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -32,7 +36,25 @@ import kotlin.coroutines.cancellation.CancellationException
 object GatewayApi {
     const val TRANSFERS_PATH = "/v1/transfers"
     const val WAIT_PARAM = "wait"
+    const val AFTER_PARAM = "after"
+    const val LIMIT_PARAM = "limit"
+    /** The largest page the statement serves (ADR 0009). */
+    const val STATEMENT_PAGE = 1_000
+
+    const val STATEMENT_PATH = "/v1/runs/{runId}/statement"
+    private const val RUN_ID_VARIABLE = "{runId}"
+
+    fun statementPath(runId: UUID) = STATEMENT_PATH.replace(RUN_ID_VARIABLE, runId.toString())
 }
+
+/** The gateway has not closed the run's period, so it has no statement yet. */
+class PeriodNotClosedException : ConflictException(GeneratorErrors.PERIOD_NOT_CLOSED)
+
+/** No answer or a 5xx: asking again may work. */
+class GatewayUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+/** An answer the client contract does not allow for: asking again will not help. */
+class GatewayAnswerException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /** Number of the first send of a transfer; retries and duplicates count on from it. */
 const val FIRST_ATTEMPT = 1
@@ -70,7 +92,7 @@ class GatewayClient(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val unreadable = Counter.builder(UNREADABLE_METRIC)
-        .description("2xx answers with a value this client does not know; the status code still decided the outcome")
+        .description("2xx answers with a value this client does not know; the status code still decided the outcome, and a statement line is not compared")
         .register(registry)
 
     private val http: HttpClient = HttpClient.newBuilder()
@@ -80,6 +102,44 @@ class GatewayClient(
     // A gateway one version ahead may send a status or reason this client does not know; the code still decides the outcome.
     private val responseReader: ObjectReader = objectMapper.readerFor(TransferResponse::class.java)
         .with(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+    private val statementReader: ObjectReader = objectMapper.readerFor(Statement::class.java)
+        .with(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+
+    /** One page of a closed period's statement, the largest the gateway serves; no retries, the caller decides. */
+    fun statement(runId: UUID, after: UUID?): Statement {
+        val query = "?${GatewayApi.LIMIT_PARAM}=${GatewayApi.STATEMENT_PAGE}" + (after?.let { "&${GatewayApi.AFTER_PARAM}=$it" } ?: "")
+        val request = HttpRequest.newBuilder(URI.create(props.gatewayUrl + GatewayApi.statementPath(runId) + query))
+            .timeout(props.requestTimeout)
+            .GET()
+            .build()
+        val response = try {
+            http.send(request, HttpResponse.BodyHandlers.ofString())
+        } catch (e: IOException) {
+            throw GatewayUnavailableException("No answer from the gateway to the statement of run $runId", e)
+        }
+        val code = HttpStatusCode.valueOf(response.statusCode())
+        return when {
+            code.is2xxSuccessful -> readStatement(response.body())
+                ?: throw GatewayAnswerException("Unreadable statement page of run $runId")
+            code == HttpStatus.CONFLICT -> throw PeriodNotClosedException()
+            code.is5xxServerError -> throw GatewayUnavailableException("The gateway answered ${code.value()} to the statement of run $runId")
+            else -> throw GatewayAnswerException("The gateway answered ${code.value()} to the statement of run $runId")
+        }
+    }
+
+    private fun readStatement(body: String): Statement? {
+        val tree = runCatching { objectMapper.readTree(body) }.getOrNull()
+        val page = tree?.let { runCatching { statementReader.readValue<Statement?>(it) }.getOrNull() } ?: return null
+        val lines = tree.get(Statement::items.name).values()
+        val lost = page.items.zip(lines).count { (line, node) ->
+            line.status == null || (line.rejectReason == null && node.hasValue(StatementLine::rejectReason.name))
+        }
+        if (lost > 0) {
+            unreadable.increment()
+            log.warn("Statement page with {} lines this client cannot read in full: {}", lost, body)
+        }
+        return page
+    }
 
     suspend fun submit(
         transfer: PlannedTransfer,

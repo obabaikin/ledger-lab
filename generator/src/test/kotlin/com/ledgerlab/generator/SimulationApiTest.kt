@@ -131,6 +131,14 @@ class SimulationApiTest {
         assertThat(noRun.body!!["error"] as String).contains("No simulation")
         assertThat(noTransfer.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
         assertThat(noTransfer.body!!["error"] as String).contains("No transfer")
+        for (path in listOf("", "/reconciliation")) {
+            val unknown = http.getForEntity("/internal/simulations/${UUID.randomUUID()}$path", Map::class.java)
+            assertThat(unknown.statusCode).`as`(path).isEqualTo(HttpStatus.NOT_FOUND)
+            assertThat(unknown.body!!["error"] as String).`as`(path).contains("No simulation")
+        }
+        val unknownStop = http.postForEntity("/internal/simulations/${UUID.randomUUID()}/stop", null, Map::class.java)
+        assertThat(unknownStop.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
+        assertThat(unknownStop.body!!["error"] as String).contains("No simulation")
 
         for (query in listOf("limit=0", "limit=1001", "after=-1", "outcome=NOPE")) {
             assertThat(http.getForEntity("/internal/simulations/$runId/transfers?$query", String::class.java).statusCode)
@@ -145,5 +153,17 @@ class SimulationApiTest {
             assertThat(http.postForEntity("/internal/simulations", request, String::class.java).statusCode)
                 .isEqualTo(HttpStatus.BAD_REQUEST)
         }
+    }
+
+    @Test
+    fun `reconciling a run that is still sending answers 409 run still active`() {
+        val runId = UUID.randomUUID()
+        http.postForEntity("/internal/simulations", mapOf("runId" to runId, "tps" to 10, "durationSeconds" to 10, "accountCount" to 10), Map::class.java)
+
+        val early = http.getForEntity("/internal/simulations/$runId/reconciliation", Map::class.java)
+
+        assertThat(early.statusCode).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(early.body!!["error"]).isEqualTo(GeneratorErrors.RUN_STILL_ACTIVE)
+        http.postForEntity("/internal/simulations/$runId/stop", null, Map::class.java)
     }
 }
