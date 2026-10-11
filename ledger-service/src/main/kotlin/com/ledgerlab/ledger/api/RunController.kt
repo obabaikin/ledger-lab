@@ -29,7 +29,6 @@ data class OpenAccountsRequest(
     @field:PositiveOrZero val dailyLimitCents: Long,
 )
 
-/** Service-to-service API used by the control service; not exposed outside the cluster. */
 @RestController
 @RequestMapping("/internal/runs/{runId}")
 class RunController(private val runs: RunService) {

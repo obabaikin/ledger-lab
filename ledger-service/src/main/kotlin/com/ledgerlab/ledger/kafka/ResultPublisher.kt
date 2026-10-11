@@ -10,7 +10,6 @@ import tools.jackson.databind.ObjectMapper
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
-/** Drains the result outbox on a timer; keeps going while batches come back full. */
 @Component
 class ResultPublisher(private val batch: ResultBatchPublisher, private val results: ResultsProperties) {
 

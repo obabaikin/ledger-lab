@@ -1,7 +1,6 @@
 package com.ledgerlab.common
 
 object Observability {
-    /** MDC key that every service puts on log lines belonging to a run. */
     const val MDC_RUN_ID = "runId"
 
     /** Percentiles published for every latency timer, so dashboards can compare services. */

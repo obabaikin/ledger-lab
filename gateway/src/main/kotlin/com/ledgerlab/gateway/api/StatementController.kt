@@ -18,12 +18,10 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
-/** Client-facing statement of a run: every transfer the bank accepted in the closed period (ADR 0009). */
 @RestController
 @RequestMapping("/{version}/runs/{runId}/statement")
 class StatementController(private val periods: PeriodService) {
 
-    /** Pages in (acceptedAt, transferId) order; `next` is the `after` of the next page, null on the last one. */
     @Operation(summary = "A page of the closed period's statement")
     @ApiResponse(responseCode = "200", description = "The page")
     @ApiResponse(responseCode = "400", description = "Invalid limit, or `after` is not a transfer of the run", content = [Content(schema = Schema(implementation = ApiError::class))])

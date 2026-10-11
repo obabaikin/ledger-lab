@@ -41,7 +41,7 @@ class RunService(
     private val reconciliation: ReconciliationRepository,
 ) {
 
-    /** Creates the account set of a run. Account numbers start at 1; the last [AccountSetup.blockedAccounts] are blocked. */
+    /** Account numbers start at 1; the last [AccountSetup.blockedAccounts] are blocked. */
     @Transactional
     fun openAccounts(runId: UUID, setup: AccountSetup): List<Account> {
         val firstBlocked = setup.accountCount - setup.blockedAccounts + 1

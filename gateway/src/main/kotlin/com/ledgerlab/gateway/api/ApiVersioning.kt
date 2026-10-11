@@ -14,7 +14,6 @@ class ApiVersioning : WebMvcConfigurer {
     override fun configureApiVersioning(configurer: ApiVersionConfigurer) {
         configurer
             .usePathSegment(0) { path -> path.value().startsWith("/v") }
-            // unversioned paths (internal, actuator) must not be rejected for lacking a version
             .setVersionRequired(false)
     }
 }

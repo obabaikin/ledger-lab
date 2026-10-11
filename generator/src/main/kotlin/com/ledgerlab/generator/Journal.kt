@@ -5,15 +5,12 @@ import com.ledgerlab.generator.bank.TransferStatus
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/** How one send of a transfer ended, as the client saw it. */
 enum class SendResult {
-    /** The gateway answered; the code is in httpStatus. */
     RESPONSE,
     /** No connection: the request never left. */
     NOT_CONNECTED,
     /** Timeout or broken connection after the request may have left. */
     NO_RESPONSE,
-    /** Cancelled by a stop while waiting for the answer. */
     CANCELLED,
 }
 

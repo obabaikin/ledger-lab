@@ -32,7 +32,6 @@ import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 import kotlin.coroutines.cancellation.CancellationException
 
-/** Everything the generator knows about the gateway's public API. */
 object GatewayApi {
     const val TRANSFERS_PATH = "/v1/transfers"
     const val WAIT_PARAM = "wait"
@@ -52,20 +51,15 @@ class GatewayUnavailableException(message: String, cause: Throwable? = null) : R
 
 class BadGatewayAnswerException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-/** Number of the first send of a transfer; retries and duplicates count on from it. */
 const val FIRST_ATTEMPT = 1
 
-/** How a client reads the gateway's answers (client contract, ADR 0006). */
+/** Outcomes of the client contract, ADR 0006. */
 enum class SubmissionOutcome {
-    /** 2xx: the gateway has the transfer. */
     ACKNOWLEDGED,
-    /** 4xx, or no attempt reached the gateway: the transfer was not accepted. */
     FAILED,
-    /** 5xx or no answer on some attempt and no answer since: the transfer may have been accepted. */
     UNKNOWN,
 }
 
-/** What the generator learns from one submission, after retries. */
 data class SubmissionResult(
     /** Null when the answer could not be read, e.g. a status this client does not know yet. */
     val status: TransferStatus?,
@@ -75,11 +69,7 @@ data class SubmissionResult(
     val latency: Duration,
 )
 
-/**
- * The only thing the generator knows about the bank: the public API of the gateway.
- * Retries reuse the same transfer id, which is the idempotency key, so a retry after a
- * timeout can never create a second transfer.
- */
+/** Retries reuse the transfer id, the idempotency key, so a retry after a timeout cannot create a second transfer. */
 @Component
 class GatewayClient(
     private val props: GeneratorProperties,
@@ -203,7 +193,6 @@ class GatewayClient(
         }
     }
 
-    /** Null when the body cannot be read; a 2xx that cannot be read in full is logged and counted. */
     private fun read(body: String, acknowledged: Boolean): TransferResponse? {
         val tree = runCatching { objectMapper.readTree(body) }.getOrNull()
         val response = tree?.let { runCatching { responseReader.readValue<TransferResponse>(it) }.getOrNull() }
@@ -226,7 +215,6 @@ class GatewayClient(
     companion object {
         const val UNREADABLE_METRIC = "generator.gateway.unreadable"
 
-        /** Each pause is the base times a random factor in [JITTER_MIN, JITTER_MAX) (ADR 0006). */
         private const val JITTER_MIN = 0.5
         private const val JITTER_MAX = 1.5
     }

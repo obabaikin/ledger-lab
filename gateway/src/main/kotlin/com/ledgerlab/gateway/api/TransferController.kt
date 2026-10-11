@@ -65,7 +65,6 @@ data class TransferResponse(
     val resultedAt: Instant?,
 )
 
-/** Public API of the bank: this is what clients (and the load generator) call. */
 @RestController
 @RequestMapping("/{version}/transfers")
 class TransferController(
@@ -79,11 +78,6 @@ class TransferController(
         .description("accepted transfers whose result could not be read while the client waited")
         .register(registry)
 
-    /**
-     * Returns 202 as soon as the transfer is durably accepted. With `wait`, the request stays
-     * open until the ledger's result arrives (200) or the wait expires (202 with current state).
-     * Once the transfer is committed the answer is 2xx, never 5xx (client contract, ADR 0006).
-     */
     @Operation(summary = "Submit a transfer")
     @ApiResponse(responseCode = "200", description = "Final status")
     @ApiResponse(responseCode = "202", description = "Accepted, not final yet; Retry-After says when to ask again")

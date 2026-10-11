@@ -18,11 +18,7 @@ class PeriodService(
     private val props: GatewayProperties,
 ) {
 
-    /**
-     * Waits for transfers of the run still being inserted, then closes the period: once this
-     * returns, no new transfer of the run can commit. Idempotent. Called by the control service
-     * when the client is done; an unknown run simply gets a closed, empty period.
-     */
+    /** Waits for inserts in flight; once this returns, no new transfer of the run can commit (ADR 0009). */
     @Transactional
     fun close(runId: UUID): RunPeriod {
         periods.find(runId)?.let { return it }

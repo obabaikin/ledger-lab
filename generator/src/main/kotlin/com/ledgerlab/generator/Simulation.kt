@@ -74,7 +74,6 @@ class Simulation(
     /** Share of submissions that wait for the ledger's result, to measure end-to-end latency. */
     private val waitShare: Double,
     private val waitTimeout: Duration,
-    /** How long a stop waits for open requests before cancelling them. */
     val stopGrace: Duration,
     private val client: GatewayClient,
     maxInFlight: Int,
@@ -141,11 +140,9 @@ class Simulation(
     companion object {
         fun journalCapacity(targetTps: Int, duration: Duration): Long = targetTps.toLong() * duration.toSeconds()
 
-        /** How often the pacer checks whether more submissions are due. */
         private val PACER_TICK = Duration.ofMillis(1)
         /** A send that ended without an answer, possibly after the request went out: it cannot count as failed. */
         private val CUT_SHORT = SubmissionResult(null, null, FIRST_ATTEMPT, SubmissionOutcome.UNKNOWN, Duration.ZERO)
-        /** How often the pacer checks for the last open requests after the run time is over. */
         private val DRAIN_POLL = Duration.ofMillis(10)
         private val NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1)
         /** Same percentiles as the bank's services publish, so dashboards can put them side by side. */

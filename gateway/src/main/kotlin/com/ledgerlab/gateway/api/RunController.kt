@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
-/** Service-to-service API used by the control service; not exposed outside the cluster. */
 @RestController
 @RequestMapping("/internal/runs/{runId}")
 class RunController(private val service: TransferService, private val periods: PeriodService) {
@@ -25,7 +24,6 @@ class RunController(private val service: TransferService, private val periods: P
     @GetMapping("/summary")
     fun summary(@PathVariable runId: UUID): RunSummary = service.summarize(runId)
 
-    /** Closes the run's period once its client is done (ADR 0009). 503 if inserts in flight outlast the lock timeout; retrying is safe. */
     @PostMapping("/close")
     fun close(@PathVariable runId: UUID): RunPeriod = periods.close(runId)
 

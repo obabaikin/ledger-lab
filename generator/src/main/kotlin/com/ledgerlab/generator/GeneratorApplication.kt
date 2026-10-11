@@ -25,9 +25,7 @@ data class GeneratorProperties(
     val maxAttempts: Int,
     /** Pause before the second attempt; it doubles for each further one, with jitter. */
     val retryBackoff: Duration,
-    /** Back-pressure: how many requests may be open at once before the pacer stops launching. */
     val maxInFlight: Int,
-    /** How long a finished simulation stays available through the API. */
     val retention: Duration,
     val retentionSweepInterval: Duration,
     val journal: JournalProperties,
@@ -35,7 +33,6 @@ data class GeneratorProperties(
 )
 
 data class ProfileProperties(
-    /** Share of transfers the client sends a second time with the same id and body. */
     val duplicateShare: Double,
     /** Delay of a duplicate after the first send starts, picked from this list; it may overlap that send. */
     val duplicateDelays: List<Duration>,

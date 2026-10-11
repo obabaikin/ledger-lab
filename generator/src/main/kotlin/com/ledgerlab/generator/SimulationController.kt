@@ -65,7 +65,6 @@ class RunStillActiveException : ConflictException(GeneratorErrors.RUN_STILL_ACTI
 
 class NotFoundException(message: String) : RuntimeException(message)
 
-/** Service-to-service API used by the control service to drive a run. */
 @RestController
 @RequestMapping("/internal/simulations")
 class SimulationController(

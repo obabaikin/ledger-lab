@@ -47,11 +47,7 @@ class TransferService(
         .publishPercentiles(*LATENCY_PERCENTILES)
         .register(registry)
 
-    /**
-     * Accepting a transfer is one committed row; the response goes out before Kafka is involved.
-     * A repeated submission with the same id returns the current state instead of a second transfer,
-     * also after the run's period is closed; a new id is then refused (ADR 0009).
-     */
+    /** One committed row; the response goes out before Kafka is involved. */
     @Transactional
     fun accept(request: TransferRequest): Transfer {
         periods.lockShared(request.runId)

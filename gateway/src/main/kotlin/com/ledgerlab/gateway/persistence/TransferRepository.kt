@@ -15,7 +15,6 @@ import java.util.UUID
 @Repository
 class TransferRepository(private val jdbc: JdbcClient) {
 
-    /** Returns the new row, or null when a transfer with this id already exists (the client's idempotency key). */
     fun insertIfAbsent(transferId: UUID, runId: UUID, fromAccount: Int, toAccount: Int, amountCents: Long): Transfer? =
         jdbc.sql(
             """
@@ -145,7 +144,6 @@ class TransferRepository(private val jdbc: JdbcClient) {
             .query(Boolean::class.java)
             .single()
 
-    /** Keyset page in (accepted_at, transfer_id) order, starting after the transfer [after]. */
     fun statementPage(runId: UUID, after: UUID?, limit: Int): List<StatementLine> {
         val afterClause = if (after == null) "" else
             "AND (accepted_at, transfer_id) > (SELECT accepted_at, transfer_id FROM transfers WHERE transfer_id = :after)"

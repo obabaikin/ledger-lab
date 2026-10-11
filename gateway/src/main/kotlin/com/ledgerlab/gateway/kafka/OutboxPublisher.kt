@@ -11,7 +11,6 @@ import tools.jackson.databind.ObjectMapper
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
-/** Drains the outbox on a timer; keeps going while batches come back full. */
 @Component
 class OutboxPublisher(private val batch: OutboxBatchPublisher, private val props: GatewayProperties) {
 
