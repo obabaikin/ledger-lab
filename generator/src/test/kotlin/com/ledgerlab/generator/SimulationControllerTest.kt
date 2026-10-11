@@ -6,6 +6,10 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
+import org.springframework.http.HttpStatus
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.time.Duration
 import java.time.Instant
@@ -197,6 +201,23 @@ class SimulationControllerTest {
             assertThatThrownBy { controller.reconciliation(runId) }
                 .isInstanceOf(GatewayAnswerException::class.java)
                 .hasMessageContaining("pages back")
+        }
+    }
+
+    @Test
+    fun `over HTTP an unavailable gateway answers 503 and a bad answer 502`() {
+        for ((gateway, expected) in listOf(
+            FakeGateway(statementFailure = { HttpStatus.SERVICE_UNAVAILABLE.value() }) to HttpStatus.SERVICE_UNAVAILABLE,
+            FakeGateway(rawStatement = "not json") to HttpStatus.BAD_GATEWAY,
+        )) {
+            gateway.use {
+                val controller = controller(gateway)
+                val runId = controller.finished()
+
+                MockMvcBuilders.standaloneSetup(controller).build()
+                    .perform(MockMvcRequestBuilders.get("/internal/simulations/$runId/reconciliation"))
+                    .andExpect(MockMvcResultMatchers.status().`is`(expected.value()))
+            }
         }
     }
 }

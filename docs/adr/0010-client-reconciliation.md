@@ -22,8 +22,9 @@ line with the journal entry under the same id. It reads the statement through it
 gateway's published API, like any other call to the bank (ADR 0011). It only reads, so it can be
 called again at any time; each call recomputes the report.
 
-**Any discrepancy fails the run, and each one is listed by id.** The aim is not that discrepancies
-never happen, but that none is lost: each is either resolved or reported. Five kinds break a run:
+**Any discrepancy makes the report unbalanced, and each one is listed by id.** The aim is not that
+discrepancies never happen, but that none is lost: each is either resolved or reported. Five kinds
+count as breaks:
 
 | Break | Meaning |
 |---|---|
@@ -33,12 +34,14 @@ never happen, but that none is lost: each is either resolved or reported. Five k
 | `payloadMismatch` | amount or accounts differ |
 | `statusMismatch` | the client was told a final status (`POSTED`, `REJECTED`) the bank does not confirm, or another reject reason |
 
-A status the client knows only as not final (202), or could not read, is not compared: the bank
-has moved on since, or the client has nothing to compare. The same holds for a statement line
-whose status the client cannot read, as when the bank is newer than the client: it raises no
-`statusMismatch`, and it keeps the report from being final (below), so it is not lost silently.
-A final status cannot have moved, because the gateway answers with a final status only after
-storing it, so a `statusMismatch` is never a timing artefact and reconciling again does not clear it.
+A status the client knows only as not final (202), or could not read, is not compared: the bank has
+moved on since, or the client has nothing to compare. The same holds for a statement line whose
+status the client cannot read, as when the bank is newer than the client: it raises no
+`statusMismatch`, and it keeps the report from being final (below), so it is not lost silently. A
+reject reason is compared only when both sides could read it; with one side newer than the other,
+one of them may not. A final status cannot have moved, because the gateway answers with a final
+status only after storing it, so a `statusMismatch` is never a timing artefact and reconciling again
+does not clear it.
 
 **Unknown transfers are settled, not counted as breaks.** A transfer with no answer, including one
 still being sent when a stop ended the run, is listed under `unknownResolved.accepted` if the
@@ -47,22 +50,25 @@ statement has it and `unknownResolved.notAccepted` if not. That is the statement
 **Each category lists at most 1000 ids; its count is exact.** A run where the gateway was down
 could otherwise return tens of thousands of ids in one answer.
 
-**Order of calls is the caller's job.** The control service calls it once the generator has
-ended, the period is closed and the ledger has drained. Before the generator ends the answer is
-409 `run still active`; before the close the gateway's 409 is passed on as `period not closed`;
-for a run the generator does not know, or whose journal it has already released, 404.
-The generator does not check the drain. After the close the verdict cannot change, since no row
-can be added; until the drain ends only the status counts move, and `statementFinal` is false.
-The verdict is final only when `statementFinal` is true; a statement line whose status the client
-cannot read makes it false. The control service keeps the verdict only from such a call.
+**Order of calls is the caller's job.** The control service (not built yet) is to call it once the
+generator has ended, the period is closed and the ledger has drained. Before the generator ends the
+answer is 409 `run still active`; before the close the gateway's 409 is passed on as `period not
+closed`; for a run the generator does not know, or whose journal it has already released, 404. The
+generator does not check the drain. After the close the verdict cannot change, since no row can be
+added; until the drain ends only the status counts move, and `statementFinal` is false. The verdict
+is final only when `statementFinal` is true; a statement line whose status the client cannot read
+makes it false. The control service is to keep the verdict only from such a call.
 
+Reconciling is a pure computation: it records nothing. A failure on any page drops the whole call,
+and calling again starts from the first page, so there is nothing to undo.
 A gateway that does not answer, or answers 5xx, on any page gives 503, and calling again is safe.
 An answer the contract does not allow for gives 502, and so does a `next` the statement has
 already given, which would otherwise page forever. The generator does not retry pages itself.
 
 ## Consequences
 
-- A run is green only if the bank's books balance and every client answer matches the bank.
+- With the control service, a run is green only if the bank's books balance and every client answer
+  matches the bank.
 - Matching counts alone is not enough and is not done: one lost and one extra transfer would cancel out.
 - A duplicate send uses the same transfer id, so it is one journal entry and one statement line.
 - The journal stays in memory for `generator.journal.retention` after the run, which bounds how

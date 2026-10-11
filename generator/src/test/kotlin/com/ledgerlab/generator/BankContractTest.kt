@@ -8,6 +8,7 @@ import com.ledgerlab.generator.bank.TransferResponse
 import com.ledgerlab.generator.bank.TransferStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import tools.jackson.databind.JsonNode
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.io.File
@@ -34,11 +35,12 @@ class BankContractTest {
     }
 
     @Test
-    fun `the statement path and its paging parameters are in the spec`() {
+    fun `the statement path, its paging parameters and the not-closed answer are in the spec`() {
         val statement = checkNotNull(spec.get("paths").get(GatewayApi.STATEMENT_PATH)?.get("get")) { "no GET ${GatewayApi.STATEMENT_PATH} in the spec" }
 
         assertThat(statement.get("parameters").values().map { it.get("name").asString() })
             .contains(GatewayApi.AFTER_PARAM, GatewayApi.LIMIT_PARAM)
+        assertThat(statement.get("responses").propertyNames()).contains(HttpStatus.CONFLICT.value().toString())
     }
 
     @Test

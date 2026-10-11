@@ -133,6 +133,25 @@ class ClientReconciliationTest {
     }
 
     @Test
+    fun `a reject reason one side could not read is not compared, the status still is`() {
+        val unreadToClient = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.REJECTED, reason = null)
+        val unreadInStatement = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.REJECTED, RejectReason.BLOCKED_ACCOUNT)
+        val postedToClient = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.POSTED)
+
+        val report = reconcile(
+            listOf(unreadToClient, unreadInStatement, postedToClient),
+            listOf(
+                line(unreadToClient, TransferStatus.REJECTED, RejectReason.BLOCKED_ACCOUNT),
+                line(unreadInStatement, TransferStatus.REJECTED, reason = null),
+                line(postedToClient, TransferStatus.REJECTED, reason = null),
+            ),
+        )
+
+        assertThat(report.breaks.statusMismatch.transferIds).containsExactly(postedToClient.transferId)
+        assertThat(report.statementFinal).isTrue()
+    }
+
+    @Test
     fun `a status the client knows only as accepted, or could not read, is not compared`() {
         val waiting = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.ACCEPTED)
         val published = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.PUBLISHED)

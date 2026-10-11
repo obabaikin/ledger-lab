@@ -1,5 +1,6 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.StatementLine
 import com.ledgerlab.generator.bank.TransferStatus
 import java.util.EnumMap
@@ -74,6 +75,9 @@ private class IdCollector {
  */
 private val JournalOutcome.unsettled: Boolean get() = this == JournalOutcome.UNKNOWN || this == JournalOutcome.PENDING
 
+/** A side with no reason either has none or could not read it, as between versions; only two known reasons are compared. */
+private fun reasonsDiffer(client: RejectReason?, bank: RejectReason?): Boolean = client != null && bank != null && client != bank
+
 class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryView>) {
     private val entries = journal.associateBy { it.transferId }
     private val inStatement = HashSet<UUID>()
@@ -100,7 +104,7 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
             JournalOutcome.FAILED -> failedButInStatement.add(line.transferId)
             JournalOutcome.UNKNOWN, JournalOutcome.PENDING -> unknownAccepted.add(line.transferId)
             JournalOutcome.ACKNOWLEDGED -> if (entry.gatewayStatus?.isFinal == true && line.status != null &&
-                (entry.gatewayStatus != line.status || entry.rejectReason != line.rejectReason)
+                (entry.gatewayStatus != line.status || reasonsDiffer(entry.rejectReason, line.rejectReason))
             ) {
                 statusMismatch.add(line.transferId)
             }
