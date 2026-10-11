@@ -39,7 +39,7 @@ Micrometer / Prometheus / Grafana · Helm · k3s · Terraform (Contabo)
 | `ledger-service` | Double-entry ledger, Kafka consumer, reconciliation, internal API | done |
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
-| `control` | Operations console: runs, reconciliation, chaos button, UI | in progress: its models of the services' internal APIs, checked against their specs |
+| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota and run queue; its models of the services' internal APIs, checked against their specs |
 
 ## Running locally
 
@@ -51,7 +51,7 @@ docker compose up -d                      # Postgres (one schema per service), K
 ./gradlew :ledger-service:bootRun         # :8080
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
-./gradlew :control:bootRun                # :8083, in progress
+./gradlew :control:bootRun                # :8083, invites and the run queue (needs the ledger to admit runs)
 ```
 
 A run by hand, until the control service exists:
@@ -105,6 +105,24 @@ all of them.
 The generator does this matching by transfer id; any discrepancy makes its report unbalanced and is
 listed by id, up to 1000 per kind ([ADR 0010](docs/adr/0010-client-reconciliation.md)). Only the control console will be exposed; gateway, ledger and generator are
 cluster-internal.
+
+## Invites and the run queue
+
+The page is opened with an invite link, `/?ref=<token>`. Invites are created by hand in the
+database; there is no endpoint for them:
+
+```sql
+INSERT INTO control.invite_tokens (token, expires_at, quota)
+VALUES ('<random token>', now() + interval '30 days', 5);  -- runs per hour
+```
+
+`POST /api/sessions {"token": ...}` opens a session and counts the visit; the
+session id is the key to it, no cookie is set. `POST /api/sessions/{sessionId}/runs {"requestId", "tps", "durationSeconds"}`
+answers 202 with the run `QUEUED` and its place; a repeat with the same `requestId` returns the
+same run. Over the invite's hourly quota, or with the queue full, the answer is 429. At most three
+runs hold a place at once, and a run that waits more than five minutes expires
+([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)). The API is described in
+`control/openapi.json`, checked against the running service.
 
 ## Scope and non-goals
 

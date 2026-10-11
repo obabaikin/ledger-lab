@@ -22,6 +22,7 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    implementation(libs.springdoc.webmvc.api)
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
@@ -34,6 +35,9 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    inputs.files("openapi.json").withPropertyName("openapiSpec")
+    systemProperty("openapi.dir", projectDir.path)
+    systemProperty("openapi.actualDir", layout.buildDirectory.get().asFile.path)
     // Control knows the services only through their specs (ADR 0011), not through their classes.
     val specs = mapOf(
         "ledger.spec" to rootProject.file("ledger-service/openapi.json"),

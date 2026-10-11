@@ -1,0 +1,420 @@
+{
+  "components" : {
+    "schemas" : {
+      "ApiError" : {
+        "description" : "Body of an error answer.",
+        "properties" : {
+          "error" : {
+            "description" : "Names the case; the status code tells it apart.",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CreateSessionRequest" : {
+        "description" : "The invite from the link.",
+        "properties" : {
+          "token" : {
+            "description" : "Token of the invite link.",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "token" ],
+        "type" : "object"
+      },
+      "RunList" : {
+        "description" : "A session's runs, newest first.",
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RunView"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "RunView" : {
+        "description" : "A run as control sees it now.",
+        "properties" : {
+          "admittedAt" : {
+            "description" : "When the run left the queue; null while queued or if it expired.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "durationSeconds" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "finishedAt" : {
+            "description" : "When the run reached a final state; null before.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "position" : {
+            "description" : "Place in the queue, from 1; only while queued.",
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "state" : {
+            "enum" : [ "QUEUED", "CREATED", "RUNNING", "DRAINING", "RECONCILED", "FAILED", "EXPIRED" ],
+            "type" : "string"
+          },
+          "tps" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "SessionCreated" : {
+        "description" : "A new session; its id is the key to it.",
+        "properties" : {
+          "sessionId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "SessionView" : {
+        "description" : "What a session may do now.",
+        "properties" : {
+          "durationOptions" : {
+            "description" : "Allowed run durations, seconds.",
+            "items" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : "array"
+          },
+          "inviteValid" : {
+            "description" : "False once the invite expired or was switched off; runs can then only be read.",
+            "type" : "boolean"
+          },
+          "runsLastHour" : {
+            "description" : "Runs started with the invite in the last hour, from any session.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "runsPerHour" : {
+            "description" : "Runs the invite may start in any hour.",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sessionId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "tpsOptions" : {
+            "description" : "Allowed transfers per second.",
+            "items" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "StartRunRequest" : {
+        "description" : "A run to start.",
+        "properties" : {
+          "durationSeconds" : {
+            "description" : "Seconds, one of the session's durationOptions.",
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "requestId" : {
+            "description" : "Idempotency key within the session: a repeat with the same body gets the same run.",
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "tps" : {
+            "description" : "Transfers per second, one of the session's tpsOptions.",
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          }
+        },
+        "required" : [ "durationSeconds", "requestId", "tps" ],
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "description" : "Invite sessions and the run queue, for the control page.",
+    "title" : "Ledger Lab control API",
+    "version" : "1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/api/sessions" : {
+      "post" : {
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SessionCreated"
+                }
+              }
+            },
+            "description" : "Session opened"
+          },
+          "400" : {
+            "description" : "Invalid body"
+          },
+          "403" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown, inactive or expired invite"
+          }
+        },
+        "summary" : "Open a session with an invite",
+        "tags" : [ "session-controller" ]
+      }
+    },
+    "/api/sessions/{sessionId}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SessionView"
+                }
+              }
+            },
+            "description" : "The session"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session"
+          }
+        },
+        "summary" : "A session's quota and run options",
+        "tags" : [ "session-controller" ]
+      }
+    },
+    "/api/sessions/{sessionId}/runs" : {
+      "get" : {
+        "operationId" : "list",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunList"
+                }
+              }
+            },
+            "description" : "The runs, newest first"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session"
+          }
+        },
+        "summary" : "A session's runs",
+        "tags" : [ "run-controller" ]
+      },
+      "post" : {
+        "operationId" : "start",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StartRunRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description" : "A repeat of a run that is final"
+          },
+          "202" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description" : "Queued, or a repeat of a run that is not final"
+          },
+          "400" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Invalid body, tps or duration"
+          },
+          "403" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The invite expired or was switched off"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session"
+          },
+          "422" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The requestId was used with a different body"
+          },
+          "429" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Quota used up (Retry-After says when) or queue full"
+          }
+        },
+        "summary" : "Start a run: it joins the queue",
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/api/sessions/{sessionId}/runs/{runId}" : {
+      "get" : {
+        "operationId" : "get_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description" : "The run"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session, or no such run in it"
+          }
+        },
+        "summary" : "A run of the session",
+        "tags" : [ "run-controller" ]
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+control:
+  queue:
+    # Tests drive the queue themselves.
+    poll-interval: 1h
+  ledger:
+    readiness-timeout: 300ms

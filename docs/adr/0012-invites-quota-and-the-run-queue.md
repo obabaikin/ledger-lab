@@ -1,0 +1,56 @@
+# ADR 0012: Invites, quota and the run queue
+
+Status: accepted · Date: 2026-10-12
+
+## Context
+
+Control is the only service reachable from the internet, and the cluster is a single 8 GB node.
+Anyone holding a link must be able to start a run, yet nobody may start enough runs to take the
+bank down. The author also wants to know which invite links were opened, without tracking people.
+
+## Decision
+
+**Entry by invite.** An invite is a random token in the link (`/?ref=<token>`), created by hand in
+the database with an expiry and a quota; there is no endpoint for it. `POST /api/sessions` with the
+token opens a session. Unknown, inactive and expired invites all get the same 403. The session id
+is the key to the session; it travels in the URL, not in a cookie, and a session sees only its own
+runs (another session's run is 404, like a run that does not exist).
+
+**Visits.** Every opening of a known link, valid or not, adds one to `invite_visits` (first seen,
+last seen, count). An unknown token leaves no row, so random tokens cannot fill the table. No IP
+address, user agent or cookie is stored.
+
+**Quota.** An invite may start `quota` runs in any hour, counted over all its sessions and in every
+state, expired runs included: the quota limits how often "start" is pressed. Over the quota the
+answer is 429 with `Retry-After`, the seconds until the oldest start leaves the hour.
+
+**Idempotent start.** The page sends a `requestId` with each start. A repeat with the same body in
+the same session returns the same run and costs no quota; a different body is 422.
+
+**The queue.** A start answers 202 at once with the run `QUEUED` and its place. At most
+`max-queued` runs wait; one more is refused with 429 and no `Retry-After`, because no honest value
+exists. At most `max-active` runs hold a place; a scheduler hands free places to the oldest queued
+runs, and only while the ledger's readiness probe answers 2xx (it is 503 until the ledger's consumer
+holds partitions, and a timeout or refused connection counts as not ready). A run that waits longer
+than `queue-timeout` becomes `EXPIRED`. The queue lives in the `runs` table, so it survives a
+restart of control, and waiting time is measured by the database clock from `created_at`.
+
+Starts and scheduler ticks take one transaction-scoped advisory lock, so counts and inserts never
+interleave: concurrent starts get exactly the free places of the queue and of the quota.
+
+## Considered and rejected
+
+- **A cookie for the session.** It would need a consent banner, and a link that carries the session
+  is easier to share inside the company that received it.
+- **A queue in memory.** Lost on every restart of control; the table costs one index.
+- **Only disabling the button against double clicks.** A retried request from the network would
+  still start a second run.
+- **Hashing the tokens.** A leaked database gives away the quota of a demo, nothing more; the
+  mapping of tokens to recipients is kept outside the repository.
+
+## Consequences
+
+- A run admitted from the queue stays `CREATED` until orchestration takes it further; runs, their
+  accounts and their cleanup after 24 hours are the next step.
+- An email scanner that fetches the link without running the page's script does not count as a
+  visit; one that runs it does.
