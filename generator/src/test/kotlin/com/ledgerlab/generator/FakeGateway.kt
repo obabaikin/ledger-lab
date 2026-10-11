@@ -40,6 +40,8 @@ class FakeGateway(
     private val statementFailure: (page: Int) -> Int? = { null },
     /** Served with 200 instead of the statement, as a broken gateway might. */
     private val rawStatement: String? = null,
+    /** Changes a statement page (numbered from 1) before it is served, as a broken gateway might. */
+    private val tamperStatement: (page: Int, Statement) -> Statement = { _, page -> page },
 ) : AutoCloseable {
     private val objectMapper = jacksonObjectMapper()
     private val server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
@@ -77,12 +79,13 @@ class FakeGateway(
             val after = exchange.requestURI.query?.split("&")
                 ?.firstOrNull { it.startsWith("${GatewayApi.AFTER_PARAM}=") }
                 ?.substringAfter("=")?.let(UUID::fromString)
-            val failure = statementFailure(statementRequests.incrementAndGet())
+            val pageNumber = statementRequests.incrementAndGet()
+            val failure = statementFailure(pageNumber)
             when {
                 failure != null -> respond(exchange, failure, """{"error":"failed"}""")
                 !periodClosed -> respond(exchange, HttpStatus.CONFLICT.value(), """{"error":"period not closed"}""")
                 rawStatement != null -> respond(exchange, HttpStatus.OK.value(), rawStatement)
-                else -> respond(exchange, HttpStatus.OK.value(), objectMapper.writeValueAsString(statement(runId, after)))
+                else -> respond(exchange, HttpStatus.OK.value(), objectMapper.writeValueAsString(tamperStatement(pageNumber, statement(runId, after))))
             }
         }
         server.start()
@@ -104,7 +107,7 @@ class FakeGateway(
         val from = after?.let { id -> lines.indexOfFirst { it.transferId == id } + 1 } ?: 0
         val page = lines.drop(from).take(statementPage)
         val next = if (from + page.size < lines.size) page.last().transferId else null
-        Statement(page, next)
+        Statement(lines.size.toLong(), page, next)
     }
 
     private fun respond(exchange: HttpExchange, code: Int, body: String) {

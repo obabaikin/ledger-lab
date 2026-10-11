@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import tools.jackson.module.kotlin.jacksonObjectMapper
@@ -108,7 +109,7 @@ class GatewayClientTest {
     }
 
     private fun statementPage(status: String, rejectReason: String?) =
-        """{"items":[{"transferId":"${UUID.randomUUID()}","fromAccount":1,"toAccount":2,"amountCents":100,""" +
+        """{"entryCount":1,"items":[{"transferId":"${UUID.randomUUID()}","fromAccount":1,"toAccount":2,"amountCents":100,""" +
             """"status":"$status","rejectReason":${rejectReason?.let { "\"$it\"" }}}],"next":null}"""
 
     @Test
@@ -129,6 +130,14 @@ class GatewayClientTest {
             assertThat(line.status).isEqualTo(TransferStatus.REJECTED)
             assertThat(line.rejectReason).isNull()
             assertThat(unreadable()).isEqualTo(1.0)
+        }
+    }
+
+    @Test
+    fun `a statement page without an entry count, as from a gateway older than this client, is a bad answer`() {
+        FakeGateway(rawStatement = """{"items":[],"next":null}""").use { gateway ->
+            assertThatThrownBy { client(gateway.url, maxAttempts = 1).statement(UUID.randomUUID(), after = null) }
+                .isInstanceOf(BadGatewayAnswerException::class.java)
         }
     }
 

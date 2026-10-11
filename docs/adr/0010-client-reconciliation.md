@@ -63,13 +63,17 @@ Reconciling is a pure computation: it records nothing. A failure on any page dro
 and calling again starts from the first page, so there is nothing to undo.
 A gateway that does not answer, or answers 5xx, on any page gives 503, and calling again is safe.
 An answer the contract does not allow for gives 502, and so does a `next` the statement has
-already given, which would otherwise page forever. The generator does not retry pages itself.
+already given, which would otherwise page forever. Before it reports, the generator checks that it
+read the whole statement (ADR 0009): a `transferId` listed twice, an `entryCount` that differs
+between pages, or a line count other than `entryCount` after the last page gives 502. The generator
+does not retry pages itself.
 
 ## Consequences
 
 - With the control service, a run is green only if the bank's books balance and every client answer
   matches the bank.
-- Matching counts alone is not enough and is not done: one lost and one extra transfer would cancel out.
+- Matching counts alone is not enough: one lost and one extra transfer would cancel out. The line
+  count only proves the statement was read in full; the matching is by id.
 - A duplicate send uses the same transfer id, so it is one journal entry and one statement line.
 - The journal stays in memory for `generator.journal.retention` after the run, which bounds how
   late the reconciliation can be called.

@@ -50,9 +50,18 @@ class RunPeriodRepository(private val jdbc: JdbcClient) {
             .optional()
             .orElse(null)
 
-    /** Stamped after the lock was taken: now() is the transaction start, before inserts in flight committed. */
+    /**
+     * Run after the lock was taken: now() is the transaction start, before inserts in flight committed,
+     * while this statement's snapshot already sees them.
+     */
     fun insertIfAbsent(runId: UUID): RunPeriod? =
-        jdbc.sql("INSERT INTO run_periods (run_id, closed_at) VALUES (:runId, clock_timestamp()) ON CONFLICT (run_id) DO NOTHING RETURNING *")
+        jdbc.sql(
+            """
+            INSERT INTO run_periods (run_id, closed_at, entry_count)
+            SELECT :runId, clock_timestamp(), count(*) FROM transfers WHERE run_id = :runId
+            ON CONFLICT (run_id) DO NOTHING RETURNING *
+            """,
+        )
             .param("runId", runId)
             .query { rs, _ -> rs.toRunPeriod() }
             .optional()
@@ -64,6 +73,7 @@ class RunPeriodRepository(private val jdbc: JdbcClient) {
     private fun java.sql.ResultSet.toRunPeriod() = RunPeriod(
         runId = getObject("run_id", UUID::class.java),
         closedAt = getObject("closed_at", Timestamp::class.java).toInstant(),
+        entryCount = getLong("entry_count"),
     )
 
     private companion object {

@@ -1,6 +1,5 @@
 package com.ledgerlab.gateway.api
 
-import com.ledgerlab.gateway.domain.RunPeriod
 import com.ledgerlab.gateway.domain.RunSummary
 import com.ledgerlab.gateway.service.PeriodService
 import com.ledgerlab.gateway.service.TransferService
@@ -15,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import java.time.Instant
 import java.util.UUID
 
 @RestController
@@ -25,7 +25,7 @@ class RunController(private val service: TransferService, private val periods: P
     fun summary(@PathVariable runId: UUID): RunSummary = service.summarize(runId)
 
     @PostMapping("/close")
-    fun close(@PathVariable runId: UUID): RunPeriod = periods.close(runId)
+    fun close(@PathVariable runId: UUID): ClosedPeriod = periods.close(runId).let { ClosedPeriod(it.runId, it.closedAt) }
 
     @DeleteMapping
     fun delete(@PathVariable runId: UUID): ResponseEntity<Void> =
@@ -35,3 +35,5 @@ class RunController(private val service: TransferService, private val periods: P
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
     fun lockTimeout(e: CannotAcquireLockException) = ApiError(GatewayErrors.CLOSE_LOCK_TIMEOUT)
 }
+
+data class ClosedPeriod(val runId: UUID, val closedAt: Instant)

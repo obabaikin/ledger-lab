@@ -57,6 +57,11 @@ class BankContractTest {
     }
 
     @Test
+    fun `the spec promises the statement's entry count on every page, since completeness rests on it`() {
+        assertThat(schemaOf(Statement::class).get("required").names()).contains(Statement::entryCount.name)
+    }
+
+    @Test
     fun `statuses and reject reasons are the ones the spec lists, in answers and in the statement`() {
         listOf(TransferResponse::class, StatementLine::class).forEach { type ->
             val properties = schemaOf(type).get("properties")

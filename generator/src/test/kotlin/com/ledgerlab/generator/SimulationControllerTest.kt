@@ -1,5 +1,7 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.Statement
+import com.ledgerlab.generator.bank.StatementLine
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -156,7 +158,7 @@ class SimulationControllerTest {
         val bodies = listOf(
             "null",
             "not json",
-            """{"runId":"${UUID.randomUUID()}","closedAt":"${Instant.now()}","items":[null],"next":null}""",
+            """{"runId":"${UUID.randomUUID()}","closedAt":"${Instant.now()}","entryCount":1,"items":[null],"next":null}""",
         )
         for (body in bodies) {
             FakeGateway(rawStatement = body).use { gateway ->
@@ -194,7 +196,7 @@ class SimulationControllerTest {
     @Test
     @Timeout(10)
     fun `a statement that pages back to a cursor it gave before is a bad answer, not an endless loop`() {
-        FakeGateway(rawStatement = """{"items":[],"next":"${UUID.randomUUID()}"}""").use { gateway ->
+        FakeGateway(rawStatement = """{"entryCount":0,"items":[],"next":"${UUID.randomUUID()}"}""").use { gateway ->
             val controller = controller(gateway)
             val runId = controller.finished()
 
@@ -202,6 +204,46 @@ class SimulationControllerTest {
                 .isInstanceOf(BadGatewayAnswerException::class.java)
                 .hasMessageContaining("pages back")
         }
+    }
+
+    private fun assertBadStatement(tamper: (page: Int, Statement) -> Statement, message: String) {
+        FakeGateway(statementPage = 7, tamperStatement = tamper).use { gateway ->
+            val controller = controller(gateway)
+            val runId = controller.finished()
+
+            assertThatThrownBy { controller.reconciliation(runId) }
+                .isInstanceOf(BadGatewayAnswerException::class.java)
+                .hasMessageContaining(message)
+        }
+    }
+
+    @Test
+    fun `a line repeated across a page boundary is a bad answer, also when it takes the place of a lost one`() {
+        var lastOfFirstPage: StatementLine? = null
+        val remember = { page: Int, statement: Statement ->
+            if (page == 1) lastOfFirstPage = statement.items.last()
+            statement
+        }
+
+        assertBadStatement({ page, statement ->
+            remember(page, statement)
+            if (page == 2) statement.copy(items = listOf(lastOfFirstPage!!) + statement.items) else statement
+        }, "twice")
+        assertBadStatement({ page, statement ->
+            remember(page, statement)
+            if (page == 2) statement.copy(items = listOf(lastOfFirstPage!!) + statement.items.drop(1)) else statement
+        }, "twice")
+    }
+
+    @Test
+    fun `an entry count that differs between pages is a bad answer`() {
+        assertBadStatement({ page, statement -> if (page == 2) statement.copy(entryCount = statement.entryCount + 1) else statement }, "between pages")
+    }
+
+    @Test
+    fun `fewer or more lines than the entry count is an incomplete statement`() {
+        assertBadStatement({ page, statement -> if (page == 2) statement.copy(items = statement.items.drop(1)) else statement }, "incomplete")
+        assertBadStatement({ _, statement -> statement.copy(entryCount = statement.entryCount - 1) }, "incomplete")
     }
 
     @Test

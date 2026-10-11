@@ -33,6 +33,6 @@ class PeriodService(
         require(after == null || transfers.belongsTo(after, runId)) { "after must be a transfer of run $runId" }
         val rows = transfers.statementPage(runId, after, limit + 1)
         val items = rows.take(limit)
-        return Statement(runId, period.closedAt, items, if (rows.size > limit) items.last().transferId else null)
+        return Statement(runId, period.closedAt, period.entryCount, items, if (rows.size > limit) items.last().transferId else null)
     }
 }

@@ -47,7 +47,7 @@ data class RunSummary(
     val pending: Long = accepted - posted - rejected
 }
 
-data class RunPeriod(val runId: UUID, val closedAt: Instant)
+data class RunPeriod(val runId: UUID, val closedAt: Instant, val entryCount: Long)
 
 @Schema(description = "A transfer the bank accepted in the closed period.")
 data class StatementLine(
@@ -68,6 +68,11 @@ data class Statement(
     val runId: UUID,
     @field:Schema(description = "When the period was closed; no transfer of the run is accepted after it.")
     val closedAt: Instant,
+    @field:Schema(
+        description = "Lines in the whole statement, any status; the same on every page.",
+        requiredMode = Schema.RequiredMode.REQUIRED,
+    )
+    val entryCount: Long,
     val items: List<StatementLine>,
     @field:Schema(description = "Pass as `after` for the next page; null on the last page.")
     val next: UUID?,

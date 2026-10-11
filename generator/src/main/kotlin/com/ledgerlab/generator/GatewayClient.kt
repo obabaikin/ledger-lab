@@ -116,12 +116,12 @@ class GatewayClient(
         val tree = runCatching { objectMapper.readTree(body) }.getOrNull()
         val page = tree?.let { runCatching { statementReader.readValue<Statement?>(it) }.getOrNull() } ?: return null
         val lines = tree.get(Statement::items.name).values()
-        val lost = page.items.zip(lines).count { (line, node) ->
+        val lost = page.items.zip(lines).filter { (line, node) ->
             line.status == null || (line.rejectReason == null && node.hasValue(StatementLine::rejectReason.name))
-        }
-        if (lost > 0) {
+        }.map { (line, _) -> line.transferId }
+        if (lost.isNotEmpty()) {
             unreadable.increment()
-            log.warn("Statement page with {} lines this client cannot read in full: {}", lost, body)
+            log.warn("Statement page with {} lines this client cannot read in full, the first: {}", lost.size, lost.take(LOGGED_IDS))
         }
         return page
     }
@@ -214,6 +214,7 @@ class GatewayClient(
 
     companion object {
         const val UNREADABLE_METRIC = "generator.gateway.unreadable"
+        private const val LOGGED_IDS = 10
 
         private const val JITTER_MIN = 0.5
         private const val JITTER_MAX = 1.5

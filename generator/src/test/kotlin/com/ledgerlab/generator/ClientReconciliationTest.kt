@@ -45,6 +45,21 @@ class ClientReconciliationTest {
     }
 
     @Test
+    fun `a line added again is refused and counted once`() {
+        val posted = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.POSTED, amountCents = 300)
+        val reconciliation = ClientReconciliation(runId, listOf(posted))
+
+        val first = reconciliation.add(line(posted))
+        val again = reconciliation.add(line(posted, amountCents = 999))
+
+        assertThat(first).isTrue()
+        assertThat(again).isFalse()
+        val report = reconciliation.report()
+        assertThat(report.statement).isEqualTo(StatementTotals(1, 300, mapOf(TransferStatus.POSTED to 1L)))
+        assertThat(report.breaks.payloadMismatch.count).isZero()
+    }
+
+    @Test
     fun `every acknowledged transfer found with the same payload and status is balanced`() {
         val posted = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.POSTED, amountCents = 300)
         val rejected = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.REJECTED, RejectReason.BLOCKED_ACCOUNT)

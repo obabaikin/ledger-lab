@@ -1,5 +1,7 @@
 package com.ledgerlab.gateway
 
+import com.ledgerlab.common.RejectReason
+import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.gateway.api.GatewayErrors
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
@@ -25,17 +27,23 @@ class StatementTest : IntegrationTest() {
     private fun statement(runId: UUID, query: String = ""): ResponseEntity<Map<*, *>> =
         http.getForEntity("/v1/runs/$runId/statement$query", Map::class.java)
 
-    private fun allItems(runId: UUID, limit: Int): List<List<Map<String, Any?>>> {
-        val pages = mutableListOf<List<Map<String, Any?>>>()
+    private fun allPages(runId: UUID, limit: Int): List<Map<*, *>> {
+        val pages = mutableListOf<Map<*, *>>()
         var after: Any? = null
         do {
             val page = statement(runId, "?limit=$limit" + (after?.let { "&after=$it" } ?: "")).body!!
-            @Suppress("UNCHECKED_CAST")
-            pages += page["items"] as List<Map<String, Any?>>
+            pages += page
             after = page["next"]
         } while (after != null)
         return pages
     }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun allItems(runId: UUID, limit: Int): List<List<Map<String, Any?>>> =
+        allPages(runId, limit).map { it["items"] as List<Map<String, Any?>> }
+
+    private fun entryCounts(runId: UUID, limit: Int): List<Long> =
+        allPages(runId, limit).map { (it["entryCount"] as Number).toLong() }
 
     @Test
     fun `the statement of a closed period lists every transfer in acceptance order, page by page`() {
@@ -55,6 +63,29 @@ class StatementTest : IntegrationTest() {
             .containsEntry("amountCents", (first["amountCents"] as Long).toInt())
             .containsKeys("status", "rejectReason", "acceptedAt", "resultedAt").doesNotContainKey("publishedAt")
         assertThat(statement(runId).body!!["closedAt"]).isEqualTo(closed.body!!["closedAt"])
+        assertThat(entryCounts(runId, limit = 2)).containsExactly(5L, 5L, 5L)
+    }
+
+    @Test
+    fun `the entry count counts rejected and unfinished lines alike`() {
+        val runId = UUID.randomUUID()
+        val rejected = body(runId = runId).also { submit(it) }
+        submit(body(runId = runId))
+        publishResult(runId, rejected["transferId"] as UUID, TransferOutcome.REJECTED, RejectReason.INSUFFICIENT_FUNDS)
+        await().atMost(Duration.ofSeconds(10)).until {
+            http.getForEntity("/v1/transfers/${rejected["transferId"]}", Map::class.java).body!!["status"] == "REJECTED"
+        }
+
+        close(runId)
+
+        assertThat(entryCounts(runId, limit = 100)).containsExactly(2L)
+    }
+
+    @Test
+    fun `the close answer carries no entry count, only the statement does`() {
+        val closed = close(UUID.randomUUID()).body!!
+
+        assertThat(closed.keys).containsExactlyInAnyOrder("runId", "closedAt")
     }
 
     @Test
@@ -82,6 +113,7 @@ class StatementTest : IntegrationTest() {
         val empty = statement(runId).body!!
         assertThat(empty["items"] as List<*>).isEmpty()
         assertThat(empty["next"]).isNull()
+        assertThat(empty["entryCount"]).isEqualTo(0)
     }
 
     @Test
@@ -100,6 +132,7 @@ class StatementTest : IntegrationTest() {
         assertThat(newKey.statusCode).isEqualTo(HttpStatus.CONFLICT)
         assertThat(newKey.body!!["error"]).isEqualTo(GatewayErrors.PERIOD_CLOSED)
         assertThat(allItems(runId, 100).flatten().map { it["transferId"] }).containsExactly(known["transferId"].toString())
+        assertThat(entryCounts(runId, 100)).containsExactly(1L)
     }
 
     @Test
@@ -115,20 +148,21 @@ class StatementTest : IntegrationTest() {
                         chunk.map { it to HttpStatus.valueOf(submit(it).statusCode.value()) }
                     }
                 }
-                val closing = pool.submit<Pair<HttpStatus, List<Any?>>> {
+                val closing = pool.submit<Triple<HttpStatus, List<Any?>, List<Long>>> {
                     gate.await()
                     Thread.sleep(5)
                     val closed = close(runId)
-                    HttpStatus.valueOf(closed.statusCode.value()) to allItems(runId, 7).flatten().map { it["transferId"] }
+                    Triple(HttpStatus.valueOf(closed.statusCode.value()), allItems(runId, 7).flatten().map { it["transferId"] }, entryCounts(runId, 7))
                 }
                 gate.countDown()
 
                 val outcomes = answers.flatMap { it.get() }
-                val (closeStatus, statementAtClose) = closing.get()
+                val (closeStatus, statementAtClose, counts) = closing.get()
                 assertThat(closeStatus).isEqualTo(HttpStatus.OK)
                 assertThat(outcomes.map { it.second }).allMatch { it == HttpStatus.ACCEPTED || it == HttpStatus.OK || it == HttpStatus.CONFLICT }
                 val acceptedIds = outcomes.filter { it.second != HttpStatus.CONFLICT }.map { it.first["transferId"].toString() }
                 assertThat(statementAtClose).containsExactlyInAnyOrderElementsOf(acceptedIds)
+                assertThat(counts).allMatch { it == acceptedIds.size.toLong() }
             }
         }
     }
@@ -155,6 +189,7 @@ class StatementTest : IntegrationTest() {
         @Suppress("UNCHECKED_CAST")
         val items = statement["items"] as List<Map<String, Any?>>
         assertThat(items.map { it["transferId"] }).containsExactly(transferId.toString())
+        assertThat(statement["entryCount"]).isEqualTo(1)
         assertThat(Instant.parse(items[0]["acceptedAt"] as String)).isBefore(Instant.parse(statement["closedAt"] as String))
     }
 

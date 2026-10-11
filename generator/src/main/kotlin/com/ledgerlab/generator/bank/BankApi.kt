@@ -44,6 +44,7 @@ enum class RejectReason {
 }
 
 data class Statement(
+    val entryCount: Long,
     val items: List<StatementLine>,
     val next: UUID?,
 )

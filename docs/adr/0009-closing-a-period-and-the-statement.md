@@ -24,8 +24,9 @@ waited for a pooled connection, and it does not cover the commit itself.
 - `POST /internal/runs/{runId}/close` takes the same lock exclusively. It waits until the
   submissions holding the lock have committed or rolled back, then records `closed_at`, read
   after the wait (`clock_timestamp()`, not the transaction start), so every transfer in the
-  statement was accepted before it. From then on no new transfer of the run can commit; the
-  guarantee comes from the lock, not from comparing clocks.
+  statement was accepted before it. In the same SQL statement it counts the run's transfers into
+  `entry_count`. From then on no new transfer of the run can commit; the guarantee comes from the
+  lock, not from comparing clocks.
 - While a close waits, new submissions of that run queue behind it, so the wait is bounded by
   `gateway.close-lock-timeout` (5 s). On expiry the answer is 503 and the period stays open;
   closing is idempotent, so the caller retries.
@@ -76,8 +77,20 @@ worse than none.
 - The cursor is the last `transferId` of the previous page (`next`), the way Stripe uses
   `starting_after`. `next` is null on the last page. A cursor outside the run is a 400.
 - `limit` is 1 to 1000, 100 by default.
+- Every page carries `entryCount`: the lines of the whole statement, of any status, counted at the
+  close and stored with the period, like the control totals of camt.053 and MT940 statements. Paging
+  alone does not show a client that a line was lost; with the count it can prove it read them all:
+  no `transferId` twice, and exactly `entryCount` lines after the last page.
 - Statuses can still be `ACCEPTED` or `PUBLISHED` right after the close: the ledger may not have
   applied everything yet. Waiting for the drain is up to the caller.
+
+**Considered and rejected.**
+- The whole statement in one answer: no paging to get wrong, but at 180 000 lines it would need a
+  long timeout and about 100 MB per request in the gateway.
+- A control sum of amounts next to the count: a closed period's amounts do not change, and the
+  client already compares every line's amount and accounts (ADR 0010), so the sum would catch
+  nothing new.
+- Running totals per page: the count and the repeated-id check already show a lost or repeated page.
 
 ## Consequences
 
@@ -87,5 +100,7 @@ worse than none.
 - Each submission costs one in-memory lock and one primary-key lookup on `run_periods`.
 - The bank decides when the period closes, not the client, so a run whose client is lost can
   still be closed and reconciled.
+- `entryCount` is required, so a client that checks it cannot read a statement from a gateway
+  older than itself. The gateway is released first, then its clients (ADR 0011).
 - Deleting a run removes its period. The run id is not reused afterwards, so a new submission
   under it is not guarded against.

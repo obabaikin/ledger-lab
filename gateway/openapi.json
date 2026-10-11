@@ -275,6 +275,11 @@
             "format" : "date-time",
             "description" : "When the period was closed; no transfer of the run is accepted after it."
           },
+          "entryCount" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "Lines in the whole statement, any status; the same on every page."
+          },
           "items" : {
             "type" : "array",
             "items" : {
@@ -286,7 +291,8 @@
             "format" : "uuid",
             "description" : "Pass as `after` for the next page; null on the last page."
           }
-        }
+        },
+        "required" : [ "entryCount" ]
       },
       "StatementLine" : {
         "type" : "object",

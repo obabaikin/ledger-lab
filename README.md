@@ -99,6 +99,8 @@ How a client reads the answer (full contract in [ADR 0006](docs/adr/0006-gateway
 A client without an answer reports "unknown", never "failed": "failed" invites a second payment
 under a new key. The statement of a closed period settles every unknown: listed means accepted,
 absent means never accepted ([ADR 0009](docs/adr/0009-closing-a-period-and-the-statement.md)).
+Every page carries `entryCount`, the lines in the whole statement, so the client can prove it read
+all of them.
 The generator does this matching by transfer id; any discrepancy makes its report unbalanced and is
 listed by id, up to 1000 per kind ([ADR 0010](docs/adr/0010-client-reconciliation.md)). Only the control console will be exposed; gateway, ledger and generator are
 cluster-internal.

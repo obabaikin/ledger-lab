@@ -155,14 +155,25 @@ class SimulationController(
         if (simulation.state.active) throw RunStillActiveException()
         val reconciliation = ClientReconciliation(runId, journalOf(simulation).entries())
         val cursors = HashSet<UUID>()
+        var entryCount: Long? = null
         var after: UUID? = null
         do {
             val page = client.statement(runId, after)
-            page.items.forEach(reconciliation::add)
+            if (entryCount != null && page.entryCount != entryCount) {
+                throw BadGatewayAnswerException("The statement of run $runId changed its totals between pages: entryCount $entryCount, then ${page.entryCount}")
+            }
+            entryCount = page.entryCount
+            for (line in page.items) {
+                if (!reconciliation.add(line)) throw BadGatewayAnswerException("The statement of run $runId lists transfer ${line.transferId} twice")
+            }
             after = page.next
             if (after != null && !cursors.add(after)) throw BadGatewayAnswerException("The statement of run $runId pages back to $after")
         } while (after != null)
-        return reconciliation.report()
+        val report = reconciliation.report()
+        if (report.statement.rows != entryCount) {
+            throw BadGatewayAnswerException("The statement of run $runId is incomplete: ${report.statement.rows} lines, entryCount $entryCount")
+        }
+        return report
     }
 
     private fun simulationOf(runId: UUID): Simulation =

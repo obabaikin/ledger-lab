@@ -72,12 +72,16 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
     private val byStatus = EnumMap<TransferStatus, Long>(TransferStatus::class.java)
     private var unreadableStatus = false
 
-    fun add(line: StatementLine) {
+    fun add(line: StatementLine): Boolean {
+        if (!inStatement.add(line.transferId)) return false
         rows++
         amountCents += line.amountCents
         if (line.status == null) unreadableStatus = true else byStatus.merge(line.status, 1L, Long::plus)
-        inStatement.add(line.transferId)
-        val entry = entries[line.transferId] ?: return notInJournal.add(line.transferId)
+        val entry = entries[line.transferId]
+        if (entry == null) {
+            notInJournal.add(line.transferId)
+            return true
+        }
         if (entry.amountCents != line.amountCents || entry.fromAccount != line.fromAccount || entry.toAccount != line.toAccount) {
             payloadMismatch.add(line.transferId)
         }
@@ -90,6 +94,7 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
                 statusMismatch.add(line.transferId)
             }
         }
+        return true
     }
 
     fun report(): ClientReconciliationReport {
