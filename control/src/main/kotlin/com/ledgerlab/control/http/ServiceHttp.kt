@@ -1,7 +1,10 @@
 package com.ledgerlab.control.http
 
+import tools.jackson.core.JacksonException
 import tools.jackson.databind.ObjectMapper
 import java.io.IOException
+import java.net.ConnectException
+import java.net.http.HttpConnectTimeoutException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -14,8 +17,14 @@ sealed interface Reply<out T> {
 
     data class Refused(val status: Int, val error: String) : Reply<Nothing>
 
-    /** Not connected, timed out or cut off: the call may or may not have taken effect. */
+    /** Timed out or cut off after connecting: the call may or may not have taken effect. */
     data object NoAnswer : Reply<Nothing>
+
+    /** The call never reached the service, so sending it again cannot repeat its effect. */
+    data object NotConnected : Reply<Nothing>
+
+    /** A 2xx this client cannot read, e.g. from a newer service: it took effect, but tells nothing. */
+    data object Unreadable : Reply<Nothing>
 }
 
 class ServiceHttp(private val baseUrl: String, private val timeout: Duration, private val objectMapper: ObjectMapper) {
@@ -38,14 +47,22 @@ class ServiceHttp(private val baseUrl: String, private val timeout: Duration, pr
             .build()
         val response = try {
             http.send(request, HttpResponse.BodyHandlers.ofString())
+        } catch (_: ConnectException) {
+            return Reply.NotConnected
+        } catch (_: HttpConnectTimeoutException) {
+            return Reply.NotConnected
         } catch (_: IOException) {
             return Reply.NoAnswer
         }
         val status = response.statusCode()
-        return when {
-            status in SUCCESS -> Reply.Answered(status, answer?.let { objectMapper.readValue(response.body(), it) })
-            else -> Reply.Refused(status, errorOf(response.body()) ?: "HTTP $status")
+        if (status !in SUCCESS) return Reply.Refused(status, errorOf(response.body()) ?: "HTTP $status")
+        if (answer == null) return Reply.Answered(status, null)
+        val body = try {
+            objectMapper.readValue(response.body(), answer)
+        } catch (_: JacksonException) {
+            null
         }
+        return if (body == null) Reply.Unreadable else Reply.Answered(status, body)
     }
 
     fun send(method: String, path: String, body: Any? = null): Reply<Any?> = call<Any>(method, path, null, body)
@@ -61,8 +78,9 @@ class ServiceHttp(private val baseUrl: String, private val timeout: Duration, pr
     }
 }
 
-/** 5xx or no answer: the service may recover, so the call is repeated on a later tick. */
-val Reply<*>.isTransient: Boolean get() = this is Reply.NoAnswer || (this is Reply.Refused && status >= SERVER_ERROR)
+/** 5xx, no answer or an answer this client cannot read: the call is repeated on a later tick, within the phase's deadline. */
+val Reply<*>.isTransient: Boolean get() =
+    this is Reply.NoAnswer || this is Reply.NotConnected || this is Reply.Unreadable || (this is Reply.Refused && status >= SERVER_ERROR)
 
 private const val SERVER_ERROR = 500
 

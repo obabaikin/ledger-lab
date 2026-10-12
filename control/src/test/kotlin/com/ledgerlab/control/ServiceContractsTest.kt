@@ -125,8 +125,11 @@ class ServiceContractsTest {
             types.forEach { type ->
                 val properties = spec.schemaOf(type).get("properties")
                 type.primaryConstructor!!.parameters.filterNot { it.type.isMarkedNullable }.forEach { field ->
-                    val types = properties.get(field.name).get("type")
-                    val nullable = types != null && types.isArray && types.names().contains(NULL_TYPE)
+                    val property = properties.get(field.name)
+                    val types = property.get("type")
+                    val alternatives = listOfNotNull(property.get("oneOf"), property.get("anyOf")).flatMap { it.values() }
+                    val nullable = (types != null && types.isArray && types.names().contains(NULL_TYPE)) ||
+                        alternatives.any { it.get("type")?.asString() == NULL_TYPE }
                     assertThat(nullable).`as`("${type.simpleName}.${field.name}").isFalse()
                 }
             }

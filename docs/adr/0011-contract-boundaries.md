@@ -38,8 +38,9 @@ the gateway's internal endpoints publish their own specs (`ledger-service/openap
 `generator/openapi.json`, `gateway/openapi-internal.json`, the gateway's split into the groups
 `bank` and `internal`), each checked against the running app. Control has its own model of the
 calls it makes, and `ServiceContractsTest` checks it against those files: paths and their
-parameters, field names, required request fields and enum values. Status codes and nullable
-fields are not checked yet. Only the Kafka messages are shared classes.
+parameters, field names, required request fields, enum values, the status codes control tells
+apart, and that a field control reads as never null is never null in the spec. Only the Kafka
+messages are shared classes.
 
 **Every entry that reads an enum from the other side tolerates a value it does not know, where the
 message can still be applied, and says so.** An outcome it does not know cannot be applied.

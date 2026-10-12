@@ -93,7 +93,7 @@ class RunController(private val runs: RunService) {
     fun get(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunView = runs.find(sessionId, runId).toView()
 
     @Operation(summary = "Stop a running run early; the bank still finishes and reconciles it")
-    @ApiResponse(responseCode = "200", description = "The run had already ended")
+    @ApiResponse(responseCode = "200", description = "The run is past running; nothing to stop")
     @ApiResponse(responseCode = "202", description = "Stopping")
     @ApiResponse(responseCode = "404", description = "Unknown session, or no such run in it", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "409", description = "The run has not started yet", content = [Content(schema = Schema(implementation = ApiError::class))])

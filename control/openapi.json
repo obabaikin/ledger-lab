@@ -160,7 +160,7 @@
             "type" : "array"
           },
           "reasons" : {
-            "description" : "Why the verdict is incomplete; empty otherwise.",
+            "description" : "What the verdict could not check, with or without breaks; empty if nothing was missing.",
             "items" : {
               "type" : "string"
             },
@@ -759,7 +759,7 @@
                 }
               }
             },
-            "description" : "The run had already ended"
+            "description" : "The run is past running; nothing to stop"
           },
           "202" : {
             "content" : {

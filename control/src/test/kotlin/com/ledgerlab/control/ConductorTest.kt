@@ -38,7 +38,7 @@ class ConductorTest : IntegrationTest() {
             """
             UPDATE runs SET state = 'DRAINING', drain_started_at = clock_timestamp(), client_lost = :clientLost,
                 closed_at = CASE WHEN :closed THEN clock_timestamp() END,
-                drain_applied = CASE WHEN :closed THEN 0 END,
+                drain_progress = CASE WHEN :closed THEN 0 END,
                 drain_progress_at = CASE WHEN :closed THEN clock_timestamp() END
             WHERE run_id = :id
             """,
@@ -161,10 +161,71 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
-    fun `a generator that does not answer in time is asked again, not started over`() {
+    fun `a start whose answer was lost is not sent again when the generator forgot the run`() {
         val runId = admitted()
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
-        generator.delay = props.services.requestTimeout.plusMillis(300)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 503)
+
+        conductor.tick()
+        conductor.tick()
+
+        assertThat(generator.callsTo("POST", GeneratorApi.SIMULATIONS_PATH)).hasSize(1)
+        assertThat(stateOf(runId)).isEqualTo("RUNNING")
+        conductor.tick()
+        assertThat(column(runId, "client_lost")).isEqualTo(true)
+    }
+
+    @Test
+    fun `a start the generator refused is sent again`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 409, mapOf("error" to "journals in memory hold 300000"))
+
+        conductor.tick()
+        conductor.tick()
+
+        assertThat(generator.callsTo("POST", GeneratorApi.SIMULATIONS_PATH)).hasSize(2)
+        assertThat(stateOf(runId)).isEqualTo("CREATED")
+    }
+
+    @Test
+    fun `an answer control cannot read does not keep the run past its deadline`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200, "{\"state\":\"WARMING_UP\"}")
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("CREATED")
+
+        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        conductor.tick()
+        assertThat(column(runId, "failure")).isEqualTo("setup timed out")
+    }
+
+    @Test
+    fun `a slow step of one run does not hold up another run`() {
+        val slow = draining()
+        bank(slow)
+        clientReconciles(slow)
+        generator.answer("GET", GeneratorApi.RECONCILIATION_PATH.forRun(slow), 200, clientReport(slow), delay = props.generator.reconciliationTimeout.minusMillis(100))
+        backdate(slow, "admitted_at", Duration.ofHours(1))
+        val fresh = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(fresh), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(fresh), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 201, simulation(fresh, "RUNNING"))
+        backdate(fresh, "admitted_at", props.runs.setupTimeout.minusMillis(300))
+
+        conductor.tick()
+
+        assertThat(stateOf(fresh)).isEqualTo("RUNNING")
+        assertThat(stateOf(slow)).isEqualTo("RECONCILED")
+    }
+
+    @Test
+    fun `a generator that does not answer in time is asked again, not started over`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404, delay = props.services.requestTimeout.plusMillis(300))
 
         conductor.tick()
 
@@ -242,7 +303,7 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
 
         assertThat(column(runId, "closed_at")).isNotNull()
-        assertThat(column(runId, "drain_applied")).isEqualTo(0L)
+        assertThat(column(runId, "drain_progress")).isEqualTo(0L)
     }
 
     @Test
@@ -305,7 +366,7 @@ class ConductorTest : IntegrationTest() {
         assertThat(stateOf(runId)).isEqualTo("RECONCILED")
         val report = reportOf(runId)
         assertThat(report["result"]).isEqualTo("INCOMPLETE")
-        assertThat(report["reasons"]).isEqualTo(listOf("drain timed out: applied 710 of 995"))
+        assertThat(report["reasons"]).isEqualTo(listOf("drain timed out: ledger applied 710, gateway results 995, of 995"))
         assertThat(report["bankViewsAgree"]).isNull()
     }
 
@@ -318,7 +379,35 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
 
         assertThat(stateOf(runId)).isEqualTo("DRAINING")
-        assertThat(column(runId, "drain_applied")).isEqualTo(710L)
+        assertThat(column(runId, "drain_progress")).isEqualTo(710L + 995L)
+    }
+
+    @Test
+    fun `a gateway still catching up on results keeps the drain waiting while the ledger is done`() {
+        val runId = draining()
+        bank(runId, summary = summary(runId, posted = 900, rejected = 15))
+        clientReconciles(runId)
+        conductor.tick()
+        backdate(runId, "drain_progress_at", props.runs.drainStallTimeout)
+        bank(runId, summary = summary(runId, posted = 950, rejected = 15))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+    }
+
+    @Test
+    fun `more results than accepted transfers end the drain at once as a break`() {
+        val runId = draining()
+        bank(runId, books = books(runId, posted = 981, rejected = 15))
+        clientReconciles(runId)
+
+        conductor.tick()
+
+        val report = reportOf(runId)
+        assertThat(report["result"]).isEqualTo("BREAKS")
+        assertThat(report["bankViewsAgree"]).isEqualTo(false)
+        assertThat(report["reasons"] as List<*>).isEmpty()
     }
 
     @Test

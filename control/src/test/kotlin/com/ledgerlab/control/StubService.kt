@@ -14,18 +14,18 @@ class StubService : AutoCloseable {
 
     data class Call(val method: String, val path: String, val body: String)
 
-    private data class Answer(val status: Int, val body: String?)
+    private data class Answer(val status: Int, val body: String?, val delay: Duration)
 
     private val answers = ConcurrentHashMap<String, Answer>()
     val calls = CopyOnWriteArrayList<Call>()
 
     private val server = HttpServer.create(InetSocketAddress("localhost", 0), 0).apply {
         createContext("/") { exchange ->
-            Thread.sleep(delay)
             val method = exchange.requestMethod
             val path = exchange.requestURI.path
             calls += Call(method, path, exchange.requestBody.readAllBytes().decodeToString())
             val answer = answers["$method $path"]
+            Thread.sleep(answer?.delay ?: delay)
             val body = answer?.body?.toByteArray()
             exchange.responseHeaders.add("Content-Type", "application/json")
             exchange.sendResponseHeaders(answer?.status ?: status, body?.size?.toLong()?.takeIf { it > 0 } ?: -1)
@@ -38,8 +38,8 @@ class StubService : AutoCloseable {
 
     val baseUrl: String = "http://localhost:${server.address.port}"
 
-    fun answer(method: String, path: String, status: Int, body: Any? = null) {
-        answers["$method $path"] = Answer(status, body?.let { mapper.writeValueAsString(it) })
+    fun answer(method: String, path: String, status: Int, body: Any? = null, delay: Duration = Duration.ZERO) {
+        answers["$method $path"] = Answer(status, body?.let { it as? String ?: mapper.writeValueAsString(it) }, delay)
     }
 
     fun callsTo(method: String, path: String): List<Call> = calls.filter { it.method == method && it.path == path }

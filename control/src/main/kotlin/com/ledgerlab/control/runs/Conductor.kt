@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.Executors
 
 @Service
 class Conductor(
@@ -29,18 +30,23 @@ class Conductor(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /** Runs step side by side, so a slow call of one run does not eat into another run's deadline. */
     fun tick() {
-        for (run in runs.inProgress()) {
-            try {
-                when (run.state) {
-                    RunState.CREATED -> setUp(run, runs.now())
-                    RunState.RUNNING -> watch(run, runs.now())
-                    RunState.DRAINING -> drain(run, runs.now())
-                    else -> Unit
-                }
-            } catch (e: RuntimeException) {
-                log.error("Run {}: step in {} failed, retried on the next tick", run.runId, run.state, e)
+        Executors.newVirtualThreadPerTaskExecutor().use { steps ->
+            runs.inProgress().forEach { run -> steps.submit { step(run) } }
+        }
+    }
+
+    private fun step(run: Run) {
+        try {
+            when (run.state) {
+                RunState.CREATED -> setUp(run, runs.now())
+                RunState.RUNNING -> watch(run, runs.now())
+                RunState.DRAINING -> drain(run, runs.now())
+                else -> Unit
             }
+        } catch (e: RuntimeException) {
+            log.error("Run {}: step in {} failed, retried on the next tick", run.runId, run.state, e)
         }
     }
 
@@ -51,6 +57,8 @@ class Conductor(
         val timedOut = now >= checkNotNull(run.admittedAt) + props.runs.setupTimeout
         if (timedOut) return failed(run, RunOutcomes.SETUP_TIMED_OUT)
         if (status !is Reply.Refused || status.status != HttpStatus.NOT_FOUND.value()) return
+        // A start that may have arrived but is unknown now means the generator restarted: the run goes on as a lost client.
+        if (run.startSent) return started(run)
 
         val accounts = props.runs.accounts
         val opened = ledger.openAccounts(
@@ -61,12 +69,14 @@ class Conductor(
         if (opened is Reply.Refused && opened.status == HttpStatus.BAD_REQUEST.value()) return failed(run, RunOutcomes.SETUP_REJECTED)
         if (opened !is Reply.Answered && !alreadyOpened) return
 
+        runs.markStartSent(run.runId, sent = true)
         val start = generator.start(
             StartSimulationRequest(run.runId, run.tps, run.durationSeconds, accounts.count, accounts.blocked),
         )
         when {
             start is Reply.Answered -> started(run)
             start is Reply.Refused && start.status == HttpStatus.BAD_REQUEST.value() -> failed(run, RunOutcomes.SETUP_REJECTED)
+            start is Reply.NotConnected || (start is Reply.Refused && !start.isTransient) -> runs.markStartSent(run.runId, sent = false)
             else -> Unit
         }
     }
@@ -109,11 +119,12 @@ class Conductor(
         }
         val bank = checkNotNull(summary.body)
         val ledgerReport = checkNotNull(books.body)
-        val applied = ledgerReport.postedTransfers + ledgerReport.rejectedTransfers
-        val progressAt = if (runs.recordDrainProgress(run.runId, applied) == 1) now else checkNotNull(run.drainProgressAt)
+        // Both counts only grow after the close, so their sum grows while either side still moves.
+        val progress = ledgerReport.postedTransfers + ledgerReport.rejectedTransfers + bank.posted + bank.rejected
+        val progressAt = if (runs.recordDrainProgress(run.runId, progress) == 1) now else checkNotNull(run.drainProgressAt)
         val drained = drainFinished(bank, ledgerReport)
         val stalled = now >= progressAt + props.runs.drainStallTimeout
-        if (!drained && !stalled && !pastDeadline) return
+        if (!drained && !overcounted(bank, ledgerReport) && !stalled && !pastDeadline) return
 
         val client = clientSide(run, pastDeadline) ?: return
         reconciled(run, bank, ledgerReport, client)
@@ -140,7 +151,7 @@ class Conductor(
     }
 
     private companion object {
-        /** A 502 is the generator finding the statement inconsistent: a repeat reads the same statement. */
+        /** A 502 means the generator could not trust the gateway's statement: reported with its words, not waited on. */
         val CLIENT_RECONCILIATION_FINAL = setOf(HttpStatus.BAD_GATEWAY.value())
     }
 }

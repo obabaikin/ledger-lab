@@ -18,7 +18,8 @@ object RunOutcomes {
     const val CLIENT_RECONCILIATION_UNAVAILABLE = "client reconciliation unavailable"
     const val STATEMENT_NOT_FINAL = "statement not final"
 
-    fun drainTimedOut(applied: Long, accepted: Long) = "drain timed out: applied $applied of $accepted"
+    fun drainTimedOut(ledgerApplied: Long, gatewayResults: Long, accepted: Long) =
+        "drain timed out: ledger applied $ledgerApplied, gateway results $gatewayResults, of $accepted"
 
     fun clientReconciliationFailed(error: String) = "client reconciliation failed: $error"
 }
@@ -32,7 +33,7 @@ data class LedgerCounts(val posted: Long, val rejected: Long)
 @Schema(description = "The verdict of a run and what it rests on.")
 data class RunReport(
     val result: RunResult,
-    @field:Schema(description = "Why the verdict is incomplete; empty otherwise.")
+    @field:Schema(description = "What the verdict could not check, with or without breaks; empty if nothing was missing.")
     val reasons: List<String>,
     @field:Schema(description = "The ledger's books: balances, journal and transfer log agree.")
     val ledgerBalanced: Boolean,
@@ -64,18 +65,25 @@ sealed interface ClientSide {
 fun drainFinished(gateway: RunSummary, ledger: ReconciliationReport): Boolean =
     gateway.posted + gateway.rejected == gateway.accepted && gateway.accepted == ledger.postedTransfers + ledger.rejectedTransfers
 
+/** Ledger and gateway only learn of transfers the gateway accepted, so more than that is never lag. */
+fun overcounted(gateway: RunSummary, ledger: ReconciliationReport): Boolean =
+    ledger.postedTransfers + ledger.rejectedTransfers > gateway.accepted || gateway.posted + gateway.rejected > gateway.accepted
+
 fun verdictOf(gateway: RunSummary, ledger: ReconciliationReport, client: ClientSide): RunReport {
     val drained = drainFinished(gateway, ledger)
+    val overcounted = overcounted(gateway, ledger)
     // Before the drain ends the gateway's counts trail the ledger's: a difference then is lag, not a break.
-    val bankViewsAgree = if (drained) {
-        gateway.posted == ledger.postedTransfers && gateway.rejected == ledger.rejectedTransfers &&
+    val bankViewsAgree = when {
+        overcounted -> false
+        drained -> gateway.posted == ledger.postedTransfers && gateway.rejected == ledger.rejectedTransfers &&
             gateway.rejectionsByReason == ledger.rejectionsByReason
-    } else {
-        null
+        else -> null
     }
     val clientReport = (client as? ClientSide.Reconciled)?.report
     val reasons = buildList {
-        if (!drained) add(RunOutcomes.drainTimedOut(ledger.postedTransfers + ledger.rejectedTransfers, gateway.accepted))
+        if (!drained && !overcounted) {
+            add(RunOutcomes.drainTimedOut(ledger.postedTransfers + ledger.rejectedTransfers, gateway.posted + gateway.rejected, gateway.accepted))
+        }
         if (client is ClientSide.Missing) add(client.reason)
         if (clientReport?.statementFinal == false) add(RunOutcomes.STATEMENT_NOT_FINAL)
     }

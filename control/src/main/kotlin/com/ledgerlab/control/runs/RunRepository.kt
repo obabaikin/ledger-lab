@@ -69,6 +69,18 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .param("running", RunState.RUNNING.name)
             .update()
 
+    fun markStartSent(runId: UUID, sent: Boolean): Int =
+        jdbc.sql(
+            """
+            UPDATE runs SET start_sent_at = CASE WHEN :sent THEN coalesce(start_sent_at, clock_timestamp()) END
+            WHERE run_id = :runId AND state = :created
+            """,
+        )
+            .param("sent", sent)
+            .param("created", RunState.CREATED.name)
+            .param("runId", runId)
+            .update()
+
     fun markStarted(runId: UUID): Int = move(runId, RunState.CREATED, RunState.RUNNING, "started_at = clock_timestamp()")
 
     fun startDraining(runId: UUID, clientLost: Boolean): Int =
@@ -87,7 +99,7 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
     fun markClosed(runId: UUID, closedAt: Instant): Int =
         jdbc.sql(
             """
-            UPDATE runs SET closed_at = :closedAt, drain_applied = 0, drain_progress_at = clock_timestamp()
+            UPDATE runs SET closed_at = :closedAt, drain_progress = 0, drain_progress_at = clock_timestamp()
             WHERE run_id = :runId AND state = :draining AND closed_at IS NULL
             """,
         )
@@ -96,14 +108,14 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .param("runId", runId)
             .update()
 
-    fun recordDrainProgress(runId: UUID, applied: Long): Int =
+    fun recordDrainProgress(runId: UUID, progress: Long): Int =
         jdbc.sql(
             """
-            UPDATE runs SET drain_applied = :applied, drain_progress_at = clock_timestamp()
-            WHERE run_id = :runId AND state = :draining AND drain_applied < :applied
+            UPDATE runs SET drain_progress = :progress, drain_progress_at = clock_timestamp()
+            WHERE run_id = :runId AND state = :draining AND drain_progress < :progress
             """,
         )
-            .param("applied", applied)
+            .param("progress", progress)
             .param("draining", RunState.DRAINING.name)
             .param("runId", runId)
             .update()
@@ -247,12 +259,13 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
         admittedAt = getObject("admitted_at", Timestamp::class.java)?.toInstant(),
         finishedAt = getObject("finished_at", Timestamp::class.java)?.toInstant(),
         position = getObject("position")?.let { getLong("position") },
+        startSent = getObject("start_sent_at") != null,
         startedAt = getObject("started_at", Timestamp::class.java)?.toInstant(),
         stopRequested = getObject("stop_requested_at") != null,
         clientLost = getBoolean("client_lost"),
         drainStartedAt = getObject("drain_started_at", Timestamp::class.java)?.toInstant(),
         closedAt = getObject("closed_at", Timestamp::class.java)?.toInstant(),
-        drainApplied = getObject("drain_applied")?.let { getLong("drain_applied") },
+        drainProgress = getObject("drain_progress")?.let { getLong("drain_progress") },
         drainProgressAt = getObject("drain_progress_at", Timestamp::class.java)?.toInstant(),
         result = getString("result")?.let { RunResult.valueOf(it) },
         failure = getString("failure"),
