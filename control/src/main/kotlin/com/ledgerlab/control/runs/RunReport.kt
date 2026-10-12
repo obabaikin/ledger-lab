@@ -48,6 +48,10 @@ data class RunReport(
     val client: JournalTotals?,
     val gateway: GatewayCounts,
     val ledger: LedgerCounts,
+    @field:Schema(description = "Bank latency p50, ms: accepted to result known, by the gateway's clock; null without results.")
+    val bankLatencyP50Ms: Double?,
+    @field:Schema(description = "Bank latency p99, ms, as bankLatencyP50Ms.")
+    val bankLatencyP99Ms: Double?,
     @field:Schema(description = "Rejections by reason, as the ledger decided them.")
     val rejectionsByReason: Map<String, Long>,
     @field:Schema(description = "Discrepancies between journal and statement, by kind, with up to 1000 ids each.")
@@ -103,6 +107,8 @@ fun verdictOf(gateway: RunSummary, ledger: ReconciliationReport, client: ClientS
         client = clientReport?.journal,
         gateway = GatewayCounts(gateway.accepted, gateway.published, gateway.posted, gateway.rejected),
         ledger = LedgerCounts(ledger.postedTransfers, ledger.rejectedTransfers),
+        bankLatencyP50Ms = gateway.latencyP50Ms,
+        bankLatencyP99Ms = gateway.latencyP99Ms,
         rejectionsByReason = ledger.rejectionsByReason,
         breaks = clientReport?.breaks,
         unknownResolved = clientReport?.unknownResolved,

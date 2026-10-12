@@ -97,6 +97,14 @@ class VerdictTest {
     }
 
     @Test
+    fun `the report keeps the bank's latency at the end of the run`() {
+        val report = verdictOf(summary(), books(), client())
+
+        assertThat(report.bankLatencyP50Ms).isEqualTo(12.0)
+        assertThat(report.bankLatencyP99Ms).isEqualTo(480.5)
+    }
+
+    @Test
     fun `rejections by reason are the ledger's`() {
         val report = verdictOf(summary(reasons = mapOf("INSUFFICIENT_FUNDS" to 15L)), books(), client())
 

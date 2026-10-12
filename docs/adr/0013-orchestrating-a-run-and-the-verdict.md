@@ -61,7 +61,8 @@ reconciliation, once, and stores a report with the run:
 
 A run that ends without a verdict is `FAILED` with its reason; a reconciled run is `RECONCILED`
 with its result. A stopped run is reconciled like a finished one. `GET …/runs/{runId}/report`
-returns the report; while the run is not `RECONCILED` the answer is 409 `report not ready`, and a
+returns the report, with the bank's p50 and p99 latency from acceptance to a known result, by the
+gateway's clock, as a snapshot at the end of the run; while the run is not `RECONCILED` the answer is 409 `report not ready`, and a
 failed run never has one. Rejections by reason in
 the report are the ledger's: the clients know the reason only for the transfers they waited for.
 
@@ -99,5 +100,7 @@ session says `chaosAvailable: false`, until deleting the ledger pod is built.
   ledger numbering them; a client of a real bank would get its accounts from the bank's API.
 - The generator releases a journal 10 minutes after its run; many short runs in a row can fill its
   memory cap, and the next setup then times out.
+- The clients' latency per run is not in the report yet: the generator's timers are shared by all
+  runs, so with runs side by side their percentiles mix; it needs a histogram per run.
 - The page shows progress live in a later step; until then the run's state and report are read
   through the API.

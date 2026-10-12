@@ -118,6 +118,16 @@
       "RunReport" : {
         "description" : "The verdict of a run and what it rests on.",
         "properties" : {
+          "bankLatencyP50Ms" : {
+            "description" : "Bank latency p50, ms: accepted to result known, by the gateway's clock; null without results.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "bankLatencyP99Ms" : {
+            "description" : "Bank latency p99, ms, as bankLatencyP50Ms.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
           "bankViewsAgree" : {
             "description" : "Gateway and ledger count the same posted and rejected transfers and reasons; null if the drain did not finish.",
             "type" : [ "boolean", "null" ]

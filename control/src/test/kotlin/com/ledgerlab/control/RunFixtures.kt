@@ -11,7 +11,7 @@ object RunFixtures {
 
     fun summary(runId: UUID, accepted: Long = 995, posted: Long = 980, rejected: Long = 15, reasons: Map<String, Long> = mapOf("BLOCKED_ACCOUNT" to 15L)) = mapOf(
         "runId" to runId, "accepted" to accepted, "published" to accepted, "posted" to posted, "rejected" to rejected,
-        "rejectionsByReason" to reasons, "latencyP50Ms" to 12.0, "latencyP99Ms" to null,
+        "rejectionsByReason" to reasons, "latencyP50Ms" to 12.0, "latencyP99Ms" to 480.5,
     )
 
     fun books(runId: UUID, posted: Long = 980, rejected: Long = 15, balanced: Boolean = true, accounts: Long = 100, reasons: Map<String, Long> = mapOf("BLOCKED_ACCOUNT" to 15L)) = mapOf(
