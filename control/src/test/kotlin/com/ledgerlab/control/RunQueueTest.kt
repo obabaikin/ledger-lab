@@ -91,7 +91,7 @@ class RunQueueTest : IntegrationTest() {
     }
 
     @Test
-    fun `a rate option no total can hold is refused at start-up`() {
+    fun `run settings with a rate option above the total are refused`() {
         assertThatThrownBy { props.runs.copy(tpsOptions = listOf(props.runs.maxTotalTps + 1)) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }

@@ -30,7 +30,7 @@ class RunQueue(private val runs: RunRepository, private val props: ControlProper
 @Component
 class QueueScheduler(private val ledger: LedgerReadiness, private val queue: RunQueue) {
 
-    // The readiness call stays outside the queue's transaction, so a slow ledger never holds the lock.
+    // The readiness call stays outside the queue's transaction, so a slow Prometheus never holds the lock.
     @Scheduled(fixedDelayString = "\${control.queue.poll-interval}", initialDelayString = "\${control.queue.poll-interval}")
     fun tick(): QueueStep = queue.advance(ledger.isReady())
 }

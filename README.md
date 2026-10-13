@@ -160,6 +160,9 @@ its own port inside the cluster. What the chart sets up:
 | PostgreSQL | 512 MiB |
 | Prometheus | 512 MiB |
 
+The services that consume Kafka wait for the topics in an init container with Kafka's tools, limited to
+512 MiB; while it runs it reserves that much, so reporting's pod requests 512 MiB, not 448.
+
 ## Invites and the run queue
 
 The page is opened with an invite link, `/?ref=<token>`. Invites are created by hand in the
