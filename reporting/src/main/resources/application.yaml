@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: reporting
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ledgerlab?reWriteBatchedInserts=true
+    username: reporting
+    password: reporting
+    hikari:
+      schema: reporting
+  flyway:
+    default-schema: reporting
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: reporting
+      auto-offset-reset: earliest
+      properties:
+        max.poll.records: 500
+    listener:
+      concurrency: 3
+      # Topics come from infrastructure (ADR 0008); a name that does not match fails the start.
+      missing-topics-fatal: true
+
+server:
+  port: 8084
+
+reporting:
+  transfers-topic: transfers
+  results-topic: transfer-results
+  consumer:
+    retry-backoff: 500ms
+
+springdoc:
+  override-with-generic-response: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always

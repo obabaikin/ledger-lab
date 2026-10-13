@@ -1,0 +1,187 @@
+{
+  "components" : {
+    "schemas" : {
+      "BankLatency" : {
+        "description" : "processedAt − acceptedAt over transfers with both known; null when there are none.",
+        "properties" : {
+          "p50Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "p99Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          }
+        },
+        "required" : [ "p50Ms", "p99Ms" ],
+        "type" : "object"
+      },
+      "RunStats" : {
+        "description" : "A run's transfers as seen in the bank's events; one consistent snapshot, lagging the books while events are on the way.",
+        "properties" : {
+          "at" : {
+            "description" : "Time of the snapshot, by the reporting database's clock.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "bankLatency" : {
+            "$ref" : "#/components/schemas/BankLatency"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "series" : {
+            "description" : "Increments per second, oldest first.",
+            "items" : {
+              "$ref" : "#/components/schemas/SecondStats"
+            },
+            "type" : "array"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/StatsTotals"
+          }
+        },
+        "required" : [ "at", "bankLatency", "runId", "series", "totals" ],
+        "type" : "object"
+      },
+      "SecondStats" : {
+        "properties" : {
+          "accepted" : {
+            "description" : "By acceptedAt, or by processedAt while the command is not seen yet.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "bankP50Ms" : {
+            "description" : "Bank latency of transfers processed in this second; null when none has a known acceptedAt.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "bankP99Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "posted" : {
+            "description" : "By processedAt.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "postedAmountCents" : {
+            "description" : "By processedAt.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "description" : "By processedAt.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "second" : {
+            "description" : "Start of the second.",
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "accepted", "bankP50Ms", "bankP99Ms", "posted", "postedAmountCents", "rejected", "second" ],
+        "type" : "object"
+      },
+      "StatsTotals" : {
+        "properties" : {
+          "accepted" : {
+            "description" : "Transfers the gateway accepted, including those known only by their result so far.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "inFlight" : {
+            "description" : "accepted − posted − rejected.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "postedAmountCents" : {
+            "description" : "Sum of posted transfers whose amount is known.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectedByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "description" : "Rejected transfers by reason; a reason this service does not know is kept as sent.",
+            "type" : "object"
+          }
+        },
+        "required" : [ "accepted", "inFlight", "posted", "postedAmountCents", "rejected", "rejectedByReason" ],
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "description" : "A run's numbers from the bank's events, for control.",
+    "title" : "Ledger Lab reporting internal API",
+    "version" : "1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/internal/runs/{runId}" : {
+      "delete" : {
+        "operationId" : "delete",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "Deleted"
+          },
+          "404" : {
+            "description" : "No events of this run"
+          }
+        },
+        "summary" : "Delete a run's numbers",
+        "tags" : [ "run-stats-controller" ]
+      }
+    },
+    "/internal/runs/{runId}/stats" : {
+      "get" : {
+        "operationId" : "stats",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunStats"
+                }
+              }
+            },
+            "description" : "The snapshot; a run with no events yet has zeros"
+          }
+        },
+        "summary" : "A run's numbers from the bank's events",
+        "tags" : [ "run-stats-controller" ]
+      }
+    }
+  }
+}
