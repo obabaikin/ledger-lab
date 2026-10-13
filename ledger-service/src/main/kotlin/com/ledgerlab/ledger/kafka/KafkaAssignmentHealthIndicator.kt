@@ -7,10 +7,7 @@ import org.springframework.boot.health.contributor.HealthIndicator
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry
 import org.springframework.stereotype.Component
 
-/**
- * Ready only while the transfer consumer holds at least one partition. After a restart the
- * service answers HTTP before the group assigns partitions, and a run started in that window waits for them.
- */
+/** Not part of the readiness probe: a rebalance would take every instance out of the Service at once (ADR 0012). */
 @Component("kafkaAssignment")
 class KafkaAssignmentHealthIndicator(private val listeners: KafkaListenerEndpointRegistry) : HealthIndicator {
 

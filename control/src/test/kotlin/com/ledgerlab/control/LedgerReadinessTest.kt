@@ -1,54 +1,55 @@
 package com.ledgerlab.control
 
+import com.ledgerlab.control.RunFixtures.prometheus
 import com.ledgerlab.control.ledger.LedgerReadiness
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import java.net.ServerSocket
-import java.time.Duration
+import org.springframework.beans.factory.annotation.Autowired
 
-class LedgerReadinessTest {
+class LedgerReadinessTest : IntegrationTest() {
 
-    private val timeout = Duration.ofMillis(300)
-    private val ledger = StubService()
+    @Autowired lateinit var readiness: LedgerReadiness
 
-    @AfterEach
-    fun stop() = ledger.close()
-
-    private fun readiness(baseUrl: String = ledger.baseUrl) = LedgerReadiness(com.ledgerlab.control.ControlProperties.Ledger(baseUrl, timeout))
+    private fun held(partitions: Int) =
+        prometheus.answerQuery("GET", QUERY_PATH, "query=$HELD", 200, prometheus(listOf(emptyMap<String, String>() to partitions)))
 
     @Test
-    fun `ready on 200`() {
-        assertThat(readiness().isReady()).isTrue()
+    fun `ready when the live instances hold every partition`() {
+        held(props.ledger.transferPartitions)
+
+        assertThat(readiness.isReady()).isTrue()
     }
 
     @Test
-    fun `not ready on 503`() {
-        ledger.status = 503
+    fun `not ready while a killed instance still holds its partitions, though the live ones hold some`() {
+        held(props.ledger.transferPartitions - 2)
 
-        assertThat(readiness().isReady()).isFalse()
+        assertThat(readiness.isReady()).isFalse()
     }
 
     @Test
-    fun `not ready on a redirect`() {
-        ledger.status = 302
+    fun `not ready when more partitions are counted than there are, as in a rebalance between scrapes`() {
+        held(props.ledger.transferPartitions + 2)
 
-        assertThat(readiness().isReady()).isFalse()
+        assertThat(readiness.isReady()).isFalse()
     }
 
     @Test
-    fun `not ready when the answer takes longer than the timeout`() {
-        ledger.delay = timeout.multipliedBy(3)
+    fun `not ready when no ledger instance is scraped`() {
+        prometheus.answerQuery("GET", QUERY_PATH, "query=$HELD", 200, prometheus(emptyList()))
 
-        val started = System.nanoTime()
-        assertThat(readiness().isReady()).isFalse()
-        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(timeout.multipliedBy(3))
+        assertThat(readiness.isReady()).isFalse()
     }
 
     @Test
-    fun `not ready when the connection is refused`() {
-        val closedPort = ServerSocket(0).use { it.localPort }
+    fun `not ready when Prometheus cannot be read`() {
+        prometheus.status = 503
 
-        assertThat(readiness("http://localhost:$closedPort").isReady()).isFalse()
+        assertThat(readiness.isReady()).isFalse()
+    }
+
+    private companion object {
+        const val QUERY_PATH = "/api/v1/query"
+        const val HELD = "sum(ledger_kafka_assigned_partitions)"
     }
 }

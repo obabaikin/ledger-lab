@@ -1,6 +1,8 @@
 package com.ledgerlab.ledger.kafka
 
+import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.boot.kafka.autoconfigure.DefaultKafkaConsumerFactoryCustomizer
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.kafka.listener.DefaultErrorHandler
@@ -20,7 +22,7 @@ data class ResultsProperties(
 )
 
 @ConfigurationProperties("ledger.consumer")
-data class ConsumerProperties(val retryBackoff: Duration)
+data class ConsumerProperties(val retryBackoff: Duration, val instanceId: String? = null)
 
 @Configuration
 class KafkaConfig {
@@ -35,4 +37,10 @@ class KafkaConfig {
         DefaultErrorHandler(FixedBackOff(consumer.retryBackoff.toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS)).apply {
             addNotRetryableExceptions(JacksonException::class.java)
         }
+
+    /** Static membership; the listener container suffixes the id per concurrent consumer. */
+    @Bean
+    fun staticMembership(consumer: ConsumerProperties) = DefaultKafkaConsumerFactoryCustomizer { factory ->
+        consumer.instanceId?.takeIf { it.isNotBlank() }?.let { factory.updateConfigs(mapOf(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG to it)) }
+    }
 }

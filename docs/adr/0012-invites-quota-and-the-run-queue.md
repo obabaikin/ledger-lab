@@ -31,10 +31,15 @@ the same session returns the same run and costs no quota; a different body is 42
 
 **The queue.** A start answers 202 at once with the run `QUEUED` and its place. At most
 `max-queued` runs wait; one more is refused with 429 and no `Retry-After`, because no honest value
-exists. At most `max-active` runs hold a place; a scheduler hands free places to the oldest queued
-runs, and only while the ledger's readiness probe answers 2xx (it is 503 until the ledger's consumer
-holds partitions, and a timeout or refused connection counts as not ready). A run that waits longer
-than `queue-timeout` becomes `EXPIRED`. The queue lives in the `runs` table, so it survives a
+exists. At most `max-active` runs hold a place, and together they run at most `max-total-tps`
+transactions per second (1000: one 1000 TPS run took up to 5 cores in our measurements, and three at
+once ran the gateway and the generator out of memory). A scheduler hands free places to the oldest
+queued runs in order, while their rates fit; a run that does not fit holds back the ones behind it, so
+a large run never waits forever behind smaller ones. It admits nothing until the ledger instances hold
+every partition of the transfers topic, as Prometheus sees them: a killed instance keeps its
+partitions until it returns or its session times out, while the others still answer, and Prometheus
+drops the series of an instance it cannot scrape. Prometheus not answering counts as not ready. A run
+that waits longer than `queue-timeout` becomes `EXPIRED`. The queue lives in the `runs` table, so it survives a
 restart of control, and waiting time is measured by the database clock from `created_at`.
 
 Starts and scheduler ticks take one transaction-scoped advisory lock, so counts and inserts never
@@ -45,6 +50,12 @@ interleave: concurrent starts get exactly the free places of the queue and of th
 - **A cookie for the session.** The project stores nothing in the visitor's browser by design, and
   a link that carries the session is easier to share inside the company that received it.
 - **A queue in memory.** Lost on every restart of control; the table costs one index.
+- **The ledger's readiness probe as the gate.** It said "ready" while any instance held a partition, so
+  a run started next to a killed instance's stalled partitions; and as the Kubernetes readiness probe
+  it took every instance out of the Service during a rebalance, though reconciliation reads need no
+  Kafka.
+- **Letting a smaller queued run overtake a larger one.** Fills the rate better, but a 1000 TPS run
+  could wait forever behind a stream of small ones.
 - **Only disabling the button against double clicks.** A retried request from the network would
   still start a second run.
 - **Hashing the tokens.** A leaked database gives away the quota of a demo, nothing more; the

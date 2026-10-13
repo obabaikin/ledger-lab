@@ -3,6 +3,7 @@ package com.ledgerlab.control
 import com.ledgerlab.control.RunFixtures.simulation
 import com.ledgerlab.control.generator.GeneratorApi
 import com.ledgerlab.control.http.forRun
+import com.ledgerlab.control.ledger.LedgerReadiness
 import com.ledgerlab.control.runs.Conductor
 import com.ledgerlab.control.runs.RunQueue
 import com.sun.net.httpserver.HttpServer
@@ -28,6 +29,7 @@ class RealPrometheusTest : IntegrationTest() {
 
     @Autowired lateinit var conductor: Conductor
     @Autowired lateinit var queue: RunQueue
+    @Autowired lateinit var readiness: LedgerReadiness
 
     private fun running(): Pair<UUID, UUID> {
         val sessionId = sessionOf(invite())
@@ -67,8 +69,26 @@ class RealPrometheusTest : IntegrationTest() {
         assertThat(live(sessionId, runId)["ledgerDuplicatesAtLeast"]).isEqualTo(7)
     }
 
+    @Test
+    fun `a killed instance's partitions stop counting, so the ledger is not ready until the live ones hold all`() {
+        exporter.serve(LEDGER, "ledger_kafka_assigned_partitions 2")
+        exporter.serve(SECOND_LEDGER, "ledger_kafka_assigned_partitions 2")
+        killedExporter.serve(KILLED_LEDGER, "ledger_kafka_assigned_partitions ${props.ledger.transferPartitions - 4}")
+        killedExporter.awaitScrapes(SCRAPES_TO_SETTLE)
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE)
+        assertThat(readiness.isReady()).isTrue()
+
+        killedExporter.close()
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE)
+        assertThat(readiness.isReady()).isFalse()
+
+        exporter.serve(SECOND_LEDGER, "ledger_kafka_assigned_partitions ${props.ledger.transferPartitions - 2}")
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE)
+        assertThat(readiness.isReady()).isTrue()
+    }
+
     /** Serves each job's metrics as text and counts the scrapes, so a test knows Prometheus has seen what it serves. */
-    class FakeExporter : AutoCloseable {
+    class FakeExporter(private val jobs: List<String>) : AutoCloseable {
         private val bodies = ConcurrentHashMap<String, String>()
         private val scrapes = AtomicInteger()
 
@@ -92,7 +112,7 @@ class RealPrometheusTest : IntegrationTest() {
         }
 
         fun awaitScrapes(perJob: Int, within: Duration = SCRAPE_INTERVAL.multipliedBy(perJob.toLong() + 2)) {
-            val until = scrapes.get() + perJob * JOBS.size
+            val until = scrapes.get() + perJob * jobs.size
             val deadline = Instant.now() + within
             while (scrapes.get() < until) {
                 check(Instant.now() < deadline) { "Prometheus did not scrape: ${scrapes.get()} of $until" }
@@ -107,6 +127,8 @@ class RealPrometheusTest : IntegrationTest() {
         private const val LEDGER = "ledger"
         private const val SECOND_LEDGER = "ledger-b"
         private val JOBS = listOf(LEDGER, SECOND_LEDGER)
+        /** A ledger instance the test kills by closing its exporter. */
+        private const val KILLED_LEDGER = "ledger-killed"
         private const val PROMETHEUS_PORT = 9090
         private val SCRAPE_INTERVAL: Duration = Duration.ofSeconds(1)
         private val POLL: Duration = Duration.ofMillis(20)
@@ -115,16 +137,18 @@ class RealPrometheusTest : IntegrationTest() {
         /** A sample is queryable once the next scrape came. */
         private const val SCRAPES_TO_SETTLE = 2
 
-        val exporter = FakeExporter()
+        val exporter = FakeExporter(JOBS)
+        val killedExporter = FakeExporter(listOf(KILLED_LEDGER))
 
         private val prometheus: GenericContainer<*> by lazy {
-            Testcontainers.exposeHostPorts(exporter.port)
-            val jobs = JOBS.joinToString("\n") { job ->
+            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port)
+            val targets = JOBS.map { it to exporter.port } + (KILLED_LEDGER to killedExporter.port)
+            val jobs = targets.joinToString("\n") { (job, port) ->
                 """
                 |  - job_name: $job
                 |    metrics_path: /$job
                 |    static_configs:
-                |      - targets: ["host.testcontainers.internal:${exporter.port}"]
+                |      - targets: ["host.testcontainers.internal:$port"]
                 """.trimMargin()
             }
             val config = "global:\n  scrape_interval: ${SCRAPE_INTERVAL.toSeconds()}s\n  scrape_timeout: 800ms\nscrape_configs:\n$jobs\n"

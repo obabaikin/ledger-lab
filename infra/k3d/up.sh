@@ -1,0 +1,36 @@
+#!/bin/sh
+# Local Kubernetes: a k3d cluster the size of the target node, the five service images, the chart.
+# Needs docker, k3d, kubectl and helm on PATH (versions in README). Safe to run again: rebuilds and upgrades.
+set -eu
+
+CLUSTER="${CLUSTER:-ledger-lab}"
+NAMESPACE="${NAMESPACE:-ledger-lab}"
+K3S_IMAGE="${K3S_IMAGE:-rancher/k3s:v1.36.4-k3s1}"
+NODE_MEMORY="${NODE_MEMORY:-8g}"
+CONTROL_PORT="${CONTROL_PORT:-8083}"
+TAG="dev-$(date +%Y%m%d%H%M%S)"
+MODULES="ledger-service gateway generator control reporting"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+if ! k3d cluster list "$CLUSTER" >/dev/null 2>&1; then
+  k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --servers 1 --agents 0 \
+    --servers-memory "$NODE_MEMORY" --port "$CONTROL_PORT:80@loadbalancer" --wait
+fi
+
+(cd "$ROOT" && ./gradlew bootJar -q)
+for module in $MODULES; do
+  docker build -q -f "$ROOT/infra/docker/Dockerfile" -t "ledger-lab/$module:$TAG" "$ROOT/$module/build/libs"
+done
+# shellcheck disable=SC2086
+k3d image import --cluster "$CLUSTER" $(for module in $MODULES; do echo "ledger-lab/$module:$TAG"; done)
+
+helm upgrade --install ledger-lab "$ROOT/infra/helm/ledger-lab" --namespace "$NAMESPACE" --create-namespace \
+  --set image.tag="$TAG" --wait --timeout 10m "$@"
+
+# k3s installs its ingress controller on its own schedule, after helm already reports the release ready.
+until curl -sf -o /dev/null "http://localhost:$CONTROL_PORT/v3/api-docs"; do
+  echo "waiting for control behind the ingress"
+  sleep 2
+done
+kubectl --namespace "$NAMESPACE" get pods
+echo "control: http://localhost:$CONTROL_PORT"

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ledger-lab
+description: The bank (ledger, gateway, reporting), its client (generator), the control service and their infrastructure.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

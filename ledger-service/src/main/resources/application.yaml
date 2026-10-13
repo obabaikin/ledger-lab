@@ -36,6 +36,8 @@ ledger:
     send-timeout: 30s
   consumer:
     retry-backoff: 500ms
+    # Set per instance in Kubernetes (the StatefulSet pod name); unset, the consumer joins the group dynamically.
+    instance-id: ${LEDGER_INSTANCE_ID:}
   run-duplicates:
     # Past the last scrape after the run, before a long-lived pod publishes every past run.
     idle-retention: 10m
@@ -59,6 +61,3 @@ management:
       show-details: always
       probes:
         enabled: true
-      group:
-        readiness:
-          include: readinessState, kafkaAssignment

@@ -20,6 +20,8 @@ control:
   runs:
     max-active: 3
     max-queued: 10
+    # From measurements in k3d (ADR 0012).
+    max-total-tps: 1000
     queue-timeout: 5m
     tps-options: 100, 500, 1000
     duration-options: 10s, 20s, 30s
@@ -36,7 +38,8 @@ control:
     poll-interval: 1s
   ledger:
     base-url: http://localhost:8080
-    readiness-timeout: 2s
+    # The transfers topic's partition count (infra/kafka/create-topics.sh); runs start once the ledger holds them all.
+    transfer-partitions: 6
   gateway:
     base-url: http://localhost:8081
   generator:

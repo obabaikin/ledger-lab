@@ -1,11 +1,12 @@
 package com.ledgerlab.control
 
+import com.ledgerlab.control.RunFixtures.prometheus
 import com.ledgerlab.control.runs.QueueScheduler
 import com.ledgerlab.control.runs.RunQueue
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import java.time.Duration
 
 class RunQueueTest : IntegrationTest() {
 
@@ -53,6 +54,56 @@ class RunQueueTest : IntegrationTest() {
             .containsExactly(*(List(props.runs.maxActive - 2) { "CREATED" } + List(2) { "QUEUED" }).toTypedArray())
     }
 
+    private fun queuedAt(vararg tps: Int): List<Any?> {
+        val sessionId = sessionOf(invite())
+        return tps.map { start(sessionId, tps = it).body!!["runId"] }
+    }
+
+    @Test
+    fun `runs whose rates fit the total together start together`() {
+        val runs = queuedAt(500, 100, 100)
+
+        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(3)
+        assertThat(runs.map { stateOf(it) }).containsOnly("CREATED")
+    }
+
+    @Test
+    fun `a run that would take the total past the limit waits until a running one ends`() {
+        val (first, second) = queuedAt(props.runs.maxTotalTps, 100)
+
+        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(1)
+        assertThat(stateOf(first)).isEqualTo("CREATED")
+        assertThat(stateOf(second)).isEqualTo("QUEUED")
+
+        setRun(first, state = "RECONCILED")
+
+        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(1)
+        assertThat(stateOf(second)).isEqualTo("CREATED")
+    }
+
+    @Test
+    fun `a smaller run behind a waiting one does not overtake it`() {
+        val (running, big, small) = queuedAt(500, props.runs.maxTotalTps, 100)
+        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(1)
+
+        assertThat(queue.advance(ledgerReady = true).admitted).isZero()
+        assertThat(listOf(running, big, small).map { stateOf(it) }).containsExactly("CREATED", "QUEUED", "QUEUED")
+    }
+
+    @Test
+    fun `run settings with a rate option above the total are refused`() {
+        assertThatThrownBy { props.runs.copy(tpsOptions = listOf(props.runs.maxTotalTps + 1)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `runs that fill the total exactly start`() {
+        val runs = queuedAt(props.runs.maxTotalTps / 2, props.runs.maxTotalTps / 2)
+
+        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(2)
+        assertThat(runs.map { stateOf(it) }).containsOnly("CREATED")
+    }
+
     @Test
     fun `final runs free their places`() {
         val runs = queued(props.runs.maxActive + 1)
@@ -85,18 +136,22 @@ class RunQueueTest : IntegrationTest() {
     }
 
     @Test
-    fun `a tick admits runs only when the ledger answers ready`() {
+    fun `a tick admits runs only once the ledger holds every partition`() {
         val (run) = queued(1)
 
-        ledger.status = 503
+        prometheus.status = 503
         assertThat(scheduler.tick().admitted).isZero()
-        ledger.status = 200
-        ledger.delay = props.ledger.readinessTimeout.plusMillis(500)
+        prometheus.status = 200
+        heldPartitions(props.ledger.transferPartitions - 2)
         assertThat(scheduler.tick().admitted).isZero()
         assertThat(stateOf(run)).isEqualTo("QUEUED")
 
-        ledger.delay = Duration.ZERO
+        heldPartitions(props.ledger.transferPartitions)
         assertThat(scheduler.tick().admitted).isEqualTo(1)
         assertThat(stateOf(run)).isEqualTo("CREATED")
     }
+
+    private fun heldPartitions(count: Int) = prometheus.answerQuery(
+        "GET", "/api/v1/query", "query=sum(ledger_kafka_assigned_partitions)", 200, prometheus(listOf(emptyMap<String, String>() to count)),
+    )
 }

@@ -1,0 +1,107 @@
+{{- $root := . }}
+{{- range $name, $service := .Values.services }}
+{{- $usesDatabase := ne $name "generator" }}
+{{- $usesKafka := has $name (list "ledger" "gateway" "reporting") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 4 }}
+spec:
+  selector: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $service.port }}
+---
+apiVersion: apps/v1
+kind: {{ if eq $name "ledger" }}StatefulSet{{ else }}Deployment{{ end }}
+metadata:
+  name: {{ $name }}
+  labels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 4 }}
+spec:
+  {{- if eq $name "ledger" }}
+  serviceName: {{ $name }}
+  # Instances start and stop together; each one's partitions wait for it under its name (static membership).
+  podManagementPolicy: Parallel
+  {{- end }}
+  replicas: {{ $service.replicas }}
+  selector:
+    matchLabels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 8 }}
+      annotations: {{- include "ledger-lab.scrape" $root | nindent 8 }}
+    spec:
+      initContainers:
+        {{- if $usesDatabase }}
+        - name: wait-for-postgres
+          image: {{ $root.Values.postgres.image }}
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432; do sleep 1; done"]
+          resources:
+            limits: {memory: {{ $root.Values.initMemory }}}
+        {{- end }}
+        {{- if $usesKafka }}
+        - name: wait-for-topics
+          image: {{ $root.Values.kafka.image }}
+          command:
+            - sh
+            - -c
+            - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic transfers,transfer-results >/dev/null 2>&1; do sleep 2; done
+          resources:
+            limits: {memory: {{ $root.Values.kafka.toolsMemory }}}
+        {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "ledger-lab.image" (dict "root" $root "service" $service) }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          env:
+            - {name: SERVER_PORT, value: {{ $service.port | quote }}}
+            - {name: MANAGEMENT_SERVER_PORT, value: {{ $root.Values.managementPort | quote }}}
+            {{- if $usesDatabase }}
+            - {name: SPRING_DATASOURCE_URL, value: "jdbc:postgresql://postgres:5432/ledgerlab?reWriteBatchedInserts=true"}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: db-passwords, key: {{ $name }}}
+            {{- end }}
+            {{- if $usesKafka }}
+            - {name: SPRING_KAFKA_BOOTSTRAPSERVERS, value: "kafka:9092"}
+            {{- end }}
+            {{- if eq $name "ledger" }}
+            {{- if mod $root.Values.kafka.partitions $service.replicas }}
+            {{- fail "kafka.partitions must divide evenly among the ledger's replicas" }}
+            {{- end }}
+            # Consumers beyond one per partition get none, and the assignor gives them to the first instances by name.
+            - {name: SPRING_KAFKA_LISTENER_CONCURRENCY, value: {{ div $root.Values.kafka.partitions $service.replicas | quote }}}
+            - name: LEDGER_INSTANCE_ID
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            {{- end }}
+            {{- if eq $name "generator" }}
+            - {name: GENERATOR_GATEWAYURL, value: "http://gateway:{{ $root.Values.services.gateway.port }}"}
+            {{- end }}
+            {{- if eq $name "control" }}
+            {{- range $other := list "ledger" "gateway" "generator" "reporting" }}
+            - {name: CONTROL_{{ upper $other }}_BASEURL, value: "http://{{ $other }}:{{ (get $root.Values.services $other).port }}"}
+            {{- end }}
+            - {name: CONTROL_LEDGER_TRANSFERPARTITIONS, value: {{ $root.Values.kafka.partitions | quote }}}
+            - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
+            {{- end }}
+          ports:
+            - {name: http, containerPort: {{ $service.port }}}
+            - {name: management, containerPort: {{ $root.Values.managementPort }}}
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: management}
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: management}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: management}
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: {memory: {{ $service.memory }}}
+            limits: {memory: {{ $service.memory }}}
+{{- end }}

@@ -1,44 +1,28 @@
 package com.ledgerlab.control.ledger
 
 import com.ledgerlab.control.ControlProperties
+import com.ledgerlab.control.metrics.LedgerMetrics
+import com.ledgerlab.control.metrics.PrometheusClient
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.stereotype.Component
-import org.springframework.web.client.RestClient
-import org.springframework.web.client.RestClientException
-import java.net.http.HttpClient
+import kotlin.math.roundToInt
 
+/** A failed scrape makes an instance's series stale, so the sum counts only instances that answered (ADR 0012). */
 @Component
-class LedgerReadiness(ledger: ControlProperties.Ledger) {
-
-    @Autowired
-    constructor(props: ControlProperties) : this(props.ledger)
-
+class LedgerReadiness(private val prometheus: PrometheusClient, props: ControlProperties) {
     private val log = LoggerFactory.getLogger(javaClass)
+    private val partitions = props.ledger.transferPartitions
 
-    private val http = RestClient.builder()
-        .baseUrl(ledger.baseUrl)
-        .requestFactory(
-            JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(ledger.readinessTimeout).build())
-                .apply { setReadTimeout(ledger.readinessTimeout) },
-        )
-        .build()
-
-    @Volatile private var lastAnswer: Boolean? = null
+    @Volatile private var lastHeld: Int? = null
 
     fun isReady(): Boolean {
-        val ready = try {
-            http.get().uri(LedgerApi.READINESS_PATH).retrieve()
-                .onStatus({ !it.is2xxSuccessful }) { _, response -> throw RestClientException("readiness answered ${response.statusCode}") }
-                .toBodilessEntity()
-            true
-        } catch (e: RestClientException) {
-            if (lastAnswer != false) log.info("Ledger not ready, runs wait in the queue: {}", e.message)
-            false
-        }
-        if (ready && lastAnswer != true) log.info("Ledger ready")
-        lastAnswer = ready
-        return ready
+        val held = prometheus.query(HELD_PARTITIONS)?.singleOrNull()?.number?.roundToInt()
+        if (held != lastHeld) log.info("Ledger instances hold {} of {} partitions; runs start only at all of them", held, partitions)
+        lastHeld = held
+        return held == partitions
+    }
+
+    private companion object {
+        const val HELD_PARTITIONS = "sum(${LedgerMetrics.ASSIGNED_PARTITIONS})"
     }
 }
