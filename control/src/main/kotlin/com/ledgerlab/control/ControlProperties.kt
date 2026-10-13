@@ -12,6 +12,8 @@ data class ControlProperties(
     val generator: Generator,
     val services: Services,
     val cleanup: Cleanup,
+    val reporting: Reporting,
+    val prometheus: Prometheus,
 ) {
     data class Runs(
         val maxActive: Int,
@@ -41,4 +43,8 @@ data class ControlProperties(
     data class Services(val requestTimeout: Duration)
 
     data class Cleanup(val interval: Duration, val retention: Duration)
+
+    data class Reporting(val baseUrl: String, val catchUpWait: Duration)
+
+    data class Prometheus(val baseUrl: String, val requestTimeout: Duration)
 }

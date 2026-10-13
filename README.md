@@ -37,10 +37,11 @@ Micrometer / Prometheus / Grafana · Helm · k3s · Terraform (Contabo)
 
 | Module | Purpose | Status |
 |---|---|---|
-| `common` | The bank's internal Kafka messages, shared by ledger and gateway; no logic | done |
+| `common` | The bank's internal Kafka messages, shared by the bank's services; no logic | done |
 | `ledger-service` | Double-entry ledger, Kafka consumer, reconciliation, internal API | done |
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
+| `reporting` | The bank's numbers per run, projected from its Kafka events, internal API | done |
 | `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota, run queue, orchestration and the verdict; page and chaos button follow |
 
 ## Running locally
@@ -48,12 +49,13 @@ Micrometer / Prometheus / Grafana · Helm · k3s · Terraform (Contabo)
 Requirements: JDK 21, Docker.
 
 ```bash
-docker compose up -d                      # Postgres (one schema per service), Kafka and its topics
+docker compose up -d                      # Postgres (one schema per service), Kafka and its topics, Prometheus :9090
 ./gradlew test                            # integration tests with Testcontainers
 ./gradlew :ledger-service:bootRun         # :8080
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
-./gradlew :control:bootRun                # :8083, invites, the run queue and orchestration (needs the other three)
+./gradlew :reporting:bootRun              # :8084, the run's numbers from the bank's events
+./gradlew :control:bootRun                # :8083, invites, the run queue and orchestration (needs the other four)
 ```
 
 A run through control, once an invite exists (see below):
@@ -144,6 +146,14 @@ period and a drained bank, then both reconciliations. Its report says `BALANCED`
 cannot finish ends the run, and a restart of control resumes every run where it stood. The bank's
 data of a run is deleted a day after it ended; control keeps the run and its report
 ([ADR 0013](docs/adr/0013-orchestrating-a-run-and-the-verdict.md)).
+
+While a run is running or draining, its `GET` carries `live`: the bank's numbers from reporting,
+which projects the bank's Kafka events into a row per transfer (accepted, posted, rejected, in
+flight, the money posted, the bank's latency, a series per second), the clients' counts from the
+generator, and from Prometheus the instances that are up, the partitions each ledger holds and the
+redeliveries the ledger skipped. Live numbers trail the bank; the report keeps the final ones once
+the projection counts what the books count, with the clients' exact latency
+([ADR 0015](docs/adr/0015-live-numbers-from-the-banks-events.md)).
 
 ## Scope and non-goals
 

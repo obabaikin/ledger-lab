@@ -1,5 +1,7 @@
 package com.ledgerlab.control.api
 
+import com.ledgerlab.control.metrics.LiveRuns
+import com.ledgerlab.control.metrics.LiveView
 import com.ledgerlab.control.runs.Run
 import com.ledgerlab.control.runs.RunReport
 import com.ledgerlab.control.runs.RunRequest
@@ -55,6 +57,8 @@ data class RunView(
     val result: RunResult?,
     @field:Schema(description = "Why the run failed without a verdict; only when failed.")
     val failure: String?,
+    @field:Schema(description = "Live numbers; only in a run's own GET while running or draining, else null. The report keeps the final ones.")
+    val live: LiveView?,
 )
 
 @Schema(description = "A session's runs, newest first.")
@@ -62,7 +66,7 @@ data class RunList(val items: List<RunView>)
 
 @RestController
 @RequestMapping(RunController.RUNS_PATH)
-class RunController(private val runs: RunService) {
+class RunController(private val runs: RunService, private val liveRuns: LiveRuns) {
 
     @Operation(summary = "Start a run: it joins the queue")
     @ApiResponse(responseCode = "200", description = "A repeat of a run that is final")
@@ -90,7 +94,10 @@ class RunController(private val runs: RunService) {
     @ApiResponse(responseCode = "200", description = "The run")
     @ApiResponse(responseCode = "404", description = "Unknown session, or no such run in it", content = [Content(schema = Schema(implementation = ApiError::class))])
     @GetMapping("/{runId}")
-    fun get(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunView = runs.find(sessionId, runId).toView()
+    fun get(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunView {
+        val run = runs.find(sessionId, runId)
+        return run.toView(liveRuns.of(runId)?.takeIf { run.state == RunState.RUNNING || run.state == RunState.DRAINING })
+    }
 
     @Operation(summary = "Stop a running run early; the bank still finishes and reconciles it")
     @ApiResponse(responseCode = "200", description = "The run is past running; nothing to stop")
@@ -115,6 +122,6 @@ class RunController(private val runs: RunService) {
     }
 }
 
-private fun Run.toView() = RunView(
-    runId, state, tps, durationSeconds, createdAt, admittedAt, finishedAt, position, startedAt, stopRequested, closedAt, result, failure,
+private fun Run.toView(live: LiveView? = null) = RunView(
+    runId, state, tps, durationSeconds, createdAt, admittedAt, finishedAt, position, startedAt, stopRequested, closedAt, result, failure, live,
 )

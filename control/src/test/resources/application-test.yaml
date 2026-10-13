@@ -8,3 +8,6 @@ control:
     request-timeout: 500ms
   generator:
     reconciliation-timeout: 500ms
+  prometheus:
+    # Through a placeholder: a dynamic property of the base test class would win over a subclass's real Prometheus (E100).
+    base-url: ${stub.prometheus-url}

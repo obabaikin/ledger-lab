@@ -1,13 +1,16 @@
 package com.ledgerlab.control
 
 import com.ledgerlab.control.RunFixtures.books
+import com.ledgerlab.control.RunFixtures.duplicates
 import com.ledgerlab.control.RunFixtures.clientReport
 import com.ledgerlab.control.RunFixtures.simulation
+import com.ledgerlab.control.RunFixtures.stats
 import com.ledgerlab.control.RunFixtures.summary
 import com.ledgerlab.control.gateway.GatewayApi
 import com.ledgerlab.control.generator.GeneratorApi
 import com.ledgerlab.control.http.forRun
 import com.ledgerlab.control.ledger.LedgerApi
+import com.ledgerlab.control.reporting.ReportingApi
 import com.ledgerlab.control.runs.Conductor
 import com.ledgerlab.control.runs.RunQueue
 import org.assertj.core.api.Assertions.assertThat
@@ -17,6 +20,10 @@ import java.time.Duration
 import java.util.UUID
 
 class ConductorTest : IntegrationTest() {
+
+    private companion object {
+        const val PROMETHEUS_QUERY = "/api/v1/query"
+    }
 
     @Autowired lateinit var conductor: Conductor
     @Autowired lateinit var queue: RunQueue
@@ -55,9 +62,15 @@ class ConductorTest : IntegrationTest() {
     private fun column(runId: UUID, column: String): Any? =
         jdbc.sql("SELECT $column FROM runs WHERE run_id = :id").param("id", runId).query { rs, _ -> rs.getObject(1) }.list().single()
 
-    private fun bank(runId: UUID, summary: Map<String, Any?> = summary(runId), books: Map<String, Any?> = books(runId)) {
+    private fun bank(
+        runId: UUID,
+        summary: Map<String, Any?> = summary(runId),
+        books: Map<String, Any?> = books(runId),
+        stats: Map<String, Any?>? = stats(runId),
+    ) {
         gateway.answer("GET", GatewayApi.SUMMARY_PATH.forRun(runId), 200, summary)
         ledger.answer("GET", LedgerApi.RECONCILIATION_PATH.forRun(runId), 200, books)
+        stats?.let { reporting.answer("GET", ReportingApi.STATS_PATH.forRun(runId), 200, it) }
     }
 
     private fun clientReconciles(runId: UUID, status: Int = 200, body: Any? = clientReport(runId)) =
@@ -498,5 +511,101 @@ class ConductorTest : IntegrationTest() {
         assertThat(stateOf(runId)).isEqualTo("FAILED")
         assertThat(column(runId, "failure")).isEqualTo("bank unavailable")
         assertThat(column(runId, "result")).isNull()
+    }
+
+    @Test
+    fun `a projection behind books that are final keeps the drain waiting, and the report comes once it caught up`() {
+        val runId = draining()
+        bank(runId, stats = stats(runId, accepted = 990, posted = 975, rejected = 15))
+        clientReconciles(runId)
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+        assertThat(generator.callsTo("GET", GeneratorApi.RECONCILIATION_PATH.forRun(runId))).isEmpty()
+
+        reporting.answer("GET", ReportingApi.STATS_PATH.forRun(runId), 200, stats(runId))
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RECONCILED")
+        val report = reportOf(runId)
+        assertThat(report["result"]).isEqualTo("BALANCED")
+        assertThat(report["projectionMatchesBooks"]).isEqualTo(true)
+        assertThat(report["notes"] as List<*>).isEmpty()
+        assertThat(((report["stats"] as Map<*, *>)["totals"] as Map<*, *>)["accepted"]).isEqualTo(995)
+    }
+
+    @Test
+    fun `a projection still behind after the catch-up wait is noted, and the verdict stays the books'`() {
+        val runId = draining()
+        bank(runId, stats = stats(runId, accepted = 990, posted = 975, rejected = 15))
+        clientReconciles(runId)
+        conductor.tick()
+
+        backdate(runId, "drain_progress_at", props.reporting.catchUpWait)
+        conductor.tick()
+
+        val report = reportOf(runId)
+        assertThat(report["result"]).isEqualTo("BALANCED")
+        assertThat(report["reasons"] as List<*>).isEmpty()
+        assertThat(report["projectionMatchesBooks"]).isEqualTo(false)
+        assertThat(report["notes"]).isEqualTo(listOf("projection does not match the books: accepted 990 of 995, posted 975 of 980, rejected 15 of 15"))
+    }
+
+    @Test
+    fun `a reporting service that does not answer is waited for as long, then noted without stats`() {
+        val runId = draining()
+        bank(runId, stats = null)
+        reporting.status = 503
+        clientReconciles(runId)
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        backdate(runId, "drain_progress_at", props.reporting.catchUpWait)
+        conductor.tick()
+
+        val report = reportOf(runId)
+        assertThat(report["result"]).isEqualTo("BALANCED")
+        assertThat(report["stats"]).isNull()
+        assertThat(report["projectionMatchesBooks"]).isNull()
+        assertThat(report["notes"]).isEqualTo(listOf("reporting unavailable: no numbers from the bank's events"))
+    }
+
+    @Test
+    fun `a drain that ends without final books does not wait for the projection`() {
+        val runId = draining()
+        bank(runId, books = books(runId, posted = 700, rejected = 10), stats = null)
+        reporting.status = 503
+        clientReconciles(runId)
+        conductor.tick()
+
+        backdate(runId, "drain_progress_at", props.runs.drainStallTimeout)
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RECONCILED")
+        assertThat(reportOf(runId)["notes"]).isEqualTo(listOf("reporting unavailable: no numbers from the bank's events"))
+    }
+
+    @Test
+    fun `the report carries the clients' exact latency and the ledger's duplicates seen while the run was live`() {
+        val runId = draining()
+        bank(runId, stats = stats(runId, accepted = 990, posted = 975, rejected = 15))
+        clientReconciles(runId)
+        generator.answer(
+            "GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200,
+            simulation(runId, "FINISHED") + mapOf("waitedLatencyP50Ms" to 101.5, "waitedLatencyP99Ms" to 870.0),
+        )
+        prometheus.answerQuery("GET", PROMETHEUS_QUERY, "query=sum by (run) (ledger_duplicates_total)", 200, duplicates(runId to 7))
+        // Live numbers are read beside the steps of the same tick, so the report takes those of an earlier tick.
+        conductor.tick()
+        prometheus.answerQuery("GET", PROMETHEUS_QUERY, "query=sum by (run) (ledger_duplicates_total)", 200, duplicates(runId to 5))
+        reporting.answer("GET", ReportingApi.STATS_PATH.forRun(runId), 200, stats(runId))
+        conductor.tick()
+
+        val report = reportOf(runId)
+        assertThat(report["clientLatencyP50Ms"]).isEqualTo(101.5)
+        assertThat(report["clientLatencyP99Ms"]).isEqualTo(870.0)
+        assertThat(report["ledgerDuplicatesAtLeast"]).isEqualTo(7)
     }
 }

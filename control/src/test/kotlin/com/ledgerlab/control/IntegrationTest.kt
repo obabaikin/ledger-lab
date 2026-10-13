@@ -43,6 +43,8 @@ abstract class IntegrationTest {
         ledger.reset()
         gateway.reset()
         generator.reset()
+        reporting.reset()
+        prometheus.reset()
     }
 
     protected fun invite(quota: Int = 100, expiresIn: Duration = Duration.ofDays(1), active: Boolean = true): String {
@@ -100,6 +102,8 @@ abstract class IntegrationTest {
         val ledger = StubService()
         val gateway = StubService()
         val generator = StubService()
+        val reporting = StubService()
+        val prometheus = StubService()
 
         @JvmStatic
         @DynamicPropertySource
@@ -107,6 +111,8 @@ abstract class IntegrationTest {
             registry.add("control.ledger.base-url") { ledger.baseUrl }
             registry.add("control.gateway.base-url") { gateway.baseUrl }
             registry.add("control.generator.base-url") { generator.baseUrl }
+            registry.add("control.reporting.base-url") { reporting.baseUrl }
+            registry.add("stub.prometheus-url") { prometheus.baseUrl }
         }
     }
 }

@@ -270,6 +270,16 @@
           "unknown" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "waitedLatencyP50Ms" : {
+            "description" : "p50 of the time a waiting client's first press took to a final status, ms; presses whose wait ran out are left out; null before one.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "waitedLatencyP99Ms" : {
+            "description" : "p99, as waitedLatencyP50Ms.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
           }
         },
         "type" : "object"

@@ -36,6 +36,8 @@ data class SimulationStatus(
     val unknown: Long,
     val retries: Long,
     val duplicatesSent: Long,
+    val waitedLatencyP50Ms: Double?,
+    val waitedLatencyP99Ms: Double?,
 )
 
 data class TransferIds(val count: Long, val transferIds: List<UUID>)

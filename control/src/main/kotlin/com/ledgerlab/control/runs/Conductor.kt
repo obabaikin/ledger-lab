@@ -11,6 +11,9 @@ import com.ledgerlab.control.ledger.LedgerClient
 import com.ledgerlab.control.ledger.OpenAccountsRequest
 import com.ledgerlab.control.ledger.ReconciliationReport
 import com.ledgerlab.control.gateway.RunSummary
+import com.ledgerlab.control.metrics.LiveRuns
+import com.ledgerlab.control.reporting.ReportingClient
+import com.ledgerlab.control.reporting.RunStats
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.scheduling.annotation.Scheduled
@@ -26,14 +29,26 @@ class Conductor(
     private val ledger: LedgerClient,
     private val gateway: GatewayClient,
     private val generator: GeneratorClient,
+    private val reporting: ReportingClient,
+    private val liveRuns: LiveRuns,
     private val props: ControlProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     /** Runs step side by side, so a slow call of one run does not eat into another run's deadline. */
     fun tick() {
+        val inProgress = runs.inProgress()
         Executors.newVirtualThreadPerTaskExecutor().use { steps ->
-            runs.inProgress().forEach { run -> steps.submit { step(run) } }
+            steps.submit { refreshLive(inProgress) }
+            inProgress.forEach { run -> steps.submit { step(run) } }
+        }
+    }
+
+    private fun refreshLive(inProgress: List<Run>) {
+        try {
+            liveRuns.refresh(inProgress.filter { it.state in LIVE_STATES }.map { it.runId })
+        } catch (e: RuntimeException) {
+            log.error("Live numbers not read, retried on the next tick", e)
         }
     }
 
@@ -126,8 +141,12 @@ class Conductor(
         val stalled = now >= progressAt + props.runs.drainStallTimeout
         if (!drained && !overcounted(bank, ledgerReport) && !stalled && !pastDeadline) return
 
+        val stats = (reporting.stats(run.runId) as? Reply.Answered)?.body
+        val catchingUp = drained && !pastDeadline && now < progressAt + props.reporting.catchUpWait
+        if (catchingUp && (stats == null || !projectionMatchesBooks(stats, bank, ledgerReport))) return
+
         val client = clientSide(run, pastDeadline) ?: return
-        reconciled(run, bank, ledgerReport, client)
+        reconciled(run, bank, ledgerReport, client, stats)
     }
 
     /** Null while the client's reconciliation may still come: the generator answered 503 or not at all. */
@@ -143,8 +162,15 @@ class Conductor(
         }
     }
 
-    private fun reconciled(run: Run, bank: RunSummary, ledgerReport: ReconciliationReport, client: ClientSide) {
-        val report = verdictOf(bank, ledgerReport, client)
+    private fun reconciled(run: Run, bank: RunSummary, ledgerReport: ReconciliationReport, client: ClientSide, stats: RunStats?) {
+        val simulation = (generator.status(run.runId) as? Reply.Answered)?.body
+        val measurements = RunMeasurements(
+            clientLatencyP50Ms = simulation?.waitedLatencyP50Ms,
+            clientLatencyP99Ms = simulation?.waitedLatencyP99Ms,
+            stats = stats,
+            ledgerDuplicatesAtLeast = liveRuns.ledgerDuplicatesAtLeast(run.runId),
+        )
+        val report = verdictOf(bank, ledgerReport, client, measurements)
         if (runs.markReconciled(run.runId, report) == 1) {
             log.info("Run {}: reconciled, {} {}", run.runId, report.result, report.reasons)
         }
@@ -153,6 +179,7 @@ class Conductor(
     private companion object {
         /** A 502 means the generator could not trust the gateway's statement: reported with its words, not waited on. */
         val CLIENT_RECONCILIATION_FINAL = setOf(HttpStatus.BAD_GATEWAY.value())
+        val LIVE_STATES = setOf(RunState.RUNNING, RunState.DRAINING)
     }
 }
 

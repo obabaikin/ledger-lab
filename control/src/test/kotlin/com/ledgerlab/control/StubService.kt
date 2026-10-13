@@ -3,6 +3,8 @@ package com.ledgerlab.control
 import com.sun.net.httpserver.HttpServer
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.net.InetSocketAddress
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -24,7 +26,7 @@ class StubService : AutoCloseable {
             val method = exchange.requestMethod
             val path = exchange.requestURI.path
             calls += Call(method, path, exchange.requestBody.readAllBytes().decodeToString())
-            val answer = answers["$method $path"]
+            val answer = exchange.requestURI.rawQuery?.let { answers["$method $path?${URLDecoder.decode(it, StandardCharsets.UTF_8)}"] } ?: answers["$method $path"]
             Thread.sleep(answer?.delay ?: delay)
             val body = answer?.body?.toByteArray()
             exchange.responseHeaders.add("Content-Type", "application/json")
@@ -41,6 +43,9 @@ class StubService : AutoCloseable {
     fun answer(method: String, path: String, status: Int, body: Any? = null, delay: Duration = Duration.ZERO) {
         answers["$method $path"] = Answer(status, body?.let { it as? String ?: mapper.writeValueAsString(it) }, delay)
     }
+
+    /** An answer to one query string only, e.g. one PromQL query; [query] is the whole query string, form-decoded as Prometheus reads it. */
+    fun answerQuery(method: String, path: String, query: String, status: Int, body: Any?) = answer(method, "$path?$query", status, body)
 
     fun callsTo(method: String, path: String): List<Call> = calls.filter { it.method == method && it.path == path }
 

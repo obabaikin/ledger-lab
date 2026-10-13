@@ -4,6 +4,7 @@ import com.ledgerlab.control.ControlProperties
 import com.ledgerlab.control.gateway.GatewayClient
 import com.ledgerlab.control.http.Reply
 import com.ledgerlab.control.ledger.LedgerClient
+import com.ledgerlab.control.reporting.ReportingClient
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.scheduling.annotation.Scheduled
@@ -14,6 +15,7 @@ class RunCleanup(
     private val runs: RunRepository,
     private val ledger: LedgerClient,
     private val gateway: GatewayClient,
+    private val reporting: ReportingClient,
     private val props: ControlProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -22,7 +24,7 @@ class RunCleanup(
     fun purge(): Int {
         var purged = 0
         for (runId in runs.purgeable(props.cleanup.retention)) {
-            if (deleted(ledger.delete(runId)) && deleted(gateway.delete(runId))) {
+            if (deleted(ledger.delete(runId)) && deleted(gateway.delete(runId)) && deleted(reporting.delete(runId))) {
                 purged += runs.markPurged(runId)
             } else {
                 log.warn("Run {}: bank data not deleted yet, retried in {}", runId, props.cleanup.interval)
