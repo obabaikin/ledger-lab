@@ -51,7 +51,7 @@ services:
     module: control
     port: 8083
     replicas: 1
-    memory: 384Mi
+    memory: 448Mi
   reporting:
     module: reporting
     port: 8084

@@ -154,7 +154,7 @@ its own port inside the cluster. What the chart sets up:
 | ledger ×3 | 512 MiB each |
 | gateway | 768 MiB |
 | generator | 576 MiB |
-| control | 384 MiB |
+| control | 448 MiB |
 | reporting | 448 MiB |
 | Kafka (heap 512 MiB) | 768 MiB |
 | PostgreSQL | 512 MiB |
