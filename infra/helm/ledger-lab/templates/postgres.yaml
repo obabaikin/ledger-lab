@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+data:
+  init.sh: |
+    #!/bin/sh
+    set -eu
+    for role in ledger gateway control reporting; do
+      password=$(cat "/run/db-passwords/$role")
+      psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+        -v role="$role" -v password="$password" <<'SQL'
+    CREATE ROLE :"role" LOGIN PASSWORD :'password';
+    CREATE SCHEMA :"role" AUTHORIZATION :"role";
+    SQL
+    done
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: {{- include "ledger-lab.labels" (dict "name" "postgres") | nindent 4 }}
+spec:
+  selector: {{- include "ledger-lab.labels" (dict "name" "postgres") | nindent 4 }}
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: {{- include "ledger-lab.labels" (dict "name" "postgres") | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "ledger-lab.labels" (dict "name" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" "postgres") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          env:
+            - name: POSTGRES_DB
+              value: ledgerlab
+            - name: POSTGRES_USER
+              value: admin
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: db-passwords, key: postgres}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "admin", "-d", "ledgerlab"]
+            periodSeconds: 2
+          resources:
+            requests: {memory: {{ .Values.postgres.memory }}}
+            limits: {memory: {{ .Values.postgres.memory }}}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: init, mountPath: /docker-entrypoint-initdb.d}
+            - {name: passwords, mountPath: /run/db-passwords, readOnly: true}
+      volumes:
+        - name: init
+          configMap: {name: postgres-init, defaultMode: 0555}
+        - name: passwords
+          secret: {secretName: db-passwords}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: {storage: {{ .Values.postgres.storage }}}

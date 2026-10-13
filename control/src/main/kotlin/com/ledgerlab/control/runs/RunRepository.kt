@@ -236,16 +236,31 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .param("timeoutMillis", timeout.toMillis())
             .update()
 
-    fun admitOldest(count: Int): Int =
+    fun sumTpsIn(states: Collection<RunState>): Int =
+        jdbc.sql("SELECT coalesce(sum(tps), 0) FROM runs WHERE state IN (:states)")
+            .param("states", states.map { it.name })
+            .query(Int::class.java)
+            .single()
+
+    fun admitOldest(count: Int, tpsBudget: Int): Int =
         jdbc.sql(
             """
             UPDATE runs SET state = :created, admitted_at = clock_timestamp()
-            WHERE run_id IN (SELECT run_id FROM runs WHERE state = :queued ORDER BY created_at, run_id LIMIT :count)
+            WHERE run_id IN (
+                SELECT run_id FROM (
+                    SELECT run_id,
+                           row_number() OVER (ORDER BY created_at, run_id) AS place,
+                           sum(tps) OVER (ORDER BY created_at, run_id) AS tps_so_far
+                    FROM runs WHERE state = :queued
+                ) queue
+                WHERE place <= :count AND tps_so_far <= :tpsBudget
+            )
             """,
         )
             .param("created", RunState.CREATED.name)
             .param("queued", RunState.QUEUED.name)
             .param("count", count)
+            .param("tpsBudget", tpsBudget)
             .update()
 
     private fun ResultSet.toRun() = Run(

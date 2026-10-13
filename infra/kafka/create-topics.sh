@@ -7,6 +7,11 @@ BOOTSTRAP="${KAFKA_BOOTSTRAP:-localhost:9092}"
 PARTITIONS="${KAFKA_PARTITIONS:-6}"
 REPLICAS="${KAFKA_REPLICAS:-1}"
 TOPICS="transfers transfer-results"
+# Shorter than control's cleanup of a finished run (24 h): a consumer group that reads the topics from the start
+# again finds only events of runs that still exist, and their handling is idempotent.
+RETENTION_MS="${KAFKA_RETENTION_MS:-43200000}"
+# Retention deletes whole segments only; a segment rolls this often.
+SEGMENT_MS="${KAFKA_SEGMENT_MS:-3600000}"
 KAFKA_BIN="${KAFKA_BIN:-/opt/kafka/bin}"
 
 until "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP" --list >/dev/null 2>&1; do
@@ -23,6 +28,8 @@ layout_of() {
 for topic in $TOPICS; do
   "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP" --create --if-not-exists \
     --topic "$topic" --partitions "$PARTITIONS" --replication-factor "$REPLICAS"
+  "$KAFKA_BIN/kafka-configs.sh" --bootstrap-server "$BOOTSTRAP" --alter --entity-type topics --entity-name "$topic" \
+    --add-config "retention.ms=$RETENTION_MS,segment.ms=$SEGMENT_MS"
   actual=$(layout_of "$topic")
   if [ "$actual" != "$PARTITIONS $REPLICAS" ]; then
     echo "topic $topic has partitions/replicas '$actual', expected '$PARTITIONS $REPLICAS'" >&2

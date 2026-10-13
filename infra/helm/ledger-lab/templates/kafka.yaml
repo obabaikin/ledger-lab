@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels: {{- include "ledger-lab.labels" (dict "name" "kafka") | nindent 4 }}
+spec:
+  selector: {{- include "ledger-lab.labels" (dict "name" "kafka") | nindent 4 }}
+  ports:
+    - port: 9092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels: {{- include "ledger-lab.labels" (dict "name" "kafka") | nindent 4 }}
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels: {{- include "ledger-lab.labels" (dict "name" "kafka") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" "kafka") | nindent 8 }}
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: kafka
+          image: {{ .Values.kafka.image }}
+          # Any KAFKA_* variable replaces the image's default config, so the full single-node setup is listed.
+          env:
+            - {name: KAFKA_NODE_ID, value: "1"}
+            - {name: KAFKA_PROCESS_ROLES, value: "broker,controller"}
+            - {name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093"}
+            - {name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka:9092"}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER}
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"}
+            - {name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9093"}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0"}
+            - {name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false"}
+            - {name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data}
+            - {name: KAFKA_HEAP_OPTS, value: "-Xmx{{ .Values.kafka.heap }} -Xms{{ .Values.kafka.heap }}"}
+          ports:
+            - containerPort: 9092
+          readinessProbe:
+            tcpSocket: {port: 9092}
+            periodSeconds: 2
+          resources:
+            requests: {memory: {{ .Values.kafka.memory }}}
+            limits: {memory: {{ .Values.kafka.memory }}}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/kafka/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: {storage: {{ .Values.kafka.storage }}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: create-topics
+data:
+  create-topics.sh: {{ .Files.Get "files/create-topics.sh" | quote }}
+---
+# A new name per release revision: a finished Job cannot be changed, and every install or upgrade checks the topics.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-topics-{{ .Release.Revision }}
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-topics
+          image: {{ .Values.kafka.image }}
+          command: ["/bin/sh", "/scripts/create-topics.sh"]
+          env:
+            - {name: KAFKA_BOOTSTRAP, value: "kafka:9092"}
+            - {name: KAFKA_PARTITIONS, value: {{ .Values.kafka.partitions | quote }}}
+          resources:
+            limits: {memory: {{ .Values.kafka.toolsMemory }}}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+      volumes:
+        - name: scripts
+          configMap: {name: create-topics}

@@ -27,22 +27,25 @@ class ReadinessTest : IntegrationTest() {
 
     private fun readiness(): HttpStatus = HttpStatus.valueOf(http.getForEntity(READINESS, String::class.java).statusCode.value())
 
+    private fun health(): HttpStatus = HttpStatus.valueOf(http.getForEntity(HEALTH, String::class.java).statusCode.value())
+
     private fun liveness(): HttpStatus = HttpStatus.valueOf(http.getForEntity(LIVENESS, String::class.java).statusCode.value())
 
     @Test
-    fun `not ready while the transfer consumer holds no partition, ready again once it does, without a restart`() {
+    fun `stays ready while the transfer consumer holds no partition, and the health shows the consumer down`() {
         val container = checkNotNull(listeners.getListenerContainer(TransferConsumer.LISTENER_ID))
-        await().atMost(TIMEOUT).until { readiness() == HttpStatus.OK }
+        await().atMost(TIMEOUT).until { health() == HttpStatus.OK }
 
         container.stop()
         try {
-            assertThat(readiness()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+            assertThat(readiness()).isEqualTo(HttpStatus.OK)
             assertThat(liveness()).isEqualTo(HttpStatus.OK)
+            assertThat(health()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
         } finally {
             container.start()
         }
 
-        await().atMost(TIMEOUT).until { readiness() == HttpStatus.OK }
+        await().atMost(TIMEOUT).until { health() == HttpStatus.OK }
     }
 
     @Test
@@ -71,6 +74,7 @@ class ReadinessTest : IntegrationTest() {
     }
 
     private companion object {
+        const val HEALTH = "/actuator/health"
         const val READINESS = "/actuator/health/readiness"
         const val LIVENESS = "/actuator/health/liveness"
         val TIMEOUT: Duration = Duration.ofSeconds(60)

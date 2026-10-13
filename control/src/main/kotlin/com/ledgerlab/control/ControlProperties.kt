@@ -26,7 +26,12 @@ data class ControlProperties(
         val drainStallTimeout: Duration,
         val drainTimeout: Duration,
         val accounts: Accounts,
+        val maxTotalTps: Int,
     ) {
+        init {
+            require(tpsOptions.all { it <= maxTotalTps }) { "a run of ${tpsOptions.max()} TPS would never fit max-total-tps $maxTotalTps" }
+        }
+
         val durationSecondsOptions: List<Int> get() = durationOptions.map { it.toSeconds().toInt() }
     }
 
@@ -34,7 +39,7 @@ data class ControlProperties(
 
     data class Queue(val pollInterval: Duration)
 
-    data class Ledger(val baseUrl: String, val readinessTimeout: Duration)
+    data class Ledger(val baseUrl: String, val transferPartitions: Int)
 
     data class Gateway(val baseUrl: String)
 

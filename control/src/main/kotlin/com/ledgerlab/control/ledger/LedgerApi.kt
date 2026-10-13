@@ -7,8 +7,6 @@ object LedgerApi {
     const val ACCOUNTS_PATH = "/internal/runs/{runId}/accounts"
     const val RECONCILIATION_PATH = "/internal/runs/{runId}/reconciliation"
     const val RUN_PATH = "/internal/runs/{runId}"
-    /** Not in the spec: actuator; 503 until the transfer consumer holds a partition. */
-    const val READINESS_PATH = "/actuator/health/readiness"
 }
 
 data class OpenAccountsRequest(

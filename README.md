@@ -7,8 +7,8 @@ still balance. Built to answer one question properly: *how do you prove no money
 duplicated when consumers crash?*
 
 > Status: work in progress. Ledger, gateway and generator are done; control takes a run from the
-> queue through the bank to a stored verdict. The page, Kubernetes deployment and the load
-> investigation follow.
+> queue through the bank to a stored verdict. The whole system runs in a local Kubernetes cluster.
+> The page, the deployment to a server and the load investigation follow.
 
 ## What it does
 
@@ -119,8 +119,46 @@ absent means never accepted ([ADR 0009](docs/adr/0009-closing-a-period-and-the-s
 Every page carries `entryCount`, the lines in the whole statement, so the client can prove it read
 all of them.
 The generator does this matching by transfer id; any discrepancy makes its report unbalanced and is
-listed by id, up to 1000 per kind ([ADR 0010](docs/adr/0010-client-reconciliation.md)). Only the control console will be exposed; gateway, ledger and generator are
+listed by id, up to 1000 per kind ([ADR 0010](docs/adr/0010-client-reconciliation.md)). Only the control console is exposed; gateway, ledger and generator are
 cluster-internal.
+
+## Running in local Kubernetes
+
+The same system on k3s in Docker ([k3d](https://k3d.io)), on one node the size of the target server
+(8 GB). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0;
+the cluster runs k3s 1.36.4.
+
+```bash
+infra/k3d/up.sh     # cluster, the five images, the chart (infra/helm/ledger-lab); safe to run again
+infra/k3d/down.sh   # deletes the cluster with its volumes
+kubectl -n ledger-lab exec postgres-0 -- psql -U admin -d ledgerlab -c \
+  "INSERT INTO control.invite_tokens (token, expires_at, quota) VALUES ('<random token>', now() + interval '1 day', 5)"
+kubectl -n ledger-lab port-forward svc/prometheus 9090   # Prometheus, inside the cluster otherwise
+```
+
+Control answers on `localhost:8083`; nothing else is exposed, and every service's actuator listens on
+its own port inside the cluster. What the chart sets up:
+
+- **The ledger runs three instances**, one consumer per partition each (six partitions), with Kafka's
+  static membership: an instance that restarts under its name gets its own partitions back without a
+  rebalance of the others; one that does not return keeps them until its 45-second session times out.
+- **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether runs may
+  start is control's question, answered by the partitions the live instances hold.
+- **Memory limits** on every pod, from measurements under load: a 1000 TPS run for 30 seconds took up
+  to 5 cores on a fresh database, and the node stayed under 4.4 GB through runs back to back. JVMs take
+  half their limit as heap; the rest is metaspace, thread stacks and buffers, 120 to 160 MB in every
+  service.
+
+| Pod | Memory limit |
+|---|---|
+| ledger ×3 | 512 MiB each |
+| gateway | 768 MiB |
+| generator | 576 MiB |
+| control | 384 MiB |
+| reporting | 448 MiB |
+| Kafka (heap 512 MiB) | 768 MiB |
+| PostgreSQL | 512 MiB |
+| Prometheus | 512 MiB |
 
 ## Invites and the run queue
 
@@ -136,8 +174,9 @@ VALUES ('<random token>', now() + interval '30 days', 5);  -- runs per hour
 key to it, no cookie is set. `POST /api/sessions/{sessionId}/runs {"requestId", "tps",
 "durationSeconds"}` answers 202 with the run `QUEUED` and its place; a repeat with the same
 `requestId` and body returns the same run, a different body is 422. Over the invite's hourly quota,
-or with the queue full, the answer is 429. At most three runs hold a place at once, and a run that
-waits more than five minutes expires ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
+or with the queue full, the answer is 429. At most three runs hold a place at once, together at most
+1000 transactions per second; a run starts only once the ledger instances hold all partitions, and
+a run that waits more than five minutes expires ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
 The API is described in `control/openapi.json`, checked against the running service.
 
 A run that leaves the queue gets 100 accounts in the ledger, its clients in the generator, a closed

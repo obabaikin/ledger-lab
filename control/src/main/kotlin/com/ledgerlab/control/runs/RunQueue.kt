@@ -18,8 +18,10 @@ class RunQueue(private val runs: RunRepository, private val props: ControlProper
     fun advance(ledgerReady: Boolean): QueueStep {
         runs.lockQueue()
         val expired = runs.expireQueued(props.runs.queueTimeout)
-        val free = props.runs.maxActive - runs.countIn(RunState.entries.filter { it.holdsSlot })
-        val admitted = if (ledgerReady && free > 0) runs.admitOldest(free) else 0
+        val active = RunState.entries.filter { it.holdsSlot }
+        val free = props.runs.maxActive - runs.countIn(active)
+        val tpsBudget = props.runs.maxTotalTps - runs.sumTpsIn(active)
+        val admitted = if (ledgerReady && free > 0 && tpsBudget > 0) runs.admitOldest(free, tpsBudget) else 0
         if (expired > 0 || admitted > 0) log.info("Run queue: {} expired, {} admitted", expired, admitted)
         return QueueStep(expired, admitted)
     }

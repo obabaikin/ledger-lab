@@ -115,8 +115,8 @@ class LiveRuns(
 
     private companion object {
         const val UP = "up"
-        const val PARTITIONS = "ledger_kafka_assigned_partitions"
-        const val DUPLICATES = "sum by (run) (ledger_duplicates_total)"
+        const val PARTITIONS = LedgerMetrics.ASSIGNED_PARTITIONS
+        const val DUPLICATES = "sum by (run) (${LedgerMetrics.DUPLICATES})"
         const val INSTANCE = "instance"
         const val JOB = "job"
         const val RUN = "run"

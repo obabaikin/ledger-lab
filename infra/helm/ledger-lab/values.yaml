@@ -1,0 +1,59 @@
+# Local k3d defaults. Real passwords come from --set or a values file outside the repository.
+image:
+  repository: ledger-lab
+  tag: dev
+  pullPolicy: IfNotPresent
+
+managementPort: 9000
+initMemory: 64Mi
+
+passwords:
+  postgres: change-me-postgres
+  ledger: change-me-ledger
+  gateway: change-me-gateway
+  control: change-me-control
+  reporting: change-me-reporting
+
+kafka:
+  image: apache/kafka:4.2.1
+  partitions: 6
+  storage: 2Gi
+  heap: 512m
+  memory: 768Mi
+  toolsMemory: 512Mi
+
+postgres:
+  image: postgres:17-alpine
+  storage: 2Gi
+  memory: 512Mi
+
+prometheus:
+  image: prom/prometheus:v3.5.0
+  memory: 512Mi
+
+services:
+  ledger:
+    module: ledger-service
+    port: 8080
+    replicas: 3
+    memory: 512Mi
+  gateway:
+    module: gateway
+    port: 8081
+    replicas: 1
+    memory: 768Mi
+  generator:
+    module: generator
+    port: 8082
+    replicas: 1
+    memory: 576Mi
+  control:
+    module: control
+    port: 8083
+    replicas: 1
+    memory: 384Mi
+  reporting:
+    module: reporting
+    port: 8084
+    replicas: 1
+    memory: 448Mi
