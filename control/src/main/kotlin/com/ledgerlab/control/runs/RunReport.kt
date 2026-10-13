@@ -30,7 +30,7 @@ object RunNotes {
     const val REPORTING_UNAVAILABLE = "reporting unavailable: no numbers from the bank's events"
 
     fun projectionBehindBooks(stats: RunStats, gateway: RunSummary, ledger: ReconciliationReport) =
-        "projection does not match the books: accepted ${stats.totals.accepted} of ${gateway.accepted}, " +
+        "projection does not match the books: commands ${stats.totals.commandsSeen} of ${gateway.accepted}, " +
             "posted ${stats.totals.posted} of ${ledger.postedTransfers}, rejected ${stats.totals.rejected} of ${ledger.rejectedTransfers}"
 }
 
@@ -74,7 +74,7 @@ data class RunReport(
     val clientLatencyP99Ms: Double?,
     @field:Schema(description = "The run's numbers from the bank's events, for the page; null if the reporting service could not be read.")
     val stats: RunStats?,
-    @field:Schema(description = "The projection counts what the books count: accepted, posted, rejected; null without stats.")
+    @field:Schema(description = "The projection counts what the books count: commands seen as accepted, posted, rejected; null without stats.")
     val projectionMatchesBooks: Boolean?,
     @field:Schema(description = "Redeliveries the ledger skipped, at least this many, from monitoring; null if never read.")
     val ledgerDuplicatesAtLeast: Long?,
@@ -90,7 +90,7 @@ data class RunMeasurements(
 )
 
 fun projectionMatchesBooks(stats: RunStats, gateway: RunSummary, ledger: ReconciliationReport): Boolean =
-    stats.totals.accepted == gateway.accepted && stats.totals.posted == ledger.postedTransfers &&
+    stats.totals.commandsSeen == gateway.accepted && stats.totals.posted == ledger.postedTransfers &&
         stats.totals.rejected == ledger.rejectedTransfers
 
 sealed interface ClientSide {

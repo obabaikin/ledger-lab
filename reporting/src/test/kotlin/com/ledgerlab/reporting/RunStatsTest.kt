@@ -86,6 +86,7 @@ class RunStatsTest : IntegrationTest() {
         val snapshot = stats.snapshot(runId)
 
         assertThat(snapshot.totals.accepted).isEqualTo(2)
+        assertThat(snapshot.totals.commandsSeen).isEqualTo(1)
         assertThat(snapshot.totals.inFlight).isZero()
         assertThat(snapshot.totals.postedAmountCents).isEqualTo(100)
         assertThat(runningInFlight(snapshot)).allMatch { it >= 0 }
@@ -94,6 +95,7 @@ class RunStatsTest : IntegrationTest() {
         store(late)
 
         val complete = stats.snapshot(runId)
+        assertThat(complete.totals.commandsSeen).isEqualTo(2)
         assertThat(complete.series.first().accepted).isEqualTo(2)
         assertThat(complete.totals.postedAmountCents).isEqualTo(300)
         assertThat(complete.series.last().bankP50Ms).isEqualTo(1_500.0)

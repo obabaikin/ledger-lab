@@ -92,6 +92,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "commandsSeen" : {
+            "description" : "Transfers whose command is seen: their amount and acceptedAt are known.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "inFlight" : {
             "description" : "accepted − posted − rejected.",
             "format" : "int64",
@@ -119,7 +124,7 @@
             "type" : "object"
           }
         },
-        "required" : [ "accepted", "inFlight", "posted", "postedAmountCents", "rejected", "rejectedByReason" ],
+        "required" : [ "accepted", "commandsSeen", "inFlight", "posted", "postedAmountCents", "rejected", "rejectedByReason" ],
         "type" : "object"
       }
     }

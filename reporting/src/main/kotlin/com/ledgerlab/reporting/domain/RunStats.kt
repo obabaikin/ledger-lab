@@ -21,6 +21,8 @@ data class RunStats(
 data class StatsTotals(
     @field:Schema(description = "Transfers the gateway accepted, including those known only by their result so far.", requiredMode = Schema.RequiredMode.REQUIRED)
     val accepted: Long,
+    @field:Schema(description = "Transfers whose command is seen: their amount and acceptedAt are known.", requiredMode = Schema.RequiredMode.REQUIRED)
+    val commandsSeen: Long,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val posted: Long,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)

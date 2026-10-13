@@ -297,7 +297,7 @@
             "type" : "array"
           },
           "projectionMatchesBooks" : {
-            "description" : "The projection counts what the books count: accepted, posted, rejected; null without stats.",
+            "description" : "The projection counts what the books count: commands seen as accepted, posted, rejected; null without stats.",
             "type" : [ "boolean", "null" ]
           },
           "reasons" : {
@@ -558,6 +558,11 @@
         "properties" : {
           "accepted" : {
             "description" : "Transfers the gateway accepted, including those known only by their result so far.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "commandsSeen" : {
+            "description" : "Transfers whose command is seen: their amount and acceptedAt are known.",
             "format" : "int64",
             "type" : "integer"
           },

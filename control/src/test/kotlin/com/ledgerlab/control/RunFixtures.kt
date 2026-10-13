@@ -20,10 +20,10 @@ object RunFixtures {
         "postedTransfers" to posted, "rejectedTransfers" to rejected, "rejectionsByReason" to reasons,
     )
 
-    fun stats(runId: UUID, accepted: Long = 995, posted: Long = 980, rejected: Long = 15) = mapOf(
+    fun stats(runId: UUID, accepted: Long = 995, posted: Long = 980, rejected: Long = 15, commandsSeen: Long = accepted) = mapOf(
         "runId" to runId, "at" to "2026-10-13T10:00:05Z",
         "totals" to mapOf(
-            "accepted" to accepted, "posted" to posted, "rejected" to rejected, "inFlight" to accepted - posted - rejected,
+            "accepted" to accepted, "commandsSeen" to commandsSeen, "posted" to posted, "rejected" to rejected, "inFlight" to accepted - posted - rejected,
             "postedAmountCents" to posted * 100, "rejectedByReason" to mapOf("BLOCKED_ACCOUNT" to rejected),
         ),
         "bankLatency" to mapOf("p50Ms" to 14.0, "p99Ms" to 490.0),

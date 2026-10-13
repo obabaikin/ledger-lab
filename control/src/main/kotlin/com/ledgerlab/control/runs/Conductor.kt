@@ -47,7 +47,7 @@ class Conductor(
     private fun refreshLive(inProgress: List<Run>) {
         try {
             liveRuns.refresh(inProgress.filter { it.state in LIVE_STATES }.map { it.runId })
-        } catch (e: RuntimeException) {
+        } catch (e: Exception) {
             log.error("Live numbers not read, retried on the next tick", e)
         }
     }

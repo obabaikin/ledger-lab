@@ -26,12 +26,13 @@ class RunStatsRepository(private val jdbc: JdbcTemplate) {
         val series = jdbc.query(SERIES_SQL, { rs, _ -> secondStats(rs) }, runId, POSTED, REJECTED, POSTED)
         return jdbc.queryForObject(TOTALS_SQL, { rs, _ ->
             val accepted = rs.getLong("accepted")
+            val commandsSeen = rs.getLong("commands_seen")
             val posted = rs.getLong("posted")
             val rejected = rs.getLong("rejected")
             RunStats(
                 runId = runId,
                 at = rs.getTimestamp("at").toInstant(),
-                totals = StatsTotals(accepted, posted, rejected, accepted - posted - rejected, rs.getLong("posted_amount"), reasons),
+                totals = StatsTotals(accepted, commandsSeen, posted, rejected, accepted - posted - rejected, rs.getLong("posted_amount"), reasons),
                 bankLatency = BankLatency(rs.nullableDouble("p50"), rs.nullableDouble("p99")),
                 series = series,
             )
@@ -59,6 +60,7 @@ class RunStatsRepository(private val jdbc: JdbcTemplate) {
         const val TOTALS_SQL = """
             SELECT now() AS at,
                    count(*) AS accepted,
+                   count(accepted_at) AS commands_seen,
                    count(*) FILTER (WHERE outcome = ?) AS posted,
                    count(*) FILTER (WHERE outcome = ?) AS rejected,
                    coalesce(sum(amount_cents) FILTER (WHERE outcome = ?), 0) AS posted_amount,

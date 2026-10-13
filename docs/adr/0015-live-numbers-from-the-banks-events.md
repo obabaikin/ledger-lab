@@ -37,9 +37,11 @@ as "at least N", not part of the verdict. Control reads all of it once a tick an
 each part while its source cannot be read.
 
 **Final means caught up with the books.** Once the books are final, control waits until the
-projection counts what they count (accepted = gateway, posted and rejected = ledger), up to 60 s,
-which is past Kafka's 45 s session timeout: a killed reporting instance's partitions move to another
-by then. The report keeps the stats, `projectionMatchesBooks`, and `notes` when reporting could not
+projection counts what they count, up to 60 s after the books are final: commands seen = the
+gateway's accepted, posted and rejected = the ledger's. Commands are counted apart from rows, as
+every transfer has a result row once the drain is done; with every command seen, the amount and the
+latency are whole too. 60 s is past Kafka's 45 s session timeout, so the partitions of a reporting
+instance killed early in the drain have moved by then. The report keeps the stats, `projectionMatchesBooks`, and `notes` when reporting could not
 be read or did not catch up. Notes never change the verdict; the verdict is the books'.
 
 ## Considered and rejected
@@ -64,8 +66,8 @@ be read or did not catch up. Notes never change the verdict; the verdict is the 
 - Live numbers trail the bank by the outbox interval and Kafka: a lower bound until the drain.
 - Bank latency subtracts the gateway's clock from the ledger's: right on one node or synchronised
   clocks, off by their difference otherwise.
-- reporting is not a chaos target in phase 6; a killed instance delays the report by up to 60 s, a
-  dead one leaves a note.
+- reporting is not a chaos target in phase 6; a killed instance delays the report by up to 60 s after
+  the books are final, and one killed near the end of that leaves a note.
 - The ledger's duplicate count loses what a killed instance counted since its last scrape; it is
   shown as a lower bound and nothing rests on it.
 - Debits equal credits in the projection by construction (one amount per transfer); the live series

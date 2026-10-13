@@ -11,6 +11,9 @@ import com.ledgerlab.control.runs.Conductor
 import com.ledgerlab.control.runs.RunQueue
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.beans.factory.annotation.Autowired
 import java.util.UUID
 
@@ -92,6 +95,18 @@ class LiveRunsTest : IntegrationTest() {
         conductor.tick()
 
         assertThat(live(sessionId, runId)!!["ledgerDuplicatesAtLeast"]).isEqualTo(0)
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension::class)
+    fun `a failure while reading live numbers is logged, not lost in a future`(output: CapturedOutput) {
+        running()
+        val noValue = mapOf("status" to "success", "data" to mapOf("resultType" to "vector", "result" to listOf(mapOf("metric" to mapOf("job" to "ledger"), "value" to emptyList<Any>()))))
+        prometheusAnswers(UP, noValue)
+
+        conductor.tick()
+
+        assertThat(output.out).contains("Live numbers not read")
     }
 
     @Test

@@ -536,6 +536,23 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
+    fun `results of every transfer without all their commands are not caught up yet`() {
+        val runId = draining()
+        bank(runId, stats = stats(runId, commandsSeen = 990))
+        clientReconciles(runId)
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        backdate(runId, "drain_progress_at", props.reporting.catchUpWait)
+        conductor.tick()
+
+        val report = reportOf(runId)
+        assertThat(report["projectionMatchesBooks"]).isEqualTo(false)
+        assertThat(report["notes"]).isEqualTo(listOf("projection does not match the books: commands 990 of 995, posted 980 of 980, rejected 15 of 15"))
+    }
+
+    @Test
     fun `a projection still behind after the catch-up wait is noted, and the verdict stays the books'`() {
         val runId = draining()
         bank(runId, stats = stats(runId, accepted = 990, posted = 975, rejected = 15))
@@ -549,7 +566,7 @@ class ConductorTest : IntegrationTest() {
         assertThat(report["result"]).isEqualTo("BALANCED")
         assertThat(report["reasons"] as List<*>).isEmpty()
         assertThat(report["projectionMatchesBooks"]).isEqualTo(false)
-        assertThat(report["notes"]).isEqualTo(listOf("projection does not match the books: accepted 990 of 995, posted 975 of 980, rejected 15 of 15"))
+        assertThat(report["notes"]).isEqualTo(listOf("projection does not match the books: commands 990 of 995, posted 975 of 980, rejected 15 of 15"))
     }
 
     @Test

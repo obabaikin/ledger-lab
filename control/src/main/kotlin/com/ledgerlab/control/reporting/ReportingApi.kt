@@ -24,6 +24,8 @@ data class RunStats(
 data class StatsTotals(
     @field:Schema(description = "Transfers the gateway accepted, including those known only by their result so far.")
     val accepted: Long,
+    @field:Schema(description = "Transfers whose command is seen: their amount and acceptedAt are known.")
+    val commandsSeen: Long,
     val posted: Long,
     val rejected: Long,
     @field:Schema(description = "accepted − posted − rejected.")
