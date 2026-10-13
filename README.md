@@ -125,43 +125,20 @@ cluster-internal.
 ## Running in local Kubernetes
 
 The same system on k3s in Docker ([k3d](https://k3d.io)), on one node the size of the target server
-(8 GB). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0;
-the cluster runs k3s 1.36.4.
+(8 GB). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
 
 ```bash
 infra/k3d/up.sh     # cluster, the five images, the chart (infra/helm/ledger-lab); safe to run again
 infra/k3d/down.sh   # deletes the cluster with its volumes
-kubectl -n ledger-lab exec postgres-0 -- psql -U admin -d ledgerlab -c \
-  "INSERT INTO control.invite_tokens (token, expires_at, quota) VALUES ('<random token>', now() + interval '1 day', 5)"
-kubectl -n ledger-lab port-forward svc/prometheus 9090   # Prometheus, inside the cluster otherwise
 ```
 
-Control answers on `localhost:8083`; nothing else is exposed, and every service's actuator listens on
-its own port inside the cluster. What the chart sets up:
+Control answers on `localhost:8083` (an invite is created as below); nothing else is exposed.
 
-- **The ledger runs three instances**, one consumer per partition each (six partitions), with Kafka's
-  static membership: an instance that restarts under its name gets its own partitions back without a
-  rebalance of the others; one that does not return keeps them until its 45-second session times out.
-- **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether runs may
+- **The ledger runs three instances** with Kafka's static membership: an instance that restarts under
+  its name gets its own partitions back without a rebalance of the others.
+- **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether a run may
   start is control's question, answered by the partitions the live instances hold.
-- **Memory limits** on every pod, from measurements under load: a 1000 TPS run for 30 seconds took up
-  to 5 cores on a fresh database, and the node stayed under 4.4 GB through runs back to back. JVMs take
-  half their limit as heap; the rest is metaspace, thread stacks and buffers, 120 to 160 MB in every
-  service.
-
-| Pod | Memory limit |
-|---|---|
-| ledger ×3 | 512 MiB each |
-| gateway | 768 MiB |
-| generator | 576 MiB |
-| control | 448 MiB |
-| reporting | 448 MiB |
-| Kafka (heap 512 MiB) | 768 MiB |
-| PostgreSQL | 512 MiB |
-| Prometheus | 512 MiB |
-
-The services that consume Kafka wait for the topics in an init container with Kafka's tools, limited to
-512 MiB; while it runs it reserves that much, so reporting's pod requests 512 MiB, not 448.
+- **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap.
 
 ## Invites and the run queue
 
