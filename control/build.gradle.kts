@@ -15,6 +15,7 @@ kotlin {
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-validation")
@@ -43,6 +44,7 @@ tasks.test {
         "ledger.spec" to rootProject.file("ledger-service/openapi.json"),
         "gateway.spec" to rootProject.file("gateway/openapi-internal.json"),
         "generator.spec" to rootProject.file("generator/openapi.json"),
+        "reporting.spec" to rootProject.file("reporting/openapi.json"),
     )
     inputs.files(specs.values).withPropertyName("serviceSpecs")
     specs.forEach { (property, file) -> systemProperty(property, file.path) }

@@ -4,6 +4,7 @@ import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.TransferStatus
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import io.swagger.v3.oas.annotations.media.Schema
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,6 +60,10 @@ data class SimulationStatus(
     val duplicatesSent: Long,
     val inFlight: Long,
     val actualTps: Double,
+    @field:Schema(description = "p50 of the time a waiting client's first press took to a final status, ms; presses whose wait ran out are left out; null before one.")
+    val waitedLatencyP50Ms: Double?,
+    @field:Schema(description = "p99, as waitedLatencyP50Ms.")
+    val waitedLatencyP99Ms: Double?,
 )
 
 /**
@@ -102,6 +107,8 @@ class Simulation(
         Timer.builder("generator.submission.latency").tag("waited", "true").tag("kind", kind.tag)
             .publishPercentiles(*LATENCY_PERCENTILES).register(registry)
     }
+    /** The same first presses as [submissionLatency], kept whole, so the run's report gets exact percentiles. */
+    private val waitedLatenciesNanos = ConcurrentLinkedQueue<Long>()
     /** One point per answered send; a histogram, so percentiles can be taken over any mix of tags. */
     private val sendLatency = buildMap {
         for (waited in listOf(true, false)) for (kind in SendKind.entries) for (final in listOf(true, false)) {
@@ -145,6 +152,9 @@ class Simulation(
         private val CUT_SHORT = SubmissionResult(null, null, FIRST_ATTEMPT, SubmissionOutcome.UNKNOWN, Duration.ZERO)
         private val DRAIN_POLL = Duration.ofMillis(10)
         private val NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1)
+        private val NANOS_PER_MILLI = TimeUnit.MILLISECONDS.toNanos(1).toDouble()
+        private const val P50 = 0.5
+        private const val P99 = 0.99
         /** Same percentiles as the bank's services publish, so dashboards can put them side by side. */
         private val LATENCY_PERCENTILES = doubleArrayOf(0.5, 0.95, 0.99)
     }
@@ -281,6 +291,7 @@ class Simulation(
     private fun recordSubmissionLatency(result: SubmissionResult, wait: Duration?, kind: SendKind) {
         if (wait != null && result.outcome == SubmissionOutcome.ACKNOWLEDGED && result.status?.isFinal == true) {
             submissionLatency.getValue(kind).record(result.latency)
+            if (kind == SendKind.FIRST) waitedLatenciesNanos.add(result.latency.toNanos())
         }
     }
 
@@ -324,11 +335,24 @@ class Simulation(
             requested.sum(), acknowledged.sum(), posted.sum(), rejected.sum(),
             rejectedByReason.mapValues { it.value.sum() }, failed.sum(), unknown.sum(), retries.sum(),
             duplicatesSent.sum(), open.get(), requested.sum() / seconds,
+            waitedLatencyMs(P50), waitedLatencyMs(P99),
         )
     }
+
+    private fun waitedLatencyMs(p: Double): Double? =
+        percentileCont(waitedLatenciesNanos.sorted(), p)?.let { it / NANOS_PER_MILLI }
 }
 
 private val SendKind.tag: String get() = name.lowercase()
+
+/** Linear interpolation between ranks, as PostgreSQL's percentile_cont, so client and bank percentiles compare. */
+internal fun percentileCont(sorted: List<Long>, p: Double): Double? {
+    if (sorted.isEmpty()) return null
+    val rank = p * (sorted.size - 1)
+    val lower = rank.toInt()
+    val upper = minOf(lower + 1, sorted.size - 1)
+    return sorted[lower] + (rank - lower) * (sorted[upper] - sorted[lower])
+}
 
 /**
  * The outcome of a transfer from all its sends, given in the order they ended (client contract,

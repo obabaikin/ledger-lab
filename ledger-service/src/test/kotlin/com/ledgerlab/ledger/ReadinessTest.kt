@@ -1,7 +1,9 @@
 package com.ledgerlab.ledger
 
+import com.ledgerlab.ledger.kafka.AssignedPartitionsGauge
 import com.ledgerlab.ledger.kafka.KafkaAssignmentHealthIndicator
 import com.ledgerlab.ledger.kafka.TransferConsumer
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.apache.kafka.common.TopicPartition
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
@@ -51,6 +53,21 @@ class ReadinessTest : IntegrationTest() {
         `when`(registry.getListenerContainer(TransferConsumer.LISTENER_ID)).thenReturn(container)
 
         assertThat(KafkaAssignmentHealthIndicator(registry).health().status).isEqualTo(Status.UP)
+    }
+
+    @Test
+    fun `the partitions an instance holds are published, so a live but idle instance shows`() {
+        val container = mock(MessageListenerContainer::class.java)
+        `when`(container.assignedPartitions).thenReturn(listOf(TopicPartition("transfers", 0), TopicPartition("transfers", 2)))
+        val listeners = mock(KafkaListenerEndpointRegistry::class.java)
+        `when`(listeners.getListenerContainer(TransferConsumer.LISTENER_ID)).thenReturn(container)
+        val meters = SimpleMeterRegistry()
+
+        AssignedPartitionsGauge(listeners, meters)
+
+        assertThat(meters.get(AssignedPartitionsGauge.METRIC).gauge().value()).isEqualTo(2.0)
+        `when`(container.assignedPartitions).thenReturn(emptyList())
+        assertThat(meters.get(AssignedPartitionsGauge.METRIC).gauge().value()).isZero()
     }
 
     private companion object {

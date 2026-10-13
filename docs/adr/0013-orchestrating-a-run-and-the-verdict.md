@@ -100,7 +100,5 @@ session says `chaosAvailable: false`, until deleting the ledger pod is built.
   ledger numbering them; a client of a real bank would get its accounts from the bank's API.
 - The generator releases a journal 10 minutes after its run; many short runs in a row can fill its
   memory cap, and the next setup then times out.
-- The clients' latency per run is not in the report yet: the generator's timers are shared by all
-  runs, so with runs side by side their percentiles mix; it needs a histogram per run.
-- The page shows progress live in a later step; until then the run's state and report are read
-  through the API.
+- The clients' latency per run and the live numbers came later, from the generator, the bank's
+  events and Prometheus ([ADR 0015](0015-live-numbers-from-the-banks-events.md)); the page follows.

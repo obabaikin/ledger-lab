@@ -3,6 +3,7 @@ package com.ledgerlab.ledger.kafka
 import com.ledgerlab.common.Observability.MDC_RUN_ID
 import com.ledgerlab.common.TransferCommand
 import com.ledgerlab.ledger.domain.TransferResult
+import com.ledgerlab.ledger.metrics.RunDuplicates
 import com.ledgerlab.ledger.service.LedgerService
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
@@ -16,12 +17,12 @@ import tools.jackson.databind.ObjectMapper
 class TransferConsumer(
     private val ledger: LedgerService,
     private val objectMapper: ObjectMapper,
+    private val duplicates: RunDuplicates,
     registry: MeterRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val posted = outcomeCounter(registry, "posted")
     private val rejected = outcomeCounter(registry, "rejected")
-    private val duplicates = outcomeCounter(registry, "duplicate")
 
     // The id lets the readiness check find this container; without idIsGroup = false it would also replace the group id.
     @KafkaListener(id = LISTENER_ID, idIsGroup = false, topics = ["\${ledger.topic.name}"])
@@ -40,7 +41,7 @@ class TransferConsumer(
             TransferResult.Posted -> posted.increment()
             is TransferResult.Rejected -> rejected.increment()
             TransferResult.AlreadyProcessed -> {
-                duplicates.increment()
+                duplicates.record(command.runId)
                 log.debug("Duplicate delivery ignored: run={} transfer={}", command.runId, command.transferId)
             }
         }

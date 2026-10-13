@@ -36,6 +36,10 @@ ledger:
     send-timeout: 30s
   consumer:
     retry-backoff: 500ms
+  run-duplicates:
+    # Past the last scrape after the run, before a long-lived pod publishes every past run.
+    idle-retention: 10m
+    sweep-interval: 1m
 
 springdoc:
   # Otherwise every controller-local error handler is added to every operation as a possible answer.
@@ -49,7 +53,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always

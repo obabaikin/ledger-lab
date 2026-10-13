@@ -1,0 +1,16 @@
+spring:
+  kafka:
+    listener:
+      concurrency: 2
+  datasource:
+    hikari:
+      # The service connection drops the URL's parameters; batches are rewritten as in production.
+      data-source-properties:
+        reWriteBatchedInserts: true
+reporting:
+  consumer:
+    retry-backoff: 200ms
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN

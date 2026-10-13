@@ -3,6 +3,7 @@ package com.ledgerlab.control
 import com.ledgerlab.control.gateway.GatewayApi
 import com.ledgerlab.control.http.forRun
 import com.ledgerlab.control.ledger.LedgerApi
+import com.ledgerlab.control.reporting.ReportingApi
 import com.ledgerlab.control.runs.RunCleanup
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -31,6 +32,7 @@ class RunCleanupTest : IntegrationTest() {
         val expired = ended("EXPIRED", 25)
         ledger.status = 204
         gateway.status = 204
+        reporting.status = 204
 
         assertThat(cleanup.purge()).isEqualTo(2)
 
@@ -38,6 +40,7 @@ class RunCleanupTest : IntegrationTest() {
         assertThat(listOf(recent, expired).map { purged(it) }).containsOnly(false)
         assertThat(ledger.callsTo("DELETE", LedgerApi.RUN_PATH.forRun(reconciled))).hasSize(1)
         assertThat(gateway.callsTo("DELETE", GatewayApi.RUN_PATH.forRun(reconciled))).hasSize(1)
+        assertThat(reporting.callsTo("DELETE", ReportingApi.RUN_PATH.forRun(reconciled))).hasSize(1)
         assertThat(ledger.callsTo("DELETE", LedgerApi.RUN_PATH.forRun(expired))).isEmpty()
         assertThat(stateOf(reconciled)).isEqualTo("RECONCILED")
     }
@@ -47,6 +50,7 @@ class RunCleanupTest : IntegrationTest() {
         val runId = ended("FAILED", 25)
         ledger.status = 404
         gateway.status = 404
+        reporting.status = 404
 
         cleanup.purge()
 
@@ -58,6 +62,7 @@ class RunCleanupTest : IntegrationTest() {
         val runId = ended("RECONCILED", 25)
         ledger.status = 204
         gateway.status = 503
+        reporting.status = 204
 
         cleanup.purge()
         assertThat(purged(runId)).isFalse()
@@ -67,5 +72,18 @@ class RunCleanupTest : IntegrationTest() {
         cleanup.purge()
         assertThat(purged(runId)).isTrue()
         assertThat(gateway.callsTo("DELETE", GatewayApi.RUN_PATH.forRun(runId))).hasSize(2)
+    }
+
+    @Test
+    fun `a run whose numbers the reporting service still holds is not purged yet`() {
+        val runId = ended("RECONCILED", 25)
+        ledger.status = 204
+        gateway.status = 204
+        reporting.status = 503
+
+        cleanup.purge()
+
+        assertThat(purged(runId)).isFalse()
+        assertThat(reporting.callsTo("DELETE", ReportingApi.RUN_PATH.forRun(runId))).hasSize(1)
     }
 }

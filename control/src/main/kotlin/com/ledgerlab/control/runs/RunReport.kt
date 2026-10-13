@@ -7,6 +7,7 @@ import com.ledgerlab.control.generator.ReconciliationBreaks
 import com.ledgerlab.control.generator.UnknownResolved
 import com.ledgerlab.control.ledger.ReconciliationCheck
 import com.ledgerlab.control.ledger.ReconciliationReport
+import com.ledgerlab.control.reporting.RunStats
 import io.swagger.v3.oas.annotations.media.Schema
 
 object RunOutcomes {
@@ -22,6 +23,15 @@ object RunOutcomes {
         "drain timed out: ledger applied $ledgerApplied, gateway results $gatewayResults, of $accepted"
 
     fun clientReconciliationFailed(error: String) = "client reconciliation failed: $error"
+}
+
+/** What the report could not show; none of it decides the verdict. */
+object RunNotes {
+    const val REPORTING_UNAVAILABLE = "reporting unavailable: no numbers from the bank's events"
+
+    fun projectionBehindBooks(stats: RunStats, gateway: RunSummary, ledger: ReconciliationReport) =
+        "projection does not match the books: commands ${stats.totals.commandsSeen} of ${gateway.accepted}, " +
+            "posted ${stats.totals.posted} of ${ledger.postedTransfers}, rejected ${stats.totals.rejected} of ${ledger.rejectedTransfers}"
 }
 
 @Schema(description = "What the gateway counted for the run.")
@@ -58,7 +68,30 @@ data class RunReport(
     val breaks: ReconciliationBreaks?,
     @field:Schema(description = "Transfers the clients did not know the outcome of, settled by the statement.")
     val unknownResolved: UnknownResolved?,
+    @field:Schema(description = "Client latency p50, ms: a waiting client's first press to a final status, exact over the run; presses whose wait ran out are left out; null without one.")
+    val clientLatencyP50Ms: Double?,
+    @field:Schema(description = "Client latency p99, ms, as clientLatencyP50Ms.")
+    val clientLatencyP99Ms: Double?,
+    @field:Schema(description = "The run's numbers from the bank's events, for the page; null if the reporting service could not be read.")
+    val stats: RunStats?,
+    @field:Schema(description = "The projection counts what the books count: commands seen as accepted, posted, rejected; null without stats.")
+    val projectionMatchesBooks: Boolean?,
+    @field:Schema(description = "Redeliveries the ledger skipped, at least this many, from monitoring; null if never read.")
+    val ledgerDuplicatesAtLeast: Long?,
+    @field:Schema(description = "What the report could not show; does not decide the verdict.")
+    val notes: List<String> = emptyList(),
 )
+
+data class RunMeasurements(
+    val clientLatencyP50Ms: Double? = null,
+    val clientLatencyP99Ms: Double? = null,
+    val stats: RunStats? = null,
+    val ledgerDuplicatesAtLeast: Long? = null,
+)
+
+fun projectionMatchesBooks(stats: RunStats, gateway: RunSummary, ledger: ReconciliationReport): Boolean =
+    stats.totals.commandsSeen == gateway.accepted && stats.totals.posted == ledger.postedTransfers &&
+        stats.totals.rejected == ledger.rejectedTransfers
 
 sealed interface ClientSide {
     data class Reconciled(val report: ClientReconciliationReport) : ClientSide
@@ -73,7 +106,12 @@ fun drainFinished(gateway: RunSummary, ledger: ReconciliationReport): Boolean =
 fun overcounted(gateway: RunSummary, ledger: ReconciliationReport): Boolean =
     ledger.postedTransfers + ledger.rejectedTransfers > gateway.accepted || gateway.posted + gateway.rejected > gateway.accepted
 
-fun verdictOf(gateway: RunSummary, ledger: ReconciliationReport, client: ClientSide): RunReport {
+fun verdictOf(
+    gateway: RunSummary,
+    ledger: ReconciliationReport,
+    client: ClientSide,
+    measurements: RunMeasurements = RunMeasurements(),
+): RunReport {
     val drained = drainFinished(gateway, ledger)
     val overcounted = overcounted(gateway, ledger)
     // Before the drain ends the gateway's counts trail the ledger's: a difference then is lag, not a break.
@@ -90,6 +128,13 @@ fun verdictOf(gateway: RunSummary, ledger: ReconciliationReport, client: ClientS
         }
         if (client is ClientSide.Missing) add(client.reason)
         if (clientReport?.statementFinal == false) add(RunOutcomes.STATEMENT_NOT_FINAL)
+    }
+    val stats = measurements.stats
+    val projectionMatches = stats?.let { projectionMatchesBooks(it, gateway, ledger) }
+    val notes = when (projectionMatches) {
+        null -> listOf(RunNotes.REPORTING_UNAVAILABLE)
+        false -> listOf(RunNotes.projectionBehindBooks(checkNotNull(stats), gateway, ledger))
+        true -> emptyList()
     }
     val result = when {
         !ledger.balanced || bankViewsAgree == false || clientReport?.balanced == false -> RunResult.BREAKS
@@ -112,5 +157,11 @@ fun verdictOf(gateway: RunSummary, ledger: ReconciliationReport, client: ClientS
         rejectionsByReason = ledger.rejectionsByReason,
         breaks = clientReport?.breaks,
         unknownResolved = clientReport?.unknownResolved,
+        clientLatencyP50Ms = measurements.clientLatencyP50Ms,
+        clientLatencyP99Ms = measurements.clientLatencyP99Ms,
+        stats = stats,
+        projectionMatchesBooks = projectionMatches,
+        ledgerDuplicatesAtLeast = measurements.ledgerDuplicatesAtLeast,
+        notes = notes,
     )
 }

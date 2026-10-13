@@ -17,6 +17,11 @@ import com.ledgerlab.control.ledger.LedgerApi
 import com.ledgerlab.control.ledger.OpenAccountsRequest
 import com.ledgerlab.control.ledger.ReconciliationCheck
 import com.ledgerlab.control.ledger.ReconciliationReport
+import com.ledgerlab.control.reporting.BankLatency
+import com.ledgerlab.control.reporting.ReportingApi
+import com.ledgerlab.control.reporting.RunStats
+import com.ledgerlab.control.reporting.SecondStats
+import com.ledgerlab.control.reporting.StatsTotals
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpMethod
@@ -43,6 +48,8 @@ class ServiceContractsTest {
     private val ledger = Spec("ledger.spec")
     private val gateway = Spec("gateway.spec")
     private val generator = Spec("generator.spec")
+    private val reporting = Spec("reporting.spec")
+    private val reportingModels = listOf(RunStats::class, StatsTotals::class, BankLatency::class, SecondStats::class)
 
     private companion object {
         const val NULL_TYPE = "null"
@@ -67,6 +74,8 @@ class ServiceContractsTest {
             Triple(generator, HttpMethod.GET, GeneratorApi.SIMULATION_PATH),
             Triple(generator, HttpMethod.POST, GeneratorApi.STOP_PATH),
             Triple(generator, HttpMethod.GET, GeneratorApi.RECONCILIATION_PATH),
+            Triple(reporting, HttpMethod.GET, ReportingApi.STATS_PATH),
+            Triple(reporting, HttpMethod.DELETE, ReportingApi.RUN_PATH),
         )
         calls.forEach { (spec, method, path) ->
             val parameters = spec.operation(method, path).get("parameters")?.values()?.map { it.get("name").asString() }.orEmpty()
@@ -83,6 +92,7 @@ class ServiceContractsTest {
                 StartSimulationRequest::class, SimulationStatus::class, ClientReconciliationReport::class, JournalTotals::class,
                 StatementTotals::class, ReconciliationBreaks::class, TransferIds::class, UnknownResolved::class,
             ),
+            reporting to reportingModels,
         )
         models.forEach { (spec, types) ->
             types.forEach { type ->
@@ -104,6 +114,8 @@ class ServiceContractsTest {
             Triple(generator, HttpMethod.GET to GeneratorApi.SIMULATION_PATH, listOf("200", "404")),
             Triple(generator, HttpMethod.POST to GeneratorApi.STOP_PATH, listOf("200", "202")),
             Triple(generator, HttpMethod.GET to GeneratorApi.RECONCILIATION_PATH, listOf("200", "404", "409", "502", "503")),
+            Triple(reporting, HttpMethod.GET to ReportingApi.STATS_PATH, listOf("200")),
+            Triple(reporting, HttpMethod.DELETE to ReportingApi.RUN_PATH, listOf("204", "404")),
         )
         answers.forEach { (spec, call, codes) ->
             val (method, path) = call
@@ -120,6 +132,7 @@ class ServiceContractsTest {
                 SimulationStatus::class, ClientReconciliationReport::class, JournalTotals::class, StatementTotals::class,
                 ReconciliationBreaks::class, TransferIds::class, UnknownResolved::class,
             ),
+            reporting to reportingModels,
         )
         models.forEach { (spec, types) ->
             types.forEach { type ->

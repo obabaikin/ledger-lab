@@ -11,6 +11,51 @@
         },
         "type" : "object"
       },
+      "BankLatency" : {
+        "description" : "processedAt − acceptedAt (ledger clock minus gateway clock); null without both.",
+        "properties" : {
+          "p50Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "p99Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "ClientCounts" : {
+        "description" : "What the clients counted, from the generator's status.",
+        "properties" : {
+          "acknowledged" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "duplicatesSent" : {
+            "description" : "Second presses of the same transfer; the gateway answers them without a new transfer.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "requested" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "retries" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unknown" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "CreateSessionRequest" : {
         "description" : "The invite from the link.",
         "properties" : {
@@ -79,6 +124,66 @@
           "rejected" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "LiveView" : {
+        "description" : "Live numbers of a running or draining run; each part is the last one read and keeps it while its source cannot be read.",
+        "properties" : {
+          "clients" : {
+            "description" : "null until the generator answered once.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ClientCounts"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "ledgerDuplicatesAtLeast" : {
+            "description" : "Redeliveries the ledger skipped, at least this many: from monitoring, and a killed instance takes its count along. Not part of the verdict.",
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          },
+          "pods" : {
+            "description" : "null until Prometheus answered once.",
+            "items" : {
+              "$ref" : "#/components/schemas/PodView"
+            },
+            "type" : [ "array", "null" ]
+          },
+          "readAt" : {
+            "description" : "When control last read any part, by its own clock.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "stats" : {
+            "description" : "The bank's numbers from its events; null until the reporting service answered once.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/RunStats"
+            }, {
+              "type" : "null"
+            } ]
+          }
+        },
+        "type" : "object"
+      },
+      "PodView" : {
+        "description" : "One instance of a service, from Prometheus; approximate, a scrape or two behind.",
+        "properties" : {
+          "instance" : {
+            "type" : "string"
+          },
+          "job" : {
+            "type" : "string"
+          },
+          "partitions" : {
+            "description" : "Partitions the ledger instance consumes; null for other services.",
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "up" : {
+            "description" : "The last scrape got an answer.",
+            "type" : "boolean"
           }
         },
         "type" : "object"
@@ -152,6 +257,16 @@
             "description" : "The clients' journal matches the statement; null without a client reconciliation.",
             "type" : [ "boolean", "null" ]
           },
+          "clientLatencyP50Ms" : {
+            "description" : "Client latency p50, ms: a waiting client's first press to a final status, exact over the run; presses whose wait ran out are left out; null without one.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "clientLatencyP99Ms" : {
+            "description" : "Client latency p99, ms, as clientLatencyP50Ms.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
           "gateway" : {
             "$ref" : "#/components/schemas/GatewayCounts"
           },
@@ -162,12 +277,28 @@
             "description" : "The ledger's books: balances, journal and transfer log agree.",
             "type" : "boolean"
           },
+          "ledgerDuplicatesAtLeast" : {
+            "description" : "Redeliveries the ledger skipped, at least this many, from monitoring; null if never read.",
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          },
           "ledgerFailedChecks" : {
             "items" : {
               "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
               "type" : "string"
             },
             "type" : "array"
+          },
+          "notes" : {
+            "description" : "What the report could not show; does not decide the verdict.",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "projectionMatchesBooks" : {
+            "description" : "The projection counts what the books count: commands seen as accepted, posted, rejected; null without stats.",
+            "type" : [ "boolean", "null" ]
           },
           "reasons" : {
             "description" : "What the verdict could not check, with or without breaks; empty if nothing was missing.",
@@ -192,6 +323,14 @@
             "description" : "No statement line was still in flight; null without a client reconciliation.",
             "type" : [ "boolean", "null" ]
           },
+          "stats" : {
+            "description" : "The run's numbers from the bank's events, for the page; null if the reporting service could not be read.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/RunStats"
+            }, {
+              "type" : "null"
+            } ]
+          },
           "unknownResolved" : {
             "description" : "Transfers the clients did not know the outcome of, settled by the statement.",
             "oneOf" : [ {
@@ -199,6 +338,34 @@
             }, {
               "type" : "null"
             } ]
+          }
+        },
+        "type" : "object"
+      },
+      "RunStats" : {
+        "description" : "A run's numbers from the bank's events, as the reporting service had them at `at`; they trail the books while events are on the way.",
+        "properties" : {
+          "at" : {
+            "description" : "Time of the snapshot, by the reporting database's clock.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "bankLatency" : {
+            "$ref" : "#/components/schemas/BankLatency"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "series" : {
+            "description" : "Increments per second, oldest first.",
+            "items" : {
+              "$ref" : "#/components/schemas/SecondStats"
+            },
+            "type" : "array"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/StatsTotals"
           }
         },
         "type" : "object"
@@ -233,6 +400,14 @@
             "format" : "date-time",
             "type" : [ "string", "null" ]
           },
+          "live" : {
+            "description" : "Live numbers; only in a run's own GET while running or draining, else null. The report keeps the final ones.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/LiveView"
+            }, {
+              "type" : "null"
+            } ]
+          },
           "position" : {
             "description" : "Place in the queue, from 1; only while queued.",
             "format" : "int64",
@@ -263,6 +438,42 @@
           "tps" : {
             "format" : "int32",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "SecondStats" : {
+        "properties" : {
+          "accepted" : {
+            "description" : "By acceptedAt, or by processedAt while the command is not seen yet.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "bankP50Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "bankP99Ms" : {
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "posted" : {
+            "description" : "By processedAt, as the rest.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "postedAmountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "second" : {
+            "description" : "Start of the second.",
+            "format" : "date-time",
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -341,6 +552,46 @@
           }
         },
         "required" : [ "durationSeconds", "requestId", "tps" ],
+        "type" : "object"
+      },
+      "StatsTotals" : {
+        "properties" : {
+          "accepted" : {
+            "description" : "Transfers the gateway accepted, including those known only by their result so far.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "commandsSeen" : {
+            "description" : "Transfers whose command is seen: their amount and acceptedAt are known.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "inFlight" : {
+            "description" : "accepted − posted − rejected.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "postedAmountCents" : {
+            "description" : "Sum of posted transfers whose amount is known.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectedByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          }
+        },
         "type" : "object"
       },
       "TransferIds" : {

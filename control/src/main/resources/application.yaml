@@ -47,6 +47,14 @@ control:
   cleanup:
     interval: 1h
     retention: 24h
+  reporting:
+    base-url: http://localhost:8084
+    # Past Kafka's session timeout (45 s): a killed reporting instance's partitions move to another by then (ADR 0015).
+    catch-up-wait: 60s
+  prometheus:
+    base-url: http://localhost:9090
+    # Shorter than the services': it is read every tick for every live run.
+    request-timeout: 1s
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every error handler is added to every operation.
@@ -56,4 +64,4 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
