@@ -26,12 +26,12 @@ duplicated when consumers crash?*
   what Kafka carried and what the ledger posted, and inside the ledger the balances, the
   journal and the transfer log. Any disagreement turns the run red, and so does a verdict that
   could not be completed.
-- A **chaos button** deletes the ledger pod during a run. Reconciliation must still pass.
+- *Planned:* a **chaos button** deletes the ledger pod during a run. Reconciliation must still pass.
 
 ## Stack
 
 Kotlin · Spring Boot 4 · Apache Kafka · PostgreSQL · Flyway · Testcontainers ·
-Micrometer / Prometheus / Grafana · Helm · k3s · Terraform (Contabo)
+Micrometer / Prometheus · Helm · k3s; planned: Grafana, Terraform (Contabo)
 
 ## Modules
 
