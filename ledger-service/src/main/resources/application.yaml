@@ -42,6 +42,9 @@ ledger:
     # Past the last scrape after the run, before a long-lived pod publishes every past run.
     idle-retention: 10m
     sweep-interval: 1m
+  reconciliation:
+    # Per query, below control's 5 s call timeout: the database stops a query control has already given up on.
+    statement-timeout: 4s
   chaos:
     # On in the chart only: POST /actuator/crash halts the instance (control's chaos button).
     enabled: false

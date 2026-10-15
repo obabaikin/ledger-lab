@@ -69,6 +69,40 @@ class ReconciliationTest : IntegrationTest() {
     }
 
     @Test
+    fun `detects a posted transfer with no journal rows`() {
+        val (runId, transferId) = runWithOnePosting()
+        // Drop both rows and undo their balance effect: only the transfer log still shows the posting.
+        jdbc.sql("DELETE FROM journal_entries WHERE run_id = :runId AND transfer_id = :t")
+            .param("runId", runId).param("t", transferId).update()
+        jdbc.sql("UPDATE accounts SET balance_cents = opening_balance_cents WHERE run_id = :runId")
+            .param("runId", runId).update()
+
+        val report = runs.reconcile(runId)
+
+        assertThat(report.failedChecks).containsExactly(ReconciliationCheck.JOURNAL_MATCHES_TRANSFER_LOG)
+    }
+
+    @Test
+    fun `detects a posting whose debit amount differs from the transfer`() {
+        val (runId, transferId) = runWithOnePosting()
+        val second = transfer(runId, from = 2, to = 3, amountCents = 50)
+        ledger.apply(second)
+        // Shift 10 between the two postings' debits: each account and every total still agree.
+        jdbc.sql("UPDATE journal_entries SET amount_cents = amount_cents - 10 WHERE run_id = :runId AND transfer_id = :t AND amount_cents < 0")
+            .param("runId", runId).param("t", transferId).update()
+        jdbc.sql("UPDATE journal_entries SET amount_cents = amount_cents + 10 WHERE run_id = :runId AND transfer_id = :t AND amount_cents < 0")
+            .param("runId", runId).param("t", second.transferId).update()
+        jdbc.sql("UPDATE accounts SET balance_cents = balance_cents - 10 WHERE run_id = :runId AND account_no = 1")
+            .param("runId", runId).update()
+        jdbc.sql("UPDATE accounts SET balance_cents = balance_cents + 10 WHERE run_id = :runId AND account_no = 2")
+            .param("runId", runId).update()
+
+        val report = runs.reconcile(runId)
+
+        assertThat(report.failedChecks).containsExactly(ReconciliationCheck.JOURNAL_MATCHES_TRANSFER_LOG)
+    }
+
+    @Test
     fun `detects a balance that drifted from its journal`() {
         val (runId, _) = runWithOnePosting()
         jdbc.sql("UPDATE accounts SET balance_cents = balance_cents + 1 WHERE run_id = :runId AND account_no = 1")

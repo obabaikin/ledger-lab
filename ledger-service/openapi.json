@@ -296,6 +296,16 @@
               }
             },
             "description" : "The ledger's checks; an unknown run has no accounts and zeros"
+          },
+          "503" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The database cancelled a reconciliation query at the statement timeout."
           }
         },
         "tags" : [ "run-controller" ]

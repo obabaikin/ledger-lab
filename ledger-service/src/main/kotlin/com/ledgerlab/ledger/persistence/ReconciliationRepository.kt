@@ -3,14 +3,22 @@ package com.ledgerlab.ledger.persistence
 import com.ledgerlab.ledger.domain.ReconciliationReport
 import com.ledgerlab.common.RejectReason
 import com.ledgerlab.common.TransferOutcome
+import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
+import java.time.Duration
 import java.util.UUID
 
-@Repository
-class ReconciliationRepository(private val jdbc: JdbcClient) {
+@ConfigurationProperties("ledger.reconciliation")
+data class ReconciliationProperties(val statementTimeout: Duration)
 
+@Repository
+class ReconciliationRepository(private val jdbc: JdbcClient, private val props: ReconciliationProperties) {
+
+    /** Runs inside the caller's transaction: the statement timeout is set for it alone. */
     fun reconcile(runId: UUID): ReconciliationReport {
+        jdbc.sql("SET LOCAL statement_timeout = '${props.statementTimeout.toMillis()}ms'").update()
+
         val accountTotals = jdbc.sql(
             """
             SELECT count(*) AS accounts,
@@ -44,20 +52,22 @@ class ReconciliationRepository(private val jdbc: JdbcClient) {
             "SELECT count(*) AS entries, coalesce(sum(amount_cents), 0) AS total FROM journal_entries WHERE run_id = :runId",
         ).param("runId", runId).query().singleRow()
 
+        // Per-transfer lookup on purpose: its plan does not depend on statistics of a run Postgres has not analyzed yet,
+        // which a JOIN with GROUP BY does (ADR 0016).
         val invalidJournal = jdbc.sql(
             """
-            SELECT count(*) FROM (
-                SELECT t.transfer_id
-                FROM transfers t
-                LEFT JOIN journal_entries j ON j.run_id = t.run_id AND j.transfer_id = t.transfer_id
-                WHERE t.run_id = :runId
-                GROUP BY t.run_id, t.transfer_id
-                HAVING (t.outcome = :posted AND (
-                           count(j.id) <> 2
-                        OR count(j.id) FILTER (WHERE j.account_no = t.from_account AND j.amount_cents = -t.amount_cents) <> 1
-                        OR count(j.id) FILTER (WHERE j.account_no = t.to_account AND j.amount_cents = t.amount_cents) <> 1))
-                    OR (t.outcome = :rejected AND count(j.id) <> 0)
-            ) bad
+            SELECT count(*)
+            FROM transfers t
+            CROSS JOIN LATERAL (
+                SELECT count(*) AS entries,
+                       count(*) FILTER (WHERE j.account_no = t.from_account AND j.amount_cents = -t.amount_cents) AS debits,
+                       count(*) FILTER (WHERE j.account_no = t.to_account AND j.amount_cents = t.amount_cents) AS credits
+                FROM journal_entries j
+                WHERE j.run_id = t.run_id AND j.transfer_id = t.transfer_id
+            ) j
+            WHERE t.run_id = :runId
+              AND ((t.outcome = :posted AND (j.entries <> 2 OR j.debits <> 1 OR j.credits <> 1))
+                OR (t.outcome = :rejected AND j.entries <> 0))
             """,
         )
             .param("runId", runId)
