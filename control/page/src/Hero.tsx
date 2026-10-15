@@ -7,10 +7,7 @@ export function Hero() {
       <h1>Can a bank lose a server mid-transfer without losing money?</h1>
       <nav className="links">
         <a href={`${REPOSITORY_URL}#what-it-does`} target="_blank" rel="noopener">
-          How it works
-        </a>
-        <a href={`${REPOSITORY_URL}/tree/main/docs/adr`} target="_blank" rel="noopener">
-          Design decisions
+          Architecture
         </a>
         <a href={`${REPOSITORY_URL}#running-locally`} target="_blank" rel="noopener">
           Run locally

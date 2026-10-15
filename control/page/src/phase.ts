@@ -1,11 +1,10 @@
 import type { RunView } from './api/client'
 
-export const PHASES = ['Queued', 'Clients sending', 'Bank finishing', 'Verdict'] as const
+export const PHASES = ['Queued', 'Clients sending', 'Bank finishing', 'Reconciling', 'Verdict'] as const
 
-export const BANK_FINISHING_PHASE = 2
 export const VERDICT_PHASE = PHASES.length - 1
 
-export function phaseOf(run: Pick<RunView, 'state'>): number {
+export function phaseOf(run: Pick<RunView, 'state' | 'booksFinalAt'>): number {
   switch (run.state) {
     case 'QUEUED':
     case 'CREATED':
@@ -13,12 +12,10 @@ export function phaseOf(run: Pick<RunView, 'state'>): number {
     case 'RUNNING':
       return 1
     case 'DRAINING':
-      return BANK_FINISHING_PHASE
+      return run.booksFinalAt === null ? 2 : 3
     default:
       return VERDICT_PHASE
   }
 }
 
-export const phaseName = (run: Pick<RunView, 'state'>) => PHASES[phaseOf(run)]
-
-export const booksFinal = (run: Pick<RunView, 'state' | 'booksFinalAt'>) => run.state === 'DRAINING' && run.booksFinalAt !== null
+export const phaseName = (run: Pick<RunView, 'state' | 'booksFinalAt'>) => PHASES[phaseOf(run)]

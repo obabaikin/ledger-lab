@@ -4,6 +4,7 @@ import type { RunReport, RunView, SessionView } from '../api/client'
 export type Answer = { status: number; body?: unknown; headers?: Record<string, string> }
 export type Call = { method: string; path: string; body: unknown }
 
+/** A stand-in for control's API: answers by "METHOD path", records every call. */
 export function fakeControl(answers: Record<string, Answer | (() => Answer)>) {
   const calls: Call[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

@@ -4,8 +4,6 @@ import { api, ApiFailure, type RunView, type SessionView } from './api/client'
 
 const SECONDS_PER_MINUTE = 60
 const MS_PER_SECOND = 1000
-export const RUN_NOT_FINISHED = 'Your run is not finished yet'
-const CRASH_LABEL = '⚡ Crash the ledger (all 3 instances)'
 
 function refusal(e: unknown): string {
   if (!(e instanceof ApiFailure)) return 'Control did not answer. Press Start again: the same run is not started twice.'
@@ -13,7 +11,6 @@ function refusal(e: unknown): string {
     return `The invite's runs for this hour are used up. Next run possible in ${Math.ceil(e.retryAfterSeconds / SECONDS_PER_MINUTE)} min.`
   }
   if (e.status === 429) return 'The queue is full. Try again in a few minutes.'
-  if (e.status === 409) return `${RUN_NOT_FINISHED}.`
   if (e.status === 403) return 'The invite has expired. Runs of this session can still be read.'
   return `Not started: ${e.error}.`
 }
@@ -31,7 +28,6 @@ export function Controls(props: {
   sessionId: string
   session: SessionView
   selected: RunView | null
-  unfinished: boolean
   onChanged: (run?: RunView) => void
   onCrashed: (at: string) => void
 }) {
@@ -99,7 +95,7 @@ export function Controls(props: {
 
   const running = selected?.state === 'RUNNING'
   const chaosWaitSeconds = chaosWaitShown(serverWaitSeconds, chaosReadyAt, now)
-  const crashBlocked = chaosWaitSeconds !== null ? `available in ${chaosWaitSeconds} s` : running ? null : 'while clients are sending'
+  const chaosCountdown = chaosWaitSeconds === null ? null : `available in ${chaosWaitSeconds} s`
 
   return (
     <section className="card">
@@ -118,22 +114,20 @@ export function Controls(props: {
             </option>
           ))}
         </select>
-        <button type="submit" className="primary" disabled={!session.inviteValid || sending || props.unfinished}>
+        <button type="submit" className="primary" disabled={!session.inviteValid || sending}>
           Start the run
-          {props.unfinished && <small className="why">{RUN_NOT_FINISHED}</small>}
         </button>
-        {running && (
-          <button type="button" className="primary" disabled={selected.stopRequested} onClick={stop}>
-            ■ Stop
-            {selected.stopRequested && <small className="why">stopping</small>}
-          </button>
-        )}
-        {session.chaosAvailable && (
-          <button type="button" className="danger" disabled={crashBlocked !== null} onClick={crash}>
-            {CRASH_LABEL}
-            {crashBlocked !== null && <small className="why chaosWait">{crashBlocked}</small>}
-          </button>
-        )}
+        <button type="button" className="primary" disabled={!running || selected?.stopRequested} onClick={stop}>
+          ■ Stop
+        </button>
+        {session.chaosAvailable &&
+          (chaosCountdown === null ? (
+            <button type="button" className="danger" disabled={!running} title={running ? undefined : 'While clients are sending'} onClick={crash}>
+              ⚡ Crash the ledger (all 3 instances)
+            </button>
+          ) : (
+            <span className="hint chaosWait">⚡ Crash the ledger: {chaosCountdown}</span>
+          ))}
         <span className="pill">
           {session.inviteValid ? `Runs this hour: ${session.runsLastHour} of ${session.runsPerHour}` : 'Invite expired; runs can still be read'}
         </span>

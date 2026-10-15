@@ -11,6 +11,7 @@ export function runInProgress(runs: RunView[]): RunView | null {
   return [...runs].reverse().find((r) => IN_PROGRESS.has(r.state)) ?? null
 }
 
+/** The run in progress, when the viewer is looking at another one. */
 export function otherRunInProgress(runs: RunView[], shown: RunView | null): RunView | null {
   const active = runInProgress(runs)
   return active !== null && active.runId !== shown?.runId ? active : null
