@@ -30,5 +30,5 @@ Rejected transfers are stored in the transfer log with a reason but write no jou
 - A lost transfer, a double posting, or a partial write each break at least one check.
 - Journal rows double the write volume per transfer. That is the price of an audit trail.
 - The checks are aggregate queries that can run while a run is still in progress. They stay
-  cheap only while their plans do not depend on statistics of the new run; check 3 is written
-  for that (ADR 0016).
+  cheap only while their plans do not depend on statistics of the new run; checks 3 and 4 are
+  written for that (ADR 0016).

@@ -100,7 +100,7 @@ class RunController(private val runs: RunService, private val reconciliation: Re
     @ExceptionHandler(ReconciliationTimeoutException::class)
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
     fun reconciliationTimeout(e: ReconciliationTimeoutException): ApiError {
-        log.warn("Reconciliation of run {} hit the database statement timeout ({})", e.runId, reconciliation.statementTimeout)
+        log.warn("Reconciliation of run {} hit the database statement timeout ({} ms)", e.runId, reconciliation.statementTimeout.toMillis())
         return ApiError(STATEMENT_TIMEOUT)
     }
 

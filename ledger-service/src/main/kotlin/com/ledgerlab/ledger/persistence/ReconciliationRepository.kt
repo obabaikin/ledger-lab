@@ -53,7 +53,7 @@ class ReconciliationRepository(private val jdbc: JdbcClient, private val props: 
         ).param("runId", runId).query().singleRow()
 
         // Per-transfer lookup on purpose: its plan does not depend on statistics of a run Postgres has not analyzed yet,
-        // which a JOIN with GROUP BY does (ADR 0016).
+        // which a join with an aggregate does (ADR 0016).
         val invalidJournal = jdbc.sql(
             """
             SELECT count(*)
@@ -75,16 +75,18 @@ class ReconciliationRepository(private val jdbc: JdbcClient, private val props: 
             .param("rejected", TransferOutcome.REJECTED.name)
             .query(Long::class.java).single()
 
+        // Per-account lookup for the same reason as the journal check above (ADR 0016).
         val outOfBalance = jdbc.sql(
             """
             SELECT count(*)
             FROM accounts a
-            LEFT JOIN (
-                SELECT account_no, sum(amount_cents) AS movement
-                FROM journal_entries WHERE run_id = :runId GROUP BY account_no
-            ) j ON j.account_no = a.account_no
+            CROSS JOIN LATERAL (
+                SELECT coalesce(sum(j.amount_cents), 0) AS movement
+                FROM journal_entries j
+                WHERE j.run_id = a.run_id AND j.account_no = a.account_no
+            ) j
             WHERE a.run_id = :runId
-              AND a.opening_balance_cents + coalesce(j.movement, 0) <> a.balance_cents
+              AND a.opening_balance_cents + j.movement <> a.balance_cents
             """,
         ).param("runId", runId).query(Long::class.java).single()
 

@@ -103,6 +103,21 @@ class ReconciliationTest : IntegrationTest() {
     }
 
     @Test
+    fun `detects a drifted balance on an account with no journal rows`() {
+        val (runId, _) = runWithOnePosting()
+        // Account 3 took no part in the posting: its check sums zero journal rows.
+        jdbc.sql("UPDATE accounts SET balance_cents = balance_cents + 1 WHERE run_id = :runId AND account_no = 3")
+            .param("runId", runId).update()
+
+        val report = runs.reconcile(runId)
+
+        assertThat(report.failedChecks).containsExactlyInAnyOrder(
+            ReconciliationCheck.TOTAL_BALANCE_CONSERVED,
+            ReconciliationCheck.EVERY_ACCOUNT_MATCHES_JOURNAL,
+        )
+    }
+
+    @Test
     fun `detects a balance that drifted from its journal`() {
         val (runId, _) = runWithOnePosting()
         jdbc.sql("UPDATE accounts SET balance_cents = balance_cents + 1 WHERE run_id = :runId AND account_no = 1")

@@ -9,12 +9,15 @@ have not seen yet. The planner estimates such a run at one row. For check 3 of A
 transfer's journal rows), written as `transfers LEFT JOIN journal_entries … GROUP BY … HAVING`,
 that estimate picks a nested loop whose inner index scan matches on `run_id` only; `transfer_id`
 becomes a filter. Every transfer then reads the whole run's journal.
+Check 4 (every account against its journal) has the same shape: an aggregate of the run's
+journal per account, joined to the accounts, ran again for each account.
 
 Measured on a run of 10,605 transfers and 20,998 journal rows: the filter discarded 222,662,792
 rows, 27 s of CPU (all buffer hits, no disk reads). With fresh statistics the same query takes
 9.2 ms as a hash join. Statistics catch up only when autoanalyze passes the change threshold of
 `transfers` and its once-a-minute round comes, so a 1000 TPS run waited about 40 s after it
-stopped before control could reconcile it.
+stopped before control could reconcile it. Polled during a run, the answer grew from 14 ms to
+52 s as the run outgrew the statistics.
 
 Control calls reconciliation with a 5 s timeout and retries on the next tick. A call it gave up
 on kept running in the database, so up to 7 copies of the slow query ran at once.
@@ -23,8 +26,12 @@ on kept running in the database, so up to 7 copies of the slow query ran at once
 
 - Check 3 is a per-transfer lookup: `transfers CROSS JOIN LATERAL (aggregate over the journal
   rows of that transfer)`. The inner scan uses the existing index on `(run_id, transfer_id)`
-  whatever the estimate; the run above takes 20.5 ms with or without statistics. The checks
-  themselves do not change.
+  whatever the estimate; the run above takes 20.5 ms with or without statistics.
+- Check 4 is a per-account lookup the same way, on the existing index on `(run_id, account_no)`.
+  Before, it read the run's journal once per account: 178 ms on 100 accounts and 14,320 rows,
+  growing with accounts times rows.
+- The checks themselves do not change. The other reconciliation queries read one table each and
+  stay linear under any estimate.
 - Each reconciliation query gets `SET LOCAL statement_timeout` (4 s, below control's 5 s call
   timeout), so the database stops a query nobody waits for. `SET LOCAL` ends with the
   reconciliation's transaction and never reaches the pooled connection.

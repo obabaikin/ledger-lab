@@ -102,8 +102,16 @@ class Conductor(
         if (runs.markStarted(run.runId) == 1) log.info("Run {}: started", run.runId)
     }
 
-    private fun failed(run: Run, failure: String) {
-        if (runs.markFailed(run.runId, run.state, failure) == 1) log.warn("Run {}: failed in {}: {}", run.runId, run.state, failure)
+    private fun failed(run: Run, failure: String, replies: String? = null) {
+        if (runs.markFailed(run.runId, run.state, failure) == 1) {
+            log.warn("Run {}: failed in {}: {}{}", run.runId, run.state, failure, replies?.let { " ($it)" }.orEmpty())
+        }
+    }
+
+    private fun Reply<*>.summary(): String = when (this) {
+        is Reply.Answered -> "answered $status"
+        is Reply.Refused -> "$status $error"
+        else -> toString()
     }
 
     private fun watch(run: Run, now: Instant) {
@@ -131,7 +139,7 @@ class Conductor(
         val summary = gateway.summary(run.runId)
         val books = ledger.reconciliation(run.runId)
         if (summary !is Reply.Answered || books !is Reply.Answered) {
-            if (pastDeadline) failed(run, RunOutcomes.BANK_UNAVAILABLE)
+            if (pastDeadline) failed(run, RunOutcomes.BANK_UNAVAILABLE, "gateway: ${summary.summary()}, ledger: ${books.summary()}")
             return
         }
         val bank = checkNotNull(summary.body)
