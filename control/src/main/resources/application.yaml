@@ -58,6 +58,11 @@ control:
     base-url: http://localhost:9090
     # Shorter than the services': it is read every tick for every live run.
     request-timeout: 1s
+  chaos:
+    # On in the chart, which also lists the ledger instances by their management URLs.
+    enabled: false
+    min-interval: 60s
+    request-timeout: 2s
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every error handler is added to every operation.

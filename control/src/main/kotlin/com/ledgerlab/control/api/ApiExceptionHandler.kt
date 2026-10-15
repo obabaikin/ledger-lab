@@ -1,5 +1,9 @@
 package com.ledgerlab.control.api
 
+import com.ledgerlab.control.chaos.ChaosNotAvailableException
+import com.ledgerlab.control.chaos.ChaosUsedRecentlyException
+import com.ledgerlab.control.chaos.LedgerDidNotAnswerException
+import com.ledgerlab.control.chaos.NoRunningRunException
 import com.ledgerlab.control.entry.InviteNotValidException
 import com.ledgerlab.control.entry.SessionNotFoundException
 import com.ledgerlab.control.runs.InvalidRunRequestException
@@ -74,6 +78,20 @@ class ApiExceptionHandler {
     @ExceptionHandler(ChaosNotAvailableException::class)
     @ResponseStatus(HttpStatus.NOT_IMPLEMENTED)
     fun chaosNotAvailable() = ApiError(ControlErrors.CHAOS_NOT_AVAILABLE)
+
+    @ExceptionHandler(NoRunningRunException::class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    fun noRunningRun() = ApiError(ControlErrors.NO_RUNNING_RUN)
+
+    @ExceptionHandler(ChaosUsedRecentlyException::class)
+    fun chaosUsedRecently(e: ChaosUsedRecentlyException): ResponseEntity<ApiError> =
+        ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, e.retryAfterSeconds.toString())
+            .body(ApiError(ControlErrors.CHAOS_USED_RECENTLY))
+
+    @ExceptionHandler(LedgerDidNotAnswerException::class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    fun ledgerDidNotAnswer() = ApiError(ControlErrors.LEDGER_DID_NOT_ANSWER)
 
     private companion object {
         const val SESSION_ID = "sessionId"

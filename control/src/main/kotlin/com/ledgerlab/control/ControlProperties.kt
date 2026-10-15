@@ -14,6 +14,7 @@ data class ControlProperties(
     val cleanup: Cleanup,
     val reporting: Reporting,
     val prometheus: Prometheus,
+    val chaos: Chaos,
 ) {
     data class Runs(
         val maxActive: Int,
@@ -52,4 +53,13 @@ data class ControlProperties(
     data class Reporting(val baseUrl: String, val catchUpWait: Duration)
 
     data class Prometheus(val baseUrl: String, val requestTimeout: Duration)
+
+    data class Chaos(
+        val enabled: Boolean,
+        val minInterval: Duration,
+        val requestTimeout: Duration,
+        val ledgerInstances: List<LedgerInstance> = emptyList(),
+    )
+
+    data class LedgerInstance(val name: String, val url: String)
 }

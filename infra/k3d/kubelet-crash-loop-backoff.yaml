@@ -1,0 +1,5 @@
+# The chaos button crashes every ledger instance at once; without this cap the second crash in a row waits 10 s, then 20 s, 40 s.
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+crashLoopBackOff:
+  maxContainerRestartPeriod: 1s

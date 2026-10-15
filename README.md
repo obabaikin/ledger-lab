@@ -26,7 +26,8 @@ duplicated when consumers crash?*
   what Kafka carried and what the ledger posted, and inside the ledger the balances, the
   journal and the transfer log. Any disagreement turns the run red, and so does a verdict that
   could not be completed.
-- *Planned:* a **chaos button** deletes the ledger pod during a run. Reconciliation must still pass.
+- A **chaos button** crashes every ledger instance in the middle of a run, as `kill -9` would.
+  Reconciliation must still pass. The API is done; the button on the page follows.
 
 ## Stack
 
@@ -42,7 +43,7 @@ Micrometer / Prometheus · Helm · k3s; planned: Grafana, Terraform (Contabo)
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
 | `reporting` | The bank's numbers per run, projected from its Kafka events, internal API | done |
-| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota, run queue, orchestration and the verdict; page and chaos button follow |
+| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota, run queue, orchestration, the verdict and chaos; the page follows |
 
 ## Running locally
 
@@ -91,6 +92,9 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 - **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether a run may
   start is control's question, answered by the partitions the live instances hold.
 - **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap.
+- **A crashed pod restarts within a second**: the cluster caps the kubelet's crash-loop backoff at 1 s
+  (`infra/k3d/kubelet-crash-loop-backoff.yaml`), otherwise a second crash in a row waits 10 s, then twice as long.
+  A cluster created before needs `down.sh` and `up.sh`.
 
 ## Invites and the run queue
 

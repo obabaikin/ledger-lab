@@ -98,6 +98,8 @@ class RunStopAndReportTest : IntegrationTest() {
         assertThat(answer.statusCode.value()).isEqualTo(501)
         assertThat(answer.body!!["error"]).isEqualTo("chaos not available")
         assertThat(http.getForEntity("/api/sessions/$sessionId", Map::class.java).body!!["chaosAvailable"]).isEqualTo(false)
+        assertThat(http.getForEntity("/api/sessions/$sessionId", Map::class.java).body!!["chaosReadyInSeconds"]).isEqualTo(0)
+        assertThat(ledgerInstances.flatMap { it.calls }).isEmpty()
         assertThat(http.postForEntity("/api/sessions/${UUID.randomUUID()}/chaos", null, Map::class.java).statusCode.value()).isEqualTo(404)
     }
 }

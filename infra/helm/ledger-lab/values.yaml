@@ -5,6 +5,7 @@ image:
   pullPolicy: IfNotPresent
 
 managementPort: 9000
+chaos: true
 initMemory: 64Mi
 
 passwords:

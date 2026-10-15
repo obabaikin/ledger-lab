@@ -1,7 +1,7 @@
 package com.ledgerlab.control.entry
 
 import com.ledgerlab.control.ControlProperties
-import com.ledgerlab.control.api.CHAOS_AVAILABLE
+import com.ledgerlab.control.chaos.ChaosService
 import com.ledgerlab.control.runs.QUOTA_WINDOW
 import com.ledgerlab.control.runs.RunRepository
 import org.springframework.stereotype.Service
@@ -16,6 +16,7 @@ data class SessionOverview(
     val tpsOptions: List<Int>,
     val durationOptions: List<Int>,
     val chaosAvailable: Boolean,
+    val chaosReadyInSeconds: Long,
 )
 
 class InviteNotValidException : RuntimeException()
@@ -26,6 +27,7 @@ class SessionNotFoundException : RuntimeException()
 class EntryService(
     private val invites: InviteRepository,
     private val runs: RunRepository,
+    private val chaos: ChaosService,
     private val props: ControlProperties,
 ) {
     /** Null rather than an exception: an exception would roll back the visit of an expired invite. */
@@ -48,7 +50,8 @@ class EntryService(
             runsLastHour = runs.quotaUsage(session.token, QUOTA_WINDOW, invite.quota).used,
             tpsOptions = props.runs.tpsOptions,
             durationOptions = props.runs.durationSecondsOptions,
-            chaosAvailable = CHAOS_AVAILABLE,
+            chaosAvailable = props.chaos.enabled,
+            chaosReadyInSeconds = chaos.readyInSeconds(),
         )
     }
 }

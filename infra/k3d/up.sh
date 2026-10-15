@@ -12,9 +12,14 @@ TAG="dev-$(date +%Y%m%d%H%M%S)"
 MODULES="ledger-service gateway generator control reporting"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
+KUBELET_DROP_IN="/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-crash-loop-backoff.conf"
+
 if ! k3d cluster list "$CLUSTER" >/dev/null 2>&1; then
   k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --servers 1 --agents 0 \
-    --servers-memory "$NODE_MEMORY" --port "$CONTROL_PORT:80@loadbalancer" --wait
+    --servers-memory "$NODE_MEMORY" --port "$CONTROL_PORT:80@loadbalancer" \
+    --volume "$ROOT/infra/k3d/kubelet-crash-loop-backoff.yaml:$KUBELET_DROP_IN@server:0" --wait
+elif ! docker exec "k3d-$CLUSTER-server-0" test -f "$KUBELET_DROP_IN"; then
+  echo "recreate the cluster (down.sh, up.sh) to cap the crash-loop backoff"
 fi
 
 (cd "$ROOT" && ./gradlew bootJar -q)

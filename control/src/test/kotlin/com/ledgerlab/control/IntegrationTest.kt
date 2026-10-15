@@ -39,12 +39,13 @@ abstract class IntegrationTest {
 
     @BeforeEach
     fun cleanDatabase() {
-        jdbc.sql("TRUNCATE runs, sessions, invite_visits, invite_tokens").update()
+        jdbc.sql("TRUNCATE runs, sessions, invite_visits, invite_tokens, chaos_events").update()
         ledger.reset()
         gateway.reset()
         generator.reset()
         reporting.reset()
         prometheus.reset()
+        ledgerInstances.forEach { it.reset() }
     }
 
     protected fun invite(quota: Int = 100, expiresIn: Duration = Duration.ofDays(1), active: Boolean = true): String {
@@ -104,6 +105,7 @@ abstract class IntegrationTest {
         val generator = StubService()
         val reporting = StubService()
         val prometheus = StubService()
+        val ledgerInstances = List(3) { StubService() }
 
         @JvmStatic
         @DynamicPropertySource
@@ -113,6 +115,10 @@ abstract class IntegrationTest {
             registry.add("control.generator.base-url") { generator.baseUrl }
             registry.add("control.reporting.base-url") { reporting.baseUrl }
             registry.add("stub.prometheus-url") { prometheus.baseUrl }
+            ledgerInstances.forEachIndexed { i, stub ->
+                registry.add("control.chaos.ledger-instances[$i].name") { "ledger-$i" }
+                registry.add("control.chaos.ledger-instances[$i].url") { stub.baseUrl }
+            }
         }
     }
 }
