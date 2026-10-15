@@ -25,6 +25,42 @@
         },
         "type" : "object"
       },
+      "ChaosInRun" : {
+        "description" : "A crash of the ledger while the run was active.",
+        "properties" : {
+          "instances" : {
+            "description" : "Instances that took the crash.",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "offsetMs" : {
+            "description" : "Milliseconds from the clients' start; 0 if the crash came before it.",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "ChaosView" : {
+        "description" : "The ledger instances that were crashed.",
+        "properties" : {
+          "at" : {
+            "description" : "When the instances were crashed, by control's clock.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "instances" : {
+            "description" : "Instances that took the crash; those that did not answer are left out.",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
       "ClientCounts" : {
         "description" : "What the clients counted, from the generator's status.",
         "properties" : {
@@ -244,6 +280,13 @@
             }, {
               "type" : "null"
             } ]
+          },
+          "chaos" : {
+            "description" : "Ledger crashes while the run was active, in order; empty if none.",
+            "items" : {
+              "$ref" : "#/components/schemas/ChaosInRun"
+            },
+            "type" : "array"
           },
           "client" : {
             "description" : "What the clients were told; null without a client reconciliation.",
@@ -495,6 +538,11 @@
             "description" : "Whether the chaos button works in this deployment.",
             "type" : "boolean"
           },
+          "chaosReadyInSeconds" : {
+            "description" : "Seconds until chaos may be used again, on the whole cluster; 0 when it may be used now.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "durationOptions" : {
             "description" : "Allowed run durations, seconds.",
             "items" : {
@@ -730,6 +778,16 @@
           }
         } ],
         "responses" : {
+          "202" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChaosView"
+                }
+              }
+            },
+            "description" : "Crashed; the instances restart and the run goes on"
+          },
           "404" : {
             "content" : {
               "*/*" : {
@@ -740,6 +798,26 @@
             },
             "description" : "Unknown session"
           },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The session has no running run"
+          },
+          "429" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Chaos was used on the cluster recently (Retry-After says when)"
+          },
           "501" : {
             "content" : {
               "*/*" : {
@@ -749,9 +827,19 @@
               }
             },
             "description" : "Not available in this deployment"
+          },
+          "503" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "No ledger instance answered"
           }
         },
-        "summary" : "Delete the ledger pod during a run",
+        "summary" : "Crash every ledger instance during a run",
         "tags" : [ "chaos-controller" ]
       }
     },

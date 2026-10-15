@@ -42,6 +42,10 @@ ledger:
     # Past the last scrape after the run, before a long-lived pod publishes every past run.
     idle-retention: 10m
     sweep-interval: 1m
+  chaos:
+    # On in the chart only: POST /actuator/crash halts the instance (control's chaos button).
+    enabled: false
+    halt-delay: 200ms
 
 springdoc:
   # Otherwise every controller-local error handler is added to every operation as a possible answer.
@@ -55,7 +59,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,crash
   endpoint:
     health:
       show-details: always

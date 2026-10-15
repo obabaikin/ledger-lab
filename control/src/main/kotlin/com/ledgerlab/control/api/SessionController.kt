@@ -41,6 +41,8 @@ data class SessionView(
     val durationOptions: List<Int>,
     @field:Schema(description = "Whether the chaos button works in this deployment.")
     val chaosAvailable: Boolean,
+    @field:Schema(description = "Seconds until chaos may be used again, on the whole cluster; 0 when it may be used now.")
+    val chaosReadyInSeconds: Long,
 )
 
 @RestController
@@ -68,4 +70,4 @@ class SessionController(private val entry: EntryService) {
     }
 }
 
-private fun SessionOverview.toView() = SessionView(sessionId, inviteValid, runsPerHour, runsLastHour, tpsOptions, durationOptions, chaosAvailable)
+private fun SessionOverview.toView() = SessionView(sessionId, inviteValid, runsPerHour, runsLastHour, tpsOptions, durationOptions, chaosAvailable, chaosReadyInSeconds)

@@ -49,6 +49,13 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .optional()
             .orElse(null)
 
+    fun hasRun(sessionId: UUID, state: RunState): Boolean =
+        jdbc.sql("SELECT EXISTS (SELECT 1 FROM runs WHERE session_id = :sessionId AND state = :state)")
+            .param("sessionId", sessionId)
+            .param("state", state.name)
+            .query(Boolean::class.java)
+            .single()
+
     fun inProgress(): List<Run> =
         jdbc.sql("SELECT r.*, NULL AS position FROM runs r WHERE r.state IN (:states) ORDER BY r.admitted_at, r.run_id")
             .param("states", listOf(RunState.CREATED, RunState.RUNNING, RunState.DRAINING).map { it.name })

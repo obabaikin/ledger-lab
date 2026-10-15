@@ -8,7 +8,10 @@ import com.ledgerlab.control.generator.UnknownResolved
 import com.ledgerlab.control.ledger.ReconciliationCheck
 import com.ledgerlab.control.ledger.ReconciliationReport
 import com.ledgerlab.control.reporting.RunStats
+import com.ledgerlab.control.chaos.ChaosEvent
 import io.swagger.v3.oas.annotations.media.Schema
+import java.time.Duration
+import java.time.Instant
 
 object RunOutcomes {
     const val SETUP_TIMED_OUT = "setup timed out"
@@ -39,6 +42,16 @@ data class GatewayCounts(val accepted: Long, val published: Long, val posted: Lo
 
 @Schema(description = "What the ledger applied for the run.")
 data class LedgerCounts(val posted: Long, val rejected: Long)
+
+@Schema(description = "A crash of the ledger while the run was active.")
+data class ChaosInRun(
+    @field:Schema(description = "Milliseconds from the clients' start; 0 if the crash came before it.")
+    val offsetMs: Long,
+    @field:Schema(description = "Instances that took the crash.")
+    val instances: List<String>,
+)
+
+fun ChaosEvent.inRun(startedAt: Instant) = ChaosInRun(Duration.between(startedAt, at).toMillis().coerceAtLeast(0), instances)
 
 @Schema(description = "The verdict of a run and what it rests on.")
 data class RunReport(
@@ -80,6 +93,8 @@ data class RunReport(
     val ledgerDuplicatesAtLeast: Long?,
     @field:Schema(description = "What the report could not show; does not decide the verdict.")
     val notes: List<String> = emptyList(),
+    @field:Schema(description = "Ledger crashes while the run was active, in order; empty if none.")
+    val chaos: List<ChaosInRun> = emptyList(),
 )
 
 data class RunMeasurements(
@@ -87,6 +102,7 @@ data class RunMeasurements(
     val clientLatencyP99Ms: Double? = null,
     val stats: RunStats? = null,
     val ledgerDuplicatesAtLeast: Long? = null,
+    val chaos: List<ChaosInRun> = emptyList(),
 )
 
 fun projectionMatchesBooks(stats: RunStats, gateway: RunSummary, ledger: ReconciliationReport): Boolean =
@@ -163,5 +179,6 @@ fun verdictOf(
         projectionMatchesBooks = projectionMatches,
         ledgerDuplicatesAtLeast = measurements.ledgerDuplicatesAtLeast,
         notes = notes,
+        chaos = measurements.chaos,
     )
 }

@@ -1,6 +1,7 @@
 package com.ledgerlab.control.runs
 
 import com.ledgerlab.control.ControlProperties
+import com.ledgerlab.control.chaos.ChaosRepository
 import com.ledgerlab.control.gateway.GatewayClient
 import com.ledgerlab.control.generator.GeneratorClient
 import com.ledgerlab.control.generator.SimulationStatus
@@ -31,6 +32,7 @@ class Conductor(
     private val generator: GeneratorClient,
     private val reporting: ReportingClient,
     private val liveRuns: LiveRuns,
+    private val chaos: ChaosRepository,
     private val props: ControlProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -169,11 +171,18 @@ class Conductor(
             clientLatencyP99Ms = simulation?.waitedLatencyP99Ms,
             stats = stats,
             ledgerDuplicatesAtLeast = liveRuns.ledgerDuplicatesAtLeast(run.runId),
+            chaos = chaosSince(run),
         )
         val report = verdictOf(bank, ledgerReport, client, measurements)
         if (runs.markReconciled(run.runId, report) == 1) {
             log.info("Run {}: reconciled, {} {}", run.runId, report.result, report.reasons)
         }
+    }
+
+    /** From the admission: a crash while the run is set up also hits it. */
+    private fun chaosSince(run: Run): List<ChaosInRun> {
+        val admittedAt = run.admittedAt ?: run.createdAt
+        return chaos.since(admittedAt).map { it.inRun(run.startedAt ?: admittedAt) }
     }
 
     private companion object {

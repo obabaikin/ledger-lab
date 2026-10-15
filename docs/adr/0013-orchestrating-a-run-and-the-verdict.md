@@ -70,8 +70,17 @@ the report are the ledger's: the clients know the reason only for the transfers 
 24 hours ago or more (204 and 404 both count as deleted) and marks them purged. Control keeps the
 run and its report; expired runs never had data and are left alone.
 
-**Chaos.** `POST /api/sessions/{sessionId}/chaos` answers 501 `chaos not available`, and the
-session says `chaosAvailable: false`, until deleting the ledger pod is built.
+**Chaos.** `POST /api/sessions/{sessionId}/chaos` crashes every ledger instance: control calls each
+instance's `POST /actuator/crash` on its management port, in parallel, 2 s each; the instance answers
+202, then halts its JVM without shutdown hooks, as `kill -9` would, so no offset is committed and the
+group is not left. Deleting the pod through the Kubernetes API is not a crash: even a forced delete
+sends SIGTERM, and the JVM shuts down cleanly. The answer is 202 with the instances that answered;
+409 `no running run` when the session has no running run; 429 `chaos used recently` with
+`Retry-After` within a minute of the last crash on the cluster; 503 `ledger did not answer` when no
+instance answered, and the minute is not used; 501 `chaos not available` where it is switched off,
+which is the default outside the chart. An advisory lock held over the check, the calls and the record
+lets one of two simultaneous presses through. The session's `chaosReadyInSeconds` counts down the same
+minute, and every report lists the crashes while its run was active, by offset from the clients' start.
 
 ## Considered and rejected
 
