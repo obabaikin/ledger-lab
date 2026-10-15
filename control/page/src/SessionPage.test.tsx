@@ -29,7 +29,7 @@ const live = (changes: Partial<LiveView> = {}): LiveView => ({
 function control(runs: RunView[], extra: Record<string, Answer | (() => Answer)> = {}) {
   return fakeControl({
     [`GET ${SESSION}`]: { status: 200, body: session() },
-    [`GET ${RUNS}`]: { status: 200, body: { items: runs } },
+    [`GET ${RUNS}`]: { status: 200, body: { items: runs.map((r) => ({ ...r, live: null })) } },
     ...Object.fromEntries(runs.map((r) => [`GET ${RUNS}/${r.runId}`, { status: 200, body: r }])),
     ...extra,
   })
@@ -50,6 +50,16 @@ describe('session page', () => {
     renderAt(`/s/${SESSION_ID}`)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Unknown session')
+  })
+
+  it('does not call the session unknown when only a run of it is not found', async () => {
+    const running = run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z' })
+    control([running], { [`GET ${RUN}`]: { status: 404, body: { error: 'run not found' } } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    await screen.findByLabelText('Phases')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText(/Unknown session/)).not.toBeInTheDocument()
   })
 
   it('holds Start back, with the reason on the button, while a run of the session is not finished', async () => {
@@ -120,7 +130,7 @@ describe('session page', () => {
     }
     fakeControl({
       [`GET ${SESSION}`]: answer(session()),
-      [`GET ${RUNS}`]: answer({ items: [running] }),
+      [`GET ${RUNS}`]: answer({ items: [{ ...running, live: null }] }),
       [`GET ${RUN}`]: answer(running),
     })
     renderAt(`/s/${SESSION_ID}`)

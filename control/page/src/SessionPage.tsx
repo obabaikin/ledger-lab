@@ -109,7 +109,12 @@ export function SessionPage() {
 
   const poll = useCallback(async () => {
     try {
-      setSession(await api.session(sessionId))
+      const found = await api.session(sessionId).catch((e: unknown) => {
+        if (e instanceof ApiFailure && e.status === 404) return null
+        throw e
+      })
+      if (found === null) return setMissing(true)
+      setSession(found)
       const { items } = await api.runs(sessionId)
       setRuns(items)
       const shownRun = runToShow(items, picked.current)
@@ -128,8 +133,7 @@ export function SessionPage() {
       }
       setConnectionLost(false)
     } catch (e) {
-      if (e instanceof ApiFailure && e.status === 404) setMissing(true)
-      else if (!(e instanceof ApiFailure)) setConnectionLost(true)
+      if (!(e instanceof ApiFailure)) setConnectionLost(true)
     }
   }, [sessionId])
 
