@@ -27,6 +27,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicLongArray
 import java.util.concurrent.atomic.LongAdder
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.TimeUnit
@@ -64,6 +65,8 @@ data class SimulationStatus(
     val waitedLatencyP50Ms: Double?,
     @field:Schema(description = "p99, as waitedLatencyP50Ms.")
     val waitedLatencyP99Ms: Double?,
+    @field:Schema(description = "New transfers per second of the run, from its start; index 0 is the first second.")
+    val requestedPerSecond: List<Long>,
 )
 
 /**
@@ -93,6 +96,7 @@ class Simulation(
     private val inFlight = Semaphore(maxInFlight)
 
     private val requested = LongAdder()
+    private val requestedPerSecond = AtomicLongArray(duration.toSeconds().toInt() + 1)
     private val acknowledged = LongAdder()
     private val posted = LongAdder()
     private val rejected = LongAdder()
@@ -230,6 +234,8 @@ class Simulation(
         val entry = checkNotNull(journal) { "journal released while the run is active" }.add(transfer)
         // Counted only once the entry exists, so that every request ends up in exactly one outcome.
         requested.increment()
+        val second = ((System.nanoTime() - startNanos) / NANOS_PER_SECOND).toInt().coerceIn(0, requestedPerSecond.length() - 1)
+        requestedPerSecond.incrementAndGet(second)
         val random = ThreadLocalRandom.current()
         val wait = if (random.nextDouble() < waitShare) waitTimeout else null
         val duplicateDelay = if (random.nextDouble() < duplicateShare) duplicateDelays[random.nextInt(duplicateDelays.size)] else null
@@ -336,8 +342,12 @@ class Simulation(
             rejectedByReason.mapValues { it.value.sum() }, failed.sum(), unknown.sum(), retries.sum(),
             duplicatesSent.sum(), open.get(), requested.sum() / seconds,
             waitedLatencyMs(P50), waitedLatencyMs(P99),
+            List(secondsSoFar(end)) { requestedPerSecond.get(it) },
         )
     }
+
+    private fun secondsSoFar(end: Instant): Int =
+        (Duration.between(startedAt, end).toSeconds().toInt() + 1).coerceIn(0, requestedPerSecond.length())
 
     private fun waitedLatencyMs(p: Double): Double? =
         percentileCont(waitedLatenciesNanos.sorted(), p)?.let { it / NANOS_PER_MILLI }

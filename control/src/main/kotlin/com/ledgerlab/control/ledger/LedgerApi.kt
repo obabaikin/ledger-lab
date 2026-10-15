@@ -31,4 +31,8 @@ data class ReconciliationReport(
     val postedTransfers: Long,
     val rejectedTransfers: Long,
     val rejectionsByReason: Map<String, Long>,
+    val openingTotalCents: Long,
+    val balanceTotalCents: Long,
+    val debitsCents: Long,
+    val creditsCents: Long,
 )

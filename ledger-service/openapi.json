@@ -109,6 +109,14 @@
             },
             "type" : "array"
           },
+          "creditsCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "debitsCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
           "failedChecks" : {
             "items" : {
               "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],

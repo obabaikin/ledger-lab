@@ -9,6 +9,7 @@
             "type" : "string"
           }
         },
+        "required" : [ "error" ],
         "type" : "object"
       },
       "BankLatency" : {
@@ -23,6 +24,7 @@
             "type" : [ "number", "null" ]
           }
         },
+        "required" : [ "p50Ms", "p99Ms" ],
         "type" : "object"
       },
       "ChaosInRun" : {
@@ -41,6 +43,7 @@
             "type" : "integer"
           }
         },
+        "required" : [ "instances", "offsetMs" ],
         "type" : "object"
       },
       "ChaosView" : {
@@ -59,6 +62,7 @@
             "type" : "array"
           }
         },
+        "required" : [ "at", "instances" ],
         "type" : "object"
       },
       "ClientCounts" : {
@@ -81,6 +85,14 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "requestedPerSecond" : {
+            "description" : "New transfers per second from the clients' start; index 0 is the first second.",
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "array"
+          },
           "retries" : {
             "format" : "int64",
             "type" : "integer"
@@ -90,6 +102,7 @@
             "type" : "integer"
           }
         },
+        "required" : [ "acknowledged", "duplicatesSent", "failed", "requested", "requestedPerSecond", "retries", "unknown" ],
         "type" : "object"
       },
       "CreateSessionRequest" : {
@@ -123,6 +136,7 @@
             "type" : "integer"
           }
         },
+        "required" : [ "accepted", "posted", "published", "rejected" ],
         "type" : "object"
       },
       "JournalTotals" : {
@@ -148,11 +162,32 @@
             "type" : "integer"
           }
         },
+        "required" : [ "acknowledged", "acknowledgedAmountCents", "failed", "requested", "unknown" ],
         "type" : "object"
       },
       "LedgerCounts" : {
-        "description" : "What the ledger applied for the run.",
+        "description" : "What the ledger applied for the run, and the sums of its books.",
         "properties" : {
+          "balanceTotalCents" : {
+            "description" : "Sum of the accounts' balances after the run.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "creditsCents" : {
+            "description" : "Sum of the journal's credits.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "debitsCents" : {
+            "description" : "Sum of the journal's debits, as a positive amount.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "openingTotalCents" : {
+            "description" : "Sum of the accounts' opening balances.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "posted" : {
             "format" : "int64",
             "type" : "integer"
@@ -162,11 +197,19 @@
             "type" : "integer"
           }
         },
+        "required" : [ "balanceTotalCents", "creditsCents", "debitsCents", "openingTotalCents", "posted", "rejected" ],
         "type" : "object"
       },
       "LiveView" : {
         "description" : "Live numbers of a running or draining run; each part is the last one read and keeps it while its source cannot be read.",
         "properties" : {
+          "chaos" : {
+            "description" : "Ledger crashes since the run was admitted, in order; empty if none.",
+            "items" : {
+              "$ref" : "#/components/schemas/ChaosInRun"
+            },
+            "type" : "array"
+          },
           "clients" : {
             "description" : "null until the generator answered once.",
             "oneOf" : [ {
@@ -201,6 +244,7 @@
             } ]
           }
         },
+        "required" : [ "chaos", "clients", "ledgerDuplicatesAtLeast", "pods", "readAt", "stats" ],
         "type" : "object"
       },
       "PodView" : {
@@ -222,6 +266,7 @@
             "type" : "boolean"
           }
         },
+        "required" : [ "instance", "job", "partitions", "up" ],
         "type" : "object"
       },
       "ReconciliationBreaks" : {
@@ -242,6 +287,7 @@
             "$ref" : "#/components/schemas/TransferIds"
           }
         },
+        "required" : [ "acknowledgedNotInStatement", "failedButInStatement", "notInJournal", "payloadMismatch", "statusMismatch" ],
         "type" : "object"
       },
       "RunList" : {
@@ -254,6 +300,7 @@
             "type" : "array"
           }
         },
+        "required" : [ "items" ],
         "type" : "object"
       },
       "RunReport" : {
@@ -383,6 +430,7 @@
             } ]
           }
         },
+        "required" : [ "bankLatencyP50Ms", "bankLatencyP99Ms", "bankViewsAgree", "breaks", "chaos", "client", "clientBalanced", "clientLatencyP50Ms", "clientLatencyP99Ms", "gateway", "ledger", "ledgerBalanced", "ledgerDuplicatesAtLeast", "ledgerFailedChecks", "notes", "projectionMatchesBooks", "reasons", "rejectionsByReason", "result", "statementFinal", "stats", "unknownResolved" ],
         "type" : "object"
       },
       "RunStats" : {
@@ -411,6 +459,7 @@
             "$ref" : "#/components/schemas/StatsTotals"
           }
         },
+        "required" : [ "at", "bankLatency", "runId", "series", "totals" ],
         "type" : "object"
       },
       "RunView" : {
@@ -418,6 +467,11 @@
         "properties" : {
           "admittedAt" : {
             "description" : "When the run left the queue; null while queued or if it expired.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "booksFinalAt" : {
+            "description" : "When control first saw the books final: every accepted transfer applied; reconciling from then on. null before.",
             "format" : "date-time",
             "type" : [ "string", "null" ]
           },
@@ -483,6 +537,7 @@
             "type" : "integer"
           }
         },
+        "required" : [ "admittedAt", "booksFinalAt", "closedAt", "createdAt", "durationSeconds", "failure", "finishedAt", "live", "position", "result", "runId", "startedAt", "state", "stopRequested", "tps" ],
         "type" : "object"
       },
       "SecondStats" : {
@@ -519,6 +574,7 @@
             "type" : "string"
           }
         },
+        "required" : [ "accepted", "bankP50Ms", "bankP99Ms", "posted", "postedAmountCents", "rejected", "second" ],
         "type" : "object"
       },
       "SessionCreated" : {
@@ -529,6 +585,7 @@
             "type" : "string"
           }
         },
+        "required" : [ "sessionId" ],
         "type" : "object"
       },
       "SessionView" : {
@@ -578,6 +635,7 @@
             "type" : "array"
           }
         },
+        "required" : [ "chaosAvailable", "chaosReadyInSeconds", "durationOptions", "inviteValid", "runsLastHour", "runsPerHour", "sessionId", "tpsOptions" ],
         "type" : "object"
       },
       "StartRunRequest" : {
@@ -640,6 +698,7 @@
             "type" : "object"
           }
         },
+        "required" : [ "accepted", "commandsSeen", "inFlight", "posted", "postedAmountCents", "rejected", "rejectedByReason" ],
         "type" : "object"
       },
       "TransferIds" : {
@@ -656,6 +715,7 @@
             "type" : "array"
           }
         },
+        "required" : [ "count", "transferIds" ],
         "type" : "object"
       },
       "UnknownResolved" : {
@@ -667,6 +727,7 @@
             "$ref" : "#/components/schemas/TransferIds"
           }
         },
+        "required" : [ "accepted", "notAccepted" ],
         "type" : "object"
       }
     }
@@ -694,17 +755,26 @@
         "responses" : {
           "201" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/SessionCreated"
                 }
               }
             },
-            "description" : "Session opened"
+            "description" : "Session opened",
+            "headers" : {
+              "Location" : {
+                "description" : "The session's address",
+                "schema" : {
+                  "type" : "string"
+                },
+                "style" : "simple"
+              }
+            }
           },
           "400" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -714,7 +784,7 @@
           },
           "403" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -742,7 +812,7 @@
         "responses" : {
           "200" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/SessionView"
                 }
@@ -752,7 +822,7 @@
           },
           "404" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -780,7 +850,7 @@
         "responses" : {
           "202" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ChaosView"
                 }
@@ -790,7 +860,7 @@
           },
           "404" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -800,7 +870,7 @@
           },
           "409" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -810,17 +880,26 @@
           },
           "429" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
               }
             },
-            "description" : "Chaos was used on the cluster recently (Retry-After says when)"
+            "description" : "Chaos was used on the cluster recently (Retry-After says when)",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds until chaos is available again",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           },
           "501" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -830,7 +909,7 @@
           },
           "503" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -858,7 +937,7 @@
         "responses" : {
           "200" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RunList"
                 }
@@ -868,7 +947,7 @@
           },
           "404" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -904,27 +983,45 @@
         "responses" : {
           "200" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RunView"
                 }
               }
             },
-            "description" : "A repeat of a run that is final"
+            "description" : "A repeat of a run that is final",
+            "headers" : {
+              "Location" : {
+                "description" : "The run's address",
+                "schema" : {
+                  "type" : "string"
+                },
+                "style" : "simple"
+              }
+            }
           },
           "202" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RunView"
                 }
               }
             },
-            "description" : "Queued, or a repeat of a run that is not final"
+            "description" : "Queued, or a repeat of a run that is not final",
+            "headers" : {
+              "Location" : {
+                "description" : "The run's address",
+                "schema" : {
+                  "type" : "string"
+                },
+                "style" : "simple"
+              }
+            }
           },
           "400" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -934,7 +1031,7 @@
           },
           "403" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -944,7 +1041,7 @@
           },
           "404" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -952,9 +1049,19 @@
             },
             "description" : "Unknown session"
           },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Another run of the session is not final"
+          },
           "422" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -964,13 +1071,22 @@
           },
           "429" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
               }
             },
-            "description" : "Quota used up (Retry-After says when) or queue full"
+            "description" : "Quota used up (Retry-After says when) or queue full",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds until the quota allows a run; absent when the queue is full",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "summary" : "Start a run: it joins the queue",
@@ -1000,7 +1116,7 @@
         "responses" : {
           "200" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RunView"
                 }
@@ -1010,7 +1126,7 @@
           },
           "404" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -1046,7 +1162,7 @@
         "responses" : {
           "200" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RunReport"
                 }
@@ -1056,7 +1172,7 @@
           },
           "404" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -1066,7 +1182,7 @@
           },
           "409" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -1102,7 +1218,7 @@
         "responses" : {
           "200" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RunView"
                 }
@@ -1112,7 +1228,7 @@
           },
           "202" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RunView"
                 }
@@ -1122,7 +1238,7 @@
           },
           "404" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
@@ -1132,7 +1248,7 @@
           },
           "409" : {
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }

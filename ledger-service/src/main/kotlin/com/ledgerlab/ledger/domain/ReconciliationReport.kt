@@ -28,6 +28,8 @@ data class ReconciliationReport(
     val rejectionsByReason: Map<RejectReason, Long>,
     val journalEntries: Long,
     val journalSumCents: Long,
+    val debitsCents: Long,
+    val creditsCents: Long,
     val transfersWithInvalidJournal: Long,
     val accountsOutOfBalance: Long,
 ) {

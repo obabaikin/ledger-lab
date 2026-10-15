@@ -196,13 +196,14 @@ class ChaosTest : IntegrationTest() {
         val at = chaos(pressing).body!!["at"]
         jdbc.sql("UPDATE runs SET started_at = CAST(:at AS timestamptz) - interval '10 seconds' WHERE run_id = :id")
             .param("at", at).param("id", hit).update()
-        val later = runIn(otherSession, "RUNNING")
+        val laterSession = sessionOf(invite())
+        val later = runIn(laterSession, "RUNNING")
 
         listOf(hit, hitInOtherSession, later).forEach { drainAndReconcile(it) }
 
         assertThat(reportOf(pressing, hit)["chaos"]).isEqualTo(listOf(mapOf("offsetMs" to 10_000, "instances" to listOf("ledger-0", "ledger-1", "ledger-2"))))
         assertThat((reportOf(otherSession, hitInOtherSession)["chaos"] as List<*>)).hasSize(1)
-        assertThat(reportOf(otherSession, later)["chaos"]).isEqualTo(emptyList<Any>())
+        assertThat(reportOf(laterSession, later)["chaos"]).isEqualTo(emptyList<Any>())
     }
 
     private fun drainAndReconcile(runId: UUID) {

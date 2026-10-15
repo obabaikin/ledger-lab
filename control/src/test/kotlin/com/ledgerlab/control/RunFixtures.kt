@@ -18,6 +18,8 @@ object RunFixtures {
         "runId" to runId, "accounts" to accounts, "balanced" to balanced,
         "failedChecks" to if (balanced) emptyList() else listOf("TOTAL_BALANCE_CONSERVED"),
         "postedTransfers" to posted, "rejectedTransfers" to rejected, "rejectionsByReason" to reasons,
+        "openingTotalCents" to accounts * 100_000, "balanceTotalCents" to accounts * 100_000,
+        "debitsCents" to posted * 100, "creditsCents" to posted * 100,
     )
 
     fun stats(runId: UUID, accepted: Long = 995, posted: Long = 980, rejected: Long = 15, commandsSeen: Long = accepted) = mapOf(

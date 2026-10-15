@@ -24,6 +24,7 @@ class RunService(
             if (existing.tps != request.tps || existing.durationSeconds != request.durationSeconds) throw RequestIdConflictException()
             return existing
         }
+        if (runs.hasRun(sessionId, UNFINISHED_STATES)) throw RunNotFinalException()
         if (request.tps !in props.runs.tpsOptions) {
             throw InvalidRunRequestException(ControlErrors.tpsNotAllowed(props.runs.tpsOptions))
         }

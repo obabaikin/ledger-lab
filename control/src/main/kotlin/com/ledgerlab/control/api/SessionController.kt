@@ -4,9 +4,11 @@ import com.ledgerlab.control.entry.EntryService
 import com.ledgerlab.control.entry.InviteNotValidException
 import com.ledgerlab.control.entry.SessionOverview
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.headers.Header
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
+import org.springframework.http.HttpHeaders
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -50,7 +52,7 @@ data class SessionView(
 class SessionController(private val entry: EntryService) {
 
     @Operation(summary = "Open a session with an invite")
-    @ApiResponse(responseCode = "201", description = "Session opened")
+    @ApiResponse(responseCode = "201", description = "Session opened", headers = [Header(name = HttpHeaders.LOCATION, description = "The session's address", schema = Schema(type = "string"))])
     @ApiResponse(responseCode = "400", description = "Unreadable body", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "403", description = "Unknown, inactive or expired invite", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping

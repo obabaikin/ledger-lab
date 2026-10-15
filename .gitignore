@@ -7,6 +7,7 @@ build/
 .gradle/
 .kotlin/
 out/
+node_modules/
 *.class
 
 # IDE

@@ -11,6 +11,7 @@ import com.ledgerlab.control.runs.QueueFullException
 import com.ledgerlab.control.runs.QuotaExceededException
 import com.ledgerlab.control.runs.ReportNotReadyException
 import com.ledgerlab.control.runs.RequestIdConflictException
+import com.ledgerlab.control.runs.RunNotFinalException
 import com.ledgerlab.control.runs.RunNotFoundException
 import com.ledgerlab.control.runs.RunNotStartedException
 import org.springframework.http.HttpHeaders
@@ -56,6 +57,10 @@ class ApiExceptionHandler {
     @ExceptionHandler(RequestIdConflictException::class)
     @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
     fun requestIdConflict() = ApiError(ControlErrors.REQUEST_ID_CONFLICT)
+
+    @ExceptionHandler(RunNotFinalException::class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    fun runNotFinal() = ApiError(ControlErrors.RUN_NOT_FINAL)
 
     @ExceptionHandler(QuotaExceededException::class)
     fun quotaExceeded(e: QuotaExceededException): ResponseEntity<ApiError> =

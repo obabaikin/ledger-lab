@@ -38,7 +38,7 @@ class ChaosService(
     fun crash(sessionId: UUID): ChaosEvent {
         invites.findSession(sessionId) ?: throw SessionNotFoundException()
         if (!props.chaos.enabled) throw ChaosNotAvailableException()
-        if (!runs.hasRun(sessionId, RunState.RUNNING)) throw NoRunningRunException()
+        if (!runs.hasRun(sessionId, listOf(RunState.RUNNING))) throw NoRunningRunException()
         events.lock()
         val at = runs.now()
         val readyIn = secondsUntilReady(events.lastAt(), at)

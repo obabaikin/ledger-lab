@@ -22,6 +22,8 @@ import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 @Service
@@ -36,6 +38,9 @@ class Conductor(
     private val props: ControlProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
+
+    /** The last answers to a run's setup, for the log line if the setup times out; lost on a restart, as only the log needs them. */
+    private val setupReplies = ConcurrentHashMap<UUID, String>()
 
     /** Runs step side by side, so a slow call of one run does not eat into another run's deadline. */
     fun tick() {
@@ -72,7 +77,10 @@ class Conductor(
         // A start that reached the generator before a restart of control must not be sent again: it would replay the run.
         if (status is Reply.Answered) return started(run)
         val timedOut = now >= checkNotNull(run.admittedAt) + props.runs.setupTimeout
-        if (timedOut) return failed(run, RunOutcomes.SETUP_TIMED_OUT)
+        if (timedOut) {
+            val earlier = setupReplies[run.runId] ?: "ledger not asked since control started"
+            return failed(run, RunOutcomes.SETUP_TIMED_OUT, "generator status: ${status.summary()}; $earlier")
+        }
         if (status !is Reply.Refused || status.status != HttpStatus.NOT_FOUND.value()) return
         // A start that may have arrived but is unknown now means the generator restarted: the run goes on as a lost client.
         if (run.startSent) return started(run)
@@ -82,6 +90,7 @@ class Conductor(
             run.runId,
             OpenAccountsRequest(accounts.count, accounts.openingBalanceCents, accounts.blocked, accounts.dailyLimitCents),
         )
+        setupReplies[run.runId] = "ledger accounts: ${opened.summary()}"
         val alreadyOpened = opened is Reply.Refused && opened.status == HttpStatus.CONFLICT.value()
         if (opened is Reply.Refused && opened.status == HttpStatus.BAD_REQUEST.value()) return failed(run, RunOutcomes.SETUP_REJECTED)
         if (opened !is Reply.Answered && !alreadyOpened) return
@@ -90,6 +99,7 @@ class Conductor(
         val start = generator.start(
             StartSimulationRequest(run.runId, run.tps, run.durationSeconds, accounts.count, accounts.blocked),
         )
+        setupReplies[run.runId] = "ledger accounts: ${opened.summary()}; generator start: ${start.summary()}"
         when {
             start is Reply.Answered -> started(run)
             start is Reply.Refused && start.status == HttpStatus.BAD_REQUEST.value() -> failed(run, RunOutcomes.SETUP_REJECTED)
@@ -99,10 +109,12 @@ class Conductor(
     }
 
     private fun started(run: Run) {
+        setupReplies.remove(run.runId)
         if (runs.markStarted(run.runId) == 1) log.info("Run {}: started", run.runId)
     }
 
     private fun failed(run: Run, failure: String, replies: String? = null) {
+        setupReplies.remove(run.runId)
         if (runs.markFailed(run.runId, run.state, failure) == 1) {
             log.warn("Run {}: failed in {}: {}{}", run.runId, run.state, failure, replies?.let { " ($it)" }.orEmpty())
         }
@@ -148,6 +160,7 @@ class Conductor(
         val progress = ledgerReport.postedTransfers + ledgerReport.rejectedTransfers + bank.posted + bank.rejected
         val progressAt = if (runs.recordDrainProgress(run.runId, progress) == 1) now else checkNotNull(run.drainProgressAt)
         val drained = drainFinished(bank, ledgerReport)
+        if (drained && run.booksFinalAt == null) runs.markBooksFinal(run.runId)
         val stalled = now >= progressAt + props.runs.drainStallTimeout
         if (!drained && !overcounted(bank, ledgerReport) && !stalled && !pastDeadline) return
 
@@ -188,7 +201,7 @@ class Conductor(
     }
 
     /** From the admission: a crash while the run is set up also hits it. */
-    private fun chaosSince(run: Run): List<ChaosInRun> {
+    fun chaosSince(run: Run): List<ChaosInRun> {
         val admittedAt = run.admittedAt ?: run.createdAt
         return chaos.since(admittedAt).map { it.inRun(run.startedAt ?: admittedAt) }
     }

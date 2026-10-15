@@ -40,8 +40,19 @@ object RunNotes {
 @Schema(description = "What the gateway counted for the run.")
 data class GatewayCounts(val accepted: Long, val published: Long, val posted: Long, val rejected: Long)
 
-@Schema(description = "What the ledger applied for the run.")
-data class LedgerCounts(val posted: Long, val rejected: Long)
+@Schema(description = "What the ledger applied for the run, and the sums of its books.")
+data class LedgerCounts(
+    val posted: Long,
+    val rejected: Long,
+    @field:Schema(description = "Sum of the accounts' opening balances.")
+    val openingTotalCents: Long,
+    @field:Schema(description = "Sum of the accounts' balances after the run.")
+    val balanceTotalCents: Long,
+    @field:Schema(description = "Sum of the journal's debits, as a positive amount.")
+    val debitsCents: Long,
+    @field:Schema(description = "Sum of the journal's credits.")
+    val creditsCents: Long,
+)
 
 @Schema(description = "A crash of the ledger while the run was active.")
 data class ChaosInRun(
@@ -167,7 +178,10 @@ fun verdictOf(
         statementFinal = clientReport?.statementFinal,
         client = clientReport?.journal,
         gateway = GatewayCounts(gateway.accepted, gateway.published, gateway.posted, gateway.rejected),
-        ledger = LedgerCounts(ledger.postedTransfers, ledger.rejectedTransfers),
+        ledger = LedgerCounts(
+            ledger.postedTransfers, ledger.rejectedTransfers,
+            ledger.openingTotalCents, ledger.balanceTotalCents, ledger.debitsCents, ledger.creditsCents,
+        ),
         bankLatencyP50Ms = gateway.latencyP50Ms,
         bankLatencyP99Ms = gateway.latencyP99Ms,
         rejectionsByReason = ledger.rejectionsByReason,

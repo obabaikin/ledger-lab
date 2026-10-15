@@ -26,6 +26,8 @@ class ReconciliationReportTest {
         rejectionsByReason = emptyMap(),
         journalEntries = journalEntries,
         journalSumCents = journalSum,
+        debitsCents = 0,
+        creditsCents = 0,
         transfersWithInvalidJournal = invalidJournal,
         accountsOutOfBalance = outOfBalance,
     )

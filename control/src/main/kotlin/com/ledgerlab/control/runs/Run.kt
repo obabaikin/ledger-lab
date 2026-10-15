@@ -16,6 +16,8 @@ enum class RunState(val isFinal: Boolean, val holdsSlot: Boolean) {
     EXPIRED(isFinal = true, holdsSlot = false),
 }
 
+val UNFINISHED_STATES = RunState.entries.filterNot { it.isFinal }
+
 enum class RunResult { BALANCED, BREAKS, INCOMPLETE }
 
 data class Run(
@@ -37,6 +39,7 @@ data class Run(
     val closedAt: Instant? = null,
     val drainProgress: Long? = null,
     val drainProgressAt: Instant? = null,
+    val booksFinalAt: Instant? = null,
     val result: RunResult? = null,
     val failure: String? = null,
 )
@@ -50,6 +53,8 @@ class RunNotFoundException : RuntimeException()
 class InvalidRunRequestException(message: String) : RuntimeException(message)
 
 class RequestIdConflictException : RuntimeException()
+
+class RunNotFinalException : RuntimeException()
 
 class QuotaExceededException(val retryAfterSeconds: Long?) : RuntimeException()
 
