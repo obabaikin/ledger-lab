@@ -2,6 +2,7 @@ package com.ledgerlab.ledger.api
 
 import com.ledgerlab.ledger.domain.Account
 import com.ledgerlab.ledger.domain.ReconciliationReport
+import com.ledgerlab.ledger.persistence.ReconciliationProperties
 import com.ledgerlab.ledger.service.AccountSetup
 import com.ledgerlab.ledger.service.RunAlreadyExistsException
 import com.ledgerlab.ledger.service.RunService
@@ -12,6 +13,8 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.PositiveOrZero
+import org.slf4j.LoggerFactory
+import org.springframework.dao.QueryTimeoutException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -39,9 +42,12 @@ data class OpenAccountsRequest(
 @Schema(description = "Body of an error answer.")
 data class ApiError(@field:Schema(description = "Names the case.") val error: String)
 
+class ReconciliationTimeoutException(val runId: UUID, cause: Throwable) : RuntimeException(cause)
+
 @RestController
 @RequestMapping("/internal/runs/{runId}")
-class RunController(private val runs: RunService) {
+class RunController(private val runs: RunService, private val reconciliation: ReconciliationProperties) {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     @ApiResponse(responseCode = "201", description = "Accounts opened")
     @ApiResponse(responseCode = "400", description = "Invalid setup", content = [Content(schema = Schema(implementation = ApiError::class))])
@@ -64,8 +70,18 @@ class RunController(private val runs: RunService) {
     fun accounts(@PathVariable runId: UUID): List<Account> = runs.listAccounts(runId)
 
     @ApiResponse(responseCode = "200", description = "The ledger's checks; an unknown run has no accounts and zeros")
+    @ApiResponse(
+        responseCode = "503",
+        description = "The database cancelled a reconciliation query at the statement timeout.",
+        content = [Content(schema = Schema(implementation = ApiError::class))],
+    )
     @GetMapping("/reconciliation")
-    fun reconciliation(@PathVariable runId: UUID): ReconciliationReport = runs.reconcile(runId)
+    fun reconciliation(@PathVariable runId: UUID): ReconciliationReport =
+        try {
+            runs.reconcile(runId)
+        } catch (e: QueryTimeoutException) {
+            throw ReconciliationTimeoutException(runId, e)
+        }
 
     @ApiResponse(responseCode = "204", description = "Deleted")
     @ApiResponse(responseCode = "404", description = "Unknown run")
@@ -80,4 +96,15 @@ class RunController(private val runs: RunService) {
     @ExceptionHandler(IllegalArgumentException::class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     fun invalidSetup(e: IllegalArgumentException) = ApiError(e.message ?: "bad request")
+
+    @ExceptionHandler(ReconciliationTimeoutException::class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    fun reconciliationTimeout(e: ReconciliationTimeoutException): ApiError {
+        log.warn("Reconciliation of run {} hit the database statement timeout ({} ms)", e.runId, reconciliation.statementTimeout.toMillis())
+        return ApiError(STATEMENT_TIMEOUT)
+    }
+
+    companion object {
+        const val STATEMENT_TIMEOUT = "database statement timeout"
+    }
 }
