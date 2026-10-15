@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 
 data class ChaosEvent(val at: Instant, val instances: List<String>)
@@ -37,6 +38,11 @@ class ChaosRepository(private val jdbc: JdbcClient) {
             .param("from", Timestamp.from(from))
             .query { rs, _ -> rs.toEvent() }
             .list()
+
+    fun deleteOlderThan(retention: Duration): Int =
+        jdbc.sql("DELETE FROM chaos_events WHERE at <= clock_timestamp() - CAST(:retentionMillis AS bigint) * interval '1 millisecond'")
+            .param("retentionMillis", retention.toMillis())
+            .update()
 
     private fun ResultSet.toEvent() = ChaosEvent(
         at = getTimestamp("at").toInstant(),

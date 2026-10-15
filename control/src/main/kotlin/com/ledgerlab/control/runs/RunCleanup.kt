@@ -1,6 +1,7 @@
 package com.ledgerlab.control.runs
 
 import com.ledgerlab.control.ControlProperties
+import com.ledgerlab.control.chaos.ChaosRepository
 import com.ledgerlab.control.gateway.GatewayClient
 import com.ledgerlab.control.http.Reply
 import com.ledgerlab.control.ledger.LedgerClient
@@ -16,6 +17,7 @@ class RunCleanup(
     private val ledger: LedgerClient,
     private val gateway: GatewayClient,
     private val reporting: ReportingClient,
+    private val chaos: ChaosRepository,
     private val props: ControlProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -31,6 +33,7 @@ class RunCleanup(
             }
         }
         if (purged > 0) log.info("Purged the bank data of {} runs", purged)
+        chaos.deleteOlderThan(props.cleanup.retention)
         return purged
     }
 

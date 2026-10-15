@@ -18,10 +18,13 @@ if ! k3d cluster list "$CLUSTER" >/dev/null 2>&1; then
   k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --servers 1 --agents 0 \
     --servers-memory "$NODE_MEMORY" --port "$CONTROL_PORT:80@loadbalancer" \
     --volume "$ROOT/infra/k3d/kubelet-crash-loop-backoff.yaml:$KUBELET_DROP_IN@server:0" --wait
-elif ! docker exec "k3d-$CLUSTER-server-0" test -f "$KUBELET_DROP_IN"; then
+elif [ "$(docker inspect -f '{{.State.Running}}' "k3d-$CLUSTER-server-0")" = true ] \
+  && ! docker exec "k3d-$CLUSTER-server-0" test -f "$KUBELET_DROP_IN"; then
   echo "recreate the cluster (down.sh, up.sh) to cap the crash-loop backoff"
 fi
 
+# A jar of an earlier version left in build/libs would give the image build two to choose from.
+rm -f "$ROOT"/*/build/libs/*.jar
 (cd "$ROOT" && ./gradlew bootJar -q)
 for module in $MODULES; do
   docker build -q -f "$ROOT/infra/docker/Dockerfile" -t "ledger-lab/$module:$TAG" "$ROOT/$module/build/libs"
@@ -33,7 +36,15 @@ helm upgrade --install ledger-lab "$ROOT/infra/helm/ledger-lab" --namespace "$NA
   --set image.tag="$TAG" --wait --timeout 10m "$@"
 
 # k3s installs its ingress controller on its own schedule, after helm already reports the release ready.
+INGRESS_ATTEMPTS="${INGRESS_ATTEMPTS:-90}"
+attempt=0
 until curl -sf -o /dev/null "http://localhost:$CONTROL_PORT/v3/api-docs"; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge "$INGRESS_ATTEMPTS" ]; then
+    echo "control did not answer behind the ingress after $attempt attempts"
+    kubectl --namespace "$NAMESPACE" get pods
+    exit 1
+  fi
   echo "waiting for control behind the ingress"
   sleep 2
 done

@@ -46,6 +46,21 @@ class RunCleanupTest : IntegrationTest() {
     }
 
     @Test
+    fun `chaos events older than the retention are deleted, newer ones kept`() {
+        jdbc.sql(
+            """
+            INSERT INTO chaos_events (at, instances) VALUES
+                (clock_timestamp() - interval '25 hours', '{ledger-0}'),
+                (clock_timestamp() - interval '23 hours', '{ledger-1}')
+            """,
+        ).update()
+
+        cleanup.purge()
+
+        assertThat(jdbc.sql("SELECT array_to_string(instances, ',') FROM chaos_events").query(String::class.java).list()).containsExactly("ledger-1")
+    }
+
+    @Test
     fun `a run the bank no longer knows counts as purged`() {
         val runId = ended("FAILED", 25)
         ledger.status = 404
