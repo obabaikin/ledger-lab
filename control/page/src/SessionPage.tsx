@@ -105,7 +105,6 @@ export function SessionPage() {
   const reportRef = useRef<Report | null>(null)
   reportRef.current = report
   const [connectionLost, setConnectionLost] = useState(false)
-  const [restartKey, setRestartKey] = useState(0)
 
   const poll = useCallback(async () => {
     try {
@@ -145,7 +144,7 @@ export function SessionPage() {
   const unfinished = runs.some((r) => !FINAL_STATES.has(r.state))
   const waitingForReport = run?.state === 'RECONCILED' && runReport === null
   const chaosCountingDown = (session?.chaosReadyInSeconds ?? 0) > 0
-  usePolling(poll, POLL_INTERVAL_MS, !missing && (session === null || connectionLost || unfinished || waitingForReport || chaosCountingDown), restartKey)
+  const pollNow = usePolling(poll, POLL_INTERVAL_MS, !missing && (session === null || connectionLost || unfinished || waitingForReport || chaosCountingDown))
 
   const live = run?.live ?? null
   const seenLive = seen !== null && seen.runId === run?.runId ? seen.live : null
@@ -262,7 +261,7 @@ export function SessionPage() {
         onCrashed={(at) => setPressedCrashAt(Date.parse(at))}
         onChanged={(started) => {
           if (started) setPickedId(null)
-          setRestartKey((k) => k + 1)
+          void pollNow()
         }}
       />
       {connectionLost && (

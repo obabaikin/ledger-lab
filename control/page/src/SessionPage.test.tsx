@@ -45,6 +45,25 @@ describe('session page', () => {
     expect(screen.queryByRole('img', { name: /Transfers flowing/ })).not.toBeInTheDocument()
   })
 
+  it('shows a run as soon as Start is pressed, without a reload', async () => {
+    const queued = run({ state: 'QUEUED', position: 1 })
+    let started = false
+    fakeControl({
+      [`GET ${SESSION}`]: { status: 200, body: session() },
+      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: started ? [queued] : [] } }),
+      [`POST ${RUNS}`]: () => {
+        started = true
+        return { status: 202, body: queued }
+      },
+      [`GET ${RUN}`]: { status: 200, body: queued },
+    })
+    renderAt(`/s/${SESSION_ID}`)
+
+    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
+
+    expect(await screen.findByTestId('queued', {}, { timeout: 3000 })).toHaveTextContent('Queued · #1 in line')
+  })
+
   it('names an unknown session', async () => {
     fakeControl({ [`GET ${SESSION}`]: { status: 404, body: { error: 'session not found' } } })
     renderAt(`/s/${SESSION_ID}`)
