@@ -2,15 +2,7 @@ import type { ChaosInRun, SecondStats } from './api/client'
 import { count } from './format'
 import { fullBankSeconds, fullClientSeconds } from './fullSeconds'
 
-export type RateLines = 'accepted' | 'clients' | 'all'
-
-export const RATE_LINES: Record<RateLines, string> = {
-  accepted: '(a) accepted + booked',
-  clients: '(b) clients + booked',
-  all: '(c) all three',
-}
-
-type Point = [number, number | null]
+export type Point = [number, number | null]
 type Line = { name: string; color: string; points: Point[] }
 
 const W = 420
@@ -21,6 +13,22 @@ const TOP = 8
 const MS_PER_SECOND = 1000
 const HEADROOM = 1.15
 const MIN_TOP = 10
+
+/** A second without a value breaks the line: the gap is drawn as a gap, not as 0. */
+export function segments(points: Point[]): [number, number][][] {
+  const out: [number, number][][] = []
+  let current: [number, number][] = []
+  for (const [s, v] of points) {
+    if (v === null) {
+      if (current.length > 0) out.push(current)
+      current = []
+    } else {
+      current.push([s, v])
+    }
+  }
+  if (current.length > 0) out.push(current)
+  return out
+}
 
 function Chart({ lines, maxSecond, bands }: { lines: Line[]; maxSecond: number; bands: [number, number][] }) {
   const values = lines.flatMap((l) => l.points.map(([, v]) => v).filter((v): v is number => v !== null))
@@ -51,19 +59,22 @@ function Chart({ lines, maxSecond, bands }: { lines: Line[]; maxSecond: number; 
           </text>
         </g>
       ))}
-      {lines.map((l) => (
-        <polyline
-          key={l.name}
-          points={l.points
-            .filter((p): p is [number, number] => p[1] !== null)
-            .map(([s, v]) => `${x(s)},${y(v)}`)
-            .join(' ')}
-          fill="none"
-          stroke={l.color}
-          strokeWidth={2.2}
-          strokeLinejoin="round"
-        />
-      ))}
+      {lines.flatMap((l) =>
+        segments(l.points).map((segment) =>
+          segment.length === 1 ? (
+            <circle key={`${l.name}-${segment[0]![0]}`} cx={x(segment[0]![0])} cy={y(segment[0]![1])} r={1.8} fill={l.color} />
+          ) : (
+            <polyline
+              key={`${l.name}-${segment[0]![0]}`}
+              points={segment.map(([s, v]) => `${x(s)},${y(v)}`).join(' ')}
+              fill="none"
+              stroke={l.color}
+              strokeWidth={2.2}
+              strokeLinejoin="round"
+            />
+          ),
+        ),
+      )}
     </svg>
   )
 }
@@ -98,8 +109,6 @@ export function Charts(props: {
   sending: boolean
   clientsPerSecond: number[] | null
   chaos: ChaosInRun[]
-  rateLines: RateLines
-  onRateLines: (lines: RateLines) => void
 }) {
   const start = props.startedAt === null ? null : Date.parse(props.startedAt)
   // A second's point sits at its end, as "how many in that second".
@@ -118,12 +127,7 @@ export function Charts(props: {
   const clientsLine: Line = { name: 'sent by clients', color: 'var(--muted)', points: clients }
   const acceptedLine: Line = { name: 'accepted by the gateway', color: 'var(--flow)', points: accepted }
   const bookedLine: Line = { name: 'booked by the ledger', color: 'var(--ok)', points: booked }
-  const rate =
-    props.rateLines === 'accepted'
-      ? [acceptedLine, bookedLine]
-      : props.rateLines === 'clients'
-        ? [{ ...clientsLine, color: 'var(--flow)' }, bookedLine]
-        : [clientsLine, acceptedLine, bookedLine]
+  const rate = [clientsLine, acceptedLine, bookedLine]
   const latency: Line[] = [
     { name: 'median (p50)', color: 'var(--flow)', points: p50 },
     { name: 'slowest 1% (p99)', color: 'var(--warn)', points: p99 },
@@ -133,15 +137,6 @@ export function Charts(props: {
     <section className="charts">
       <div className="card chart">
         <h3>Transfers per second</h3>
-        <div className="probe">
-          probe:{' '}
-          {(Object.keys(RATE_LINES) as RateLines[]).map((k) => (
-            <label key={k}>
-              <input type="radio" name="rateLines" checked={props.rateLines === k} onChange={() => props.onRateLines(k)} />{' '}
-              {RATE_LINES[k]}
-            </label>
-          ))}
-        </div>
         <Legend lines={rate} />
         <Chart lines={rate} maxSecond={maxSecond} bands={bands} />
       </div>

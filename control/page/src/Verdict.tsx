@@ -1,6 +1,6 @@
 import type { RunReport } from './api/client'
 import { REPOSITORY_URL } from './Diagram'
-import { count, euros } from './format'
+import { count, euros, NO_DATA } from './format'
 
 const TESTS_URL = `${REPOSITORY_URL}/tree/main/control/src/test`
 const MS_PER_SECOND = 1000
@@ -42,6 +42,19 @@ function checks(r: RunReport): Check[] {
   ]
 }
 
+const PERCENT = 100
+
+const seconds = (ms: number | null) => (ms === null ? NO_DATA : `${(ms / MS_PER_SECOND).toFixed(2)} s`)
+
+/** What the bank took and how fast it answered, from the report alone; a side without data is a dash. */
+export function verdictLine(r: RunReport): string {
+  const sent = r.client?.requested ?? null
+  const accepted = r.gateway.accepted
+  const share = sent === null || sent === 0 ? NO_DATA : `${((accepted / sent) * PERCENT).toFixed(1)} %`
+  const sentText = sent === null ? NO_DATA : count(sent)
+  return `Accepted ${count(accepted)} of ${sentText} sent (${share}) · bank p50 ${seconds(r.bankLatencyP50Ms)} / p99 ${seconds(r.bankLatencyP99Ms)}`
+}
+
 const MARK = (passed: boolean | null) => (passed === null ? '–' : passed ? '✓' : '✗')
 
 export function Verdict({ report, tps, durationSeconds }: { report: RunReport; tps: number; durationSeconds: number }) {
@@ -61,6 +74,7 @@ export function Verdict({ report, tps, durationSeconds }: { report: RunReport; t
     <section className="card verdict" data-testid="verdict">
       <div className={`mark ${head.tone}`}>{head.mark}</div>
       <h2>{head.title}</h2>
+      <div data-testid="verdict-line">{verdictLine(report)}</div>
       <div className="hint">
         {count(tps)} transfers/s for {durationSeconds} s
       </div>

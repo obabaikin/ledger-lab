@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { api } from './api/client'
-import { Diagram, NO_NUMBERS } from './Diagram'
+import { Diagram } from './Diagram'
 import { BuildInfo } from './BuildInfo'
 import { Hero } from './Hero'
 
@@ -37,7 +37,7 @@ export function Landing() {
         </div>
       </section>
       <section className="card">
-        <Diagram numbers={NO_NUMBERS} pods={undefined} />
+        <Diagram numbers={null} pods={undefined} />
       </section>
       <BuildInfo />
     </main>

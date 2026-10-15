@@ -1,6 +1,7 @@
 import type { PodView } from './api/client'
 import { FlowDots } from './FlowDots'
 import { count, shown } from './format'
+import { inFlight } from './shownCounts'
 
 export const REPOSITORY_URL = 'https://github.com/obabaikin/ledger-lab'
 const CODE_URL = `${REPOSITORY_URL}/tree/main/`
@@ -23,26 +24,43 @@ export const NO_NUMBERS: DiagramNumbers = {
   duplicatesSent: null,
 }
 
-type PodState = 'consuming' | 'idle' | 'down' | 'unknown'
+export type PodState = 'consuming' | 'starting' | 'down' | 'unknown'
 
 const POD_COLOR: Record<PodState, string> = {
   consuming: 'var(--ok)',
-  idle: 'var(--warn)',
+  starting: 'var(--warn)',
   down: 'var(--bad)',
   unknown: 'var(--muted)',
 }
 
-const POD_TITLE: Record<PodState, string> = {
-  consuming: 'up, consuming',
-  idle: 'up, no partitions',
+export const POD_LEGEND: Record<PodState, string> = {
+  consuming: 'consuming',
+  starting: 'starting',
   down: 'no answer to Prometheus',
   unknown: 'no data',
 }
 
 export function podState(pod: PodView): PodState {
   if (!pod.up) return 'down'
-  if (pod.partitions === 0) return 'idle'
+  if (pod.partitions === 0) return 'starting'
   return 'consuming'
+}
+
+export function podStates(pods: PodView[] | null): { name: string; state: PodState }[] {
+  return pods === null ? [{ name: 'no data', state: 'unknown' }] : pods.map((p) => ({ name: p.instance, state: podState(p) }))
+}
+
+export function PodLegend() {
+  return (
+    <div className="legend podLegend" aria-label="Instances">
+      {(Object.keys(POD_LEGEND) as PodState[]).map((state) => (
+        <span key={state}>
+          <i className="dot" style={{ background: POD_COLOR[state] }} />
+          {POD_LEGEND[state]}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 const NODES = {
@@ -63,27 +81,38 @@ const WIRES = [
 ] as const
 
 function Pods({ x, y, w, pods }: { x: number; y: number; w: number; pods: PodView[] | null }) {
-  const states: { name: string; state: PodState }[] =
-    pods === null ? [{ name: 'no data', state: 'unknown' }] : pods.map((p) => ({ name: p.instance, state: podState(p) }))
+  const states = podStates(pods)
   return (
     <g>
       {states.map((p, i) => (
-        <circle key={p.name} cx={x + w / 2 + (i - (states.length - 1) / 2) * 14} cy={y - 10} r={5} fill={POD_COLOR[p.state]}>
-          <title>{`${p.name}: ${POD_TITLE[p.state]}`}</title>
+        <circle
+          key={p.name}
+          cx={x + w / 2 + (i - (states.length - 1) / 2) * 14}
+          cy={y - 10}
+          r={5}
+          fill={POD_COLOR[p.state]}
+          data-testid="pod"
+          data-state={p.state}
+        >
+          <title>{`${p.name}: ${POD_LEGEND[p.state]}`}</title>
         </circle>
       ))}
     </g>
   )
 }
 
-export function Diagram({ numbers, pods, rates }: { numbers: DiagramNumbers; pods: PodView[] | null | undefined; rates?: number[] }) {
+/** Without numbers (null) the diagram only shows the way a transfer takes, as for a visitor without an invite. */
+export function Diagram(props: { numbers: DiagramNumbers | null; pods: PodView[] | null | undefined; rates?: number[] }) {
+  const { pods, rates } = props
+  const numbers = props.numbers ?? NO_NUMBERS
+  const bare = props.numbers === null
   const { requested, accepted, posted, rejected } = numbers
-  const inFlight = accepted === null || posted === null || rejected === null ? null : accepted - posted - rejected
+  const waiting = accepted === null || posted === null || rejected === null ? null : inFlight({ accepted, posted, rejected })
   const ledgerPods = pods === undefined ? undefined : (pods?.filter((p) => p.job === 'ledger') ?? null)
   const consuming = ledgerPods?.filter((p) => podState(p) === 'consuming').length
   const ledgerClass =
     ledgerPods == null || ledgerPods.length === 0 ? '' : consuming === 0 ? 'dead' : consuming! < ledgerPods.length ? 'degraded' : ''
-  const lines: Record<string, [string, string, string]> = {
+  const lines: Record<string, [string, string, string]> = bare ? {} : {
     clients: [`${shown(requested)} sent`, 'their own count', numbers.duplicatesSent ? `↺ ${count(numbers.duplicatesSent)} pressed twice` : ''],
     gateway: [`${shown(accepted)} accepted`, '', ''],
     ledger: [
@@ -133,7 +162,7 @@ export function Diagram({ numbers, pods, rates }: { numbers: DiagramNumbers; pod
             {key === 'kafka' ? (
               <>
                 <text className="num" x={cx} y={y + 61} textAnchor="middle" data-testid="in-flight">
-                  {shown(inFlight)}
+                  {bare ? '' : shown(waiting)}
                 </text>
                 <text className="sub" x={cx} y={y + 84} textAnchor="middle">
                   in flight
@@ -164,7 +193,7 @@ export function Diagram({ numbers, pods, rates }: { numbers: DiagramNumbers; pod
         rejected by the rules
       </text>
       <text x={780} y={273} textAnchor="middle" className="num binNum">
-        {shown(rejected)}
+        {bare ? '' : shown(rejected)}
       </text>
     </svg>
   )

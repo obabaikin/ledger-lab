@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-export type Counters = Record<string, number>
+export type Counters = Record<string, number | null>
 
 /**
  * Moves from the counters shown when the new snapshot came towards it, never past it: no extrapolation.
@@ -11,19 +11,19 @@ export function between<T extends Counters>(from: T | null, to: T, fraction: num
   const out: Counters = {}
   for (const [key, end] of Object.entries(to)) {
     const start = from?.[key] ?? end
-    out[key] = start > end ? end : Math.floor(start + (end - start) * f)
+    out[key] = end === null || start === null || start > end ? end : Math.floor(start + (end - start) * f)
   }
   return out as T
 }
 
-export function useSmoothed<T extends Counters>(target: T | null, intervalMs: number, enabled: boolean): T | null {
+export function useSmoothed<T extends Counters>(target: T | null, intervalMs: number): T | null {
   const [shown, setShown] = useState<T | null>(target)
   const shownRef = useRef<T | null>(target)
   shownRef.current = shown
 
   useEffect(() => {
-    if (target === null || !enabled) {
-      setShown(target)
+    if (target === null) {
+      setShown(null)
       return
     }
     const from = shownRef.current
@@ -37,7 +37,7 @@ export function useSmoothed<T extends Counters>(target: T | null, intervalMs: nu
     frame = requestAnimationFrame(step)
     return () => cancelAnimationFrame(frame)
     // A new snapshot is a new object; its identity is the trigger.
-  }, [target, intervalMs, enabled])
+  }, [target, intervalMs])
 
   return shown
 }

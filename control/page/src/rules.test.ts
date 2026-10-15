@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { NO_DATA, shown } from './format'
-import { PHASES, phaseOf } from './phase'
+import { booksFinal, PHASES, phaseOf } from './phase'
+import { inFlight, liveCounters, shownAccepted } from './shownCounts'
+import { segments } from './Charts'
+import { podState, podStates } from './Diagram'
 import { between } from './smooth'
 import { otherRunInProgress, runToShow } from './selectRun'
 import { run } from './test/fakeControl'
@@ -10,16 +13,53 @@ import { chaosWaitShown, nextChaosReadyAt } from './chaosReady'
 
 describe('phases', () => {
   it.each([
-    ['QUEUED', null, 'Queued'],
-    ['CREATED', null, 'Queued'],
-    ['RUNNING', null, 'Clients sending'],
-    ['DRAINING', null, 'Bank finishing'],
-    ['DRAINING', '2026-10-15T10:00:00Z', 'Reconciling'],
-    ['RECONCILED', '2026-10-15T10:00:00Z', 'Verdict'],
-    ['FAILED', null, 'Verdict'],
-    ['EXPIRED', null, 'Verdict'],
-  ] as const)('a run %s with booksFinalAt %s is in %s', (state, booksFinalAt, phase) => {
-    expect(PHASES[phaseOf({ state, booksFinalAt })]).toBe(phase)
+    ['QUEUED', 'Queued'],
+    ['CREATED', 'Queued'],
+    ['RUNNING', 'Clients sending'],
+    ['DRAINING', 'Bank finishing'],
+    ['RECONCILED', 'Verdict'],
+    ['FAILED', 'Verdict'],
+    ['EXPIRED', 'Verdict'],
+  ] as const)('a run %s is in %s', (state, phase) => {
+    expect(PHASES[phaseOf({ state })]).toBe(phase)
+  })
+
+  it('are four, books final being a mark within Bank finishing', () => {
+    expect(PHASES).toEqual(['Queued', 'Clients sending', 'Bank finishing', 'Verdict'])
+    expect(PHASES[phaseOf({ state: 'DRAINING' })]).toBe('Bank finishing')
+  })
+
+  it('mark the books final only once control saw them final', () => {
+    expect(booksFinal({ state: 'DRAINING', booksFinalAt: null })).toBe(false)
+    expect(booksFinal({ state: 'DRAINING', booksFinalAt: '2026-10-15T10:00:00Z' })).toBe(true)
+  })
+})
+
+describe('live counts', () => {
+  const live = (changes: Record<string, unknown> = {}) =>
+    ({
+      stats: { at: '2026-10-15T10:00:05Z', totals: { accepted: 1000, posted: 990, rejected: 5, postedAmountCents: 99_000 }, series: [] },
+      clients: { requested: 1100 },
+      ...changes,
+    }) as never
+
+  it('take in flight from one snapshot and never below 0', () => {
+    expect(inFlight({ accepted: 1000, posted: 990, rejected: 5 })).toBe(5)
+    expect(inFlight({ accepted: 990, posted: 990, rejected: 5 })).toBe(0)
+  })
+
+  it('show accepted at least as booked and rejected together', () => {
+    expect(shownAccepted({ accepted: 990, posted: 990, rejected: 5 })).toBe(995)
+    expect(shownAccepted({ accepted: 1000, posted: 990, rejected: 5 })).toBe(1000)
+  })
+
+  it('leave the clients\' count unknown, not -1 or 0, while the generator has not answered', () => {
+    expect(liveCounters(live({ clients: null }))?.requested).toBeNull()
+    expect(liveCounters(live())?.requested).toBe(1100)
+  })
+
+  it('are unknown as a whole without a projection snapshot', () => {
+    expect(liveCounters(live({ stats: null }))).toBeNull()
   })
 })
 
@@ -53,6 +93,11 @@ describe('numbers on screen', () => {
 
   it('starts from the snapshot itself when nothing was shown before', () => {
     expect(between(null, { accepted: 42 }, 0)).toEqual({ accepted: 42 })
+  })
+
+  it('keeps a part nobody has read unknown, and starts it from its first value', () => {
+    expect(between({ requested: 500 }, { requested: null }, 0.5)).toEqual({ requested: null })
+    expect(between({ requested: null }, { requested: 800 }, 0.5)).toEqual({ requested: 800 })
   })
 })
 
@@ -116,6 +161,37 @@ describe('transfers per second', () => {
   it("leaves out the clients' second being counted and the slot past the duration", () => {
     expect(fullClientSeconds([1000, 1000, 365], 30, true)).toEqual([1000, 1000])
     expect(fullClientSeconds([1000, 1000, 1000, 0], 3, false)).toEqual([1000, 1000, 1000])
+  })
+})
+
+describe('latency line', () => {
+  it('breaks at a second without a value instead of dropping to 0', () => {
+    expect(segments([[1, 12], [2, null], [3, 14], [4, 15]])).toEqual([[[1, 12]], [[3, 14], [4, 15]]])
+  })
+
+  it('is one line without gaps', () => {
+    expect(segments([[1, 12], [2, 13]])).toEqual([[[1, 12], [2, 13]]])
+  })
+})
+
+describe('instances', () => {
+  const pod = (up: boolean, partitions: number | null) => ({ instance: 'ledger-0', job: 'ledger', up, partitions })
+
+  it('are down when Prometheus got no answer', () => {
+    expect(podState(pod(false, 4))).toBe('down')
+  })
+
+  it('are starting while up without partitions', () => {
+    expect(podState(pod(true, 0))).toBe('starting')
+  })
+
+  it('are consuming with partitions, and a service without partitions is consuming once up', () => {
+    expect(podState(pod(true, 4))).toBe('consuming')
+    expect(podState({ ...pod(true, null), job: 'gateway' })).toBe('consuming')
+  })
+
+  it('show no data without an answer from Prometheus', () => {
+    expect(podStates(null)).toEqual([{ name: 'no data', state: 'unknown' }])
   })
 })
 
