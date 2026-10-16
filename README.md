@@ -43,7 +43,7 @@ Micrometer / Prometheus · Helm · k3s; planned: Grafana, Terraform (Contabo)
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
 | `reporting` | The bank's numbers per run, projected from its Kafka events, internal API | done |
-| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota, run queue, orchestration, the verdict and chaos; the page follows |
+| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | done |
 
 ## Running locally
 
@@ -56,7 +56,7 @@ docker compose up -d                      # Postgres (one schema per service), K
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
 ./gradlew :reporting:bootRun              # :8084, the run's numbers from the bank's events
-./gradlew :control:bootRun                # :8083, invites, the run queue and orchestration (needs the other four)
+./gradlew :control:bootRun                # :8083, the page, invites, the run queue and orchestration (needs the other four)
 ```
 
 A run through control, once an invite exists (see below):
