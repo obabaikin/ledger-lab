@@ -52,7 +52,7 @@ Requirements: JDK 21, Docker.
 ```bash
 docker compose up -d                      # Postgres (one schema per service), Kafka and its topics, Prometheus :9090
 ./gradlew test                            # integration tests with Testcontainers
-./gradlew check                           # tests plus dead-code checks: compiler warnings, detekt, knip
+./gradlew check                           # tests plus dead-code checks: detekt, knip (compiler warnings fail every build)
 ./gradlew :ledger-service:bootRun         # :8080
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
