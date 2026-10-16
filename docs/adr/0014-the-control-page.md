@@ -14,9 +14,11 @@ reader the page is built for.
 ## Decision
 
 **Polling, one request at a time.** The page asks control once a second: the session, its runs, then
-the shown run, one after the other; a call due while the last one waits for its answer is skipped. It
-stops asking once nothing is in progress or awaited. When control does not answer, one line says "connection
-lost, retrying" and the last numbers stay. The page keeps its state in the browser only.
+the shown run, one after the other; a tick due while the last call waits for its answer is skipped. It
+stops asking once nothing is in progress or awaited. Start, Stop and the crash button ask at once,
+also when the page was idle; if a call is still waiting then, the next one follows right after it, as
+its answer may predate the press. When control does not answer, one line says "connection lost,
+retrying" and the last numbers stay. The page keeps its state in the browser only.
 
 **Types from the specification.** The page's types are generated from `control/openapi.json`, which
 a test checks against the running control. Control writes every field, a null one too, so every
@@ -30,16 +32,24 @@ relation between the clients' count and the bank's live, as none holds while the
 the gateway's answers. Money equalities, debits = credits and the total of all accounts unchanged,
 are shown only from the sums of the books in the report.
 
-**The display rule.** A part not read yet is shown as "—", never as 0. Accepted, booked, rejected
-and in flight come from one snapshot: shown accepted is at least booked plus rejected, and in flight
-is accepted minus booked minus rejected, never below 0. Counters move towards the last snapshot
-without extrapolation and never count down. A second still running is not drawn; a second without
-results breaks the latency line instead of drawing 0. Once the run is reconciled, the numbers are the
-report's.
+**The display rule.** A part not read yet is shown as "—", never as 0. Accepted, booked, rejected and
+in flight come from one snapshot: shown accepted is at least booked plus rejected, and in flight is
+accepted minus booked minus rejected, never below 0. Counters move towards the last snapshot without
+extrapolation and never count down. A second still running is not drawn; a second without results
+breaks the latency line instead of drawing 0. The latency is named "gateway - ledger": from the
+gateway's acceptance to the ledger's booking or rejection, not the gateway's answer to the client,
+which comes at once. A crash band runs from the crash to the first second in which the ledger books
+again after its outage; the instances still book for a moment after the crash, so that moment does not
+end the band. Once the run is reconciled, the numbers are the report's.
 
 **Four phases.** Queued (queued or being set up), Clients sending, Bank finishing (draining, with a
 mark once every accepted transfer is applied), Verdict (reconciled, failed or expired). A queued run
-shows its place in line instead of the diagram; an expired one shows its reason.
+shows its place in line on its phase, an expired one its reason above the diagram.
+
+**A layout that does not move.** The diagram is on the page from the start, with "—" for numbers not
+read; the charts come with the first run, and the buttons keep their places. A run in a session
+changes numbers and marks, not blocks: a run is queued for about a second when the queue is empty, and
+a block put in place of the diagram only for that second reads as a flicker.
 
 **The page is always fresh.** `index.html` names its scripts by content hash, so a cached index keeps
 an old page after a deploy. The jar gives every file the same 1980 timestamp, so a reload checked by
@@ -52,11 +62,11 @@ under the queue's lock, so two tabs pressing Start at once make one run. The pag
 with the reason on the button. A queued run cannot be cancelled: it leaves the queue by starting or
 by expiring after `queue-timeout`, and the session waits for it.
 
-**Buttons only when they act.** Stop is shown only while the clients send. The crash button is shown
-when control says chaos is available and is held back with its reason on it: a countdown from
-control's seconds, which may end the page's own count but never stretch it, or "while clients are
-sending". A visitor without an invite sees the question, the diagram without numbers, the links and
-how to get an invite.
+**Buttons act only when they can.** Stop acts only while the clients send; otherwise it is held back
+with "while clients are sending" on it. The crash button is shown when control says chaos is available
+and is held back the same way, with its reason on it: a countdown from control's seconds, which may
+end the page's own count but never stretch it, or "while clients are sending". A visitor without an
+invite sees the question, the diagram without numbers, the links and how to get an invite.
 
 ## Considered and rejected
 

@@ -119,10 +119,10 @@ The API is described in [`control/openapi.json`](control/openapi.json), checked 
 Control serves the page at `/`; the invite link opens a session at `/s/<sessionId>`. It shows a run as
 four phases (queued, clients sending, bank finishing, verdict), the way a transfer takes from the
 clients through the gateway and Kafka to the ledger with live counts and the state of each instance,
-transfers and the bank's latency per second, the crash button, and after the run the verdict with the
-sums of the books: debits against credits and the total of all accounts before and after. A session
-runs one run at a time. Every live number comes from a named source, and a number not read yet shows
-as "—" ([ADR 0014](docs/adr/0014-the-control-page.md)).
+transfers per second and the time from the gateway to the ledger, the crash button, and after the run
+the verdict with the sums of the books: debits against credits and the total of all accounts before and
+after. A session runs one run at a time. Every live number comes from a named source, and a number not
+read yet shows as "—" ([ADR 0014](docs/adr/0014-the-control-page.md)).
 
 The page is React and TypeScript in `control/page`; its types are generated from `control/openapi.json`.
 Gradle downloads Node, runs the page's tests with control's and puts the built page into control's jar,
