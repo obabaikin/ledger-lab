@@ -38,10 +38,6 @@
             "format" : "double",
             "type" : [ "number", "null" ]
           },
-          "pending" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "posted" : {
             "format" : "int64",
             "type" : "integer"

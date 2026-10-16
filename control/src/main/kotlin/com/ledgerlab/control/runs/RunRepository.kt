@@ -293,7 +293,6 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
         clientLost = getBoolean("client_lost"),
         drainStartedAt = getObject("drain_started_at", Timestamp::class.java)?.toInstant(),
         closedAt = getObject("closed_at", Timestamp::class.java)?.toInstant(),
-        drainProgress = getObject("drain_progress")?.let { getLong("drain_progress") },
         drainProgressAt = getObject("drain_progress_at", Timestamp::class.java)?.toInstant(),
         booksFinalAt = getObject("books_final_at", Timestamp::class.java)?.toInstant(),
         result = getString("result")?.let { RunResult.valueOf(it) },

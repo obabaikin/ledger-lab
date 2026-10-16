@@ -10,7 +10,6 @@ import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import java.sql.ResultSet
-import java.sql.Timestamp
 import java.util.UUID
 
 @Repository

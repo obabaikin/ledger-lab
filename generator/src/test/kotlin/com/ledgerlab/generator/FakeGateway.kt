@@ -15,7 +15,6 @@ import tools.jackson.module.kotlin.jacksonObjectMapper
 import tools.jackson.module.kotlin.readValue
 import java.net.InetSocketAddress
 import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -62,7 +61,7 @@ class FakeGateway(
             val waited = exchange.requestURI.query?.contains("${GatewayApi.WAIT_PARAM}=") == true
             Thread.sleep(if (attempt > FIRST_ATTEMPT) repeatDelay else responseDelay)
             fun answer(status: TransferStatus, reason: RejectReason? = null) =
-                objectMapper.writeValueAsString(TransferResponse(request.transferId!!, request.runId!!, status, reason, Instant.now(), null))
+                objectMapper.writeValueAsString(TransferResponse(request.transferId!!, request.runId!!, status, reason))
             val (code, response) = when {
                 failFirstAttempt && attempt == FIRST_ATTEMPT -> HttpStatus.SERVICE_UNAVAILABLE.value() to """{"error":"unavailable"}"""
                 refuseWith != null -> refuseWith to """{"error":"refused"}"""
@@ -85,7 +84,7 @@ class FakeGateway(
                 failure != null -> respond(exchange, failure, """{"error":"failed"}""")
                 !periodClosed -> respond(exchange, HttpStatus.CONFLICT.value(), """{"error":"period not closed"}""")
                 rawStatement != null -> respond(exchange, HttpStatus.OK.value(), rawStatement)
-                else -> respond(exchange, HttpStatus.OK.value(), objectMapper.writeValueAsString(tamperStatement(pageNumber, statement(runId, after))))
+                else -> respond(exchange, HttpStatus.OK.value(), objectMapper.writeValueAsString(tamperStatement(pageNumber, statement(after))))
             }
         }
         server.start()
@@ -102,7 +101,7 @@ class FakeGateway(
         )
     }
 
-    private fun statement(runId: UUID, after: UUID?): Statement = synchronized(accepted) {
+    private fun statement(after: UUID?): Statement = synchronized(accepted) {
         val lines = accepted.values.toList()
         val from = after?.let { id -> lines.indexOfFirst { it.transferId == id } + 1 } ?: 0
         val page = lines.drop(from).take(statementPage)

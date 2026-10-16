@@ -15,7 +15,7 @@ import { useSmoothed } from './smooth'
 import { usePolling } from './usePolling'
 import { Verdict } from './Verdict'
 
-export const POLL_INTERVAL_MS = 1000
+const POLL_INTERVAL_MS = 1000
 export const RUNS_LISTED = 10
 const MS_PER_SECOND = 1000
 

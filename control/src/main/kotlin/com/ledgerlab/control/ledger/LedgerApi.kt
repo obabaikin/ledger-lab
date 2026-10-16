@@ -25,7 +25,6 @@ enum class ReconciliationCheck {
 
 data class ReconciliationReport(
     val runId: UUID,
-    val accounts: Long,
     val balanced: Boolean,
     val failedChecks: List<ReconciliationCheck>,
     val postedTransfers: Long,

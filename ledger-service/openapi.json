@@ -195,34 +195,6 @@
       }
     },
     "/internal/runs/{runId}/accounts" : {
-      "get" : {
-        "operationId" : "accounts",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "items" : {
-                    "$ref" : "#/components/schemas/Account"
-                  },
-                  "type" : "array"
-                }
-              }
-            },
-            "description" : "The run's accounts"
-          }
-        },
-        "tags" : [ "run-controller" ]
-      },
       "post" : {
         "operationId" : "openAccounts",
         "parameters" : [ {

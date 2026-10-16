@@ -19,7 +19,7 @@ class RunDuplicatesTest {
     @Test
     fun `duplicates are counted per run`() {
         val registry = SimpleMeterRegistry()
-        val duplicates = RunDuplicates(registry, RunDuplicatesProperties(Duration.ofMinutes(10), Duration.ofMinutes(1)))
+        val duplicates = RunDuplicates(registry, RunDuplicatesProperties(Duration.ofMinutes(10)))
         val (a, b) = UUID.randomUUID() to UUID.randomUUID()
 
         repeat(3) { duplicates.record(a) }
@@ -32,7 +32,7 @@ class RunDuplicatesTest {
     @Test
     fun `an idle run's counter is removed and a later duplicate starts a new one`() {
         val registry = SimpleMeterRegistry()
-        val duplicates = RunDuplicates(registry, RunDuplicatesProperties(Duration.ZERO, Duration.ofMinutes(1)))
+        val duplicates = RunDuplicates(registry, RunDuplicatesProperties(Duration.ZERO))
         val runId = UUID.randomUUID()
         duplicates.record(runId)
 
@@ -48,7 +48,7 @@ class RunDuplicatesTest {
         val broken = object : SimpleMeterRegistry() {
             override fun newCounter(id: Meter.Id) = throw IllegalStateException("registry closed")
         }
-        val duplicates = RunDuplicates(broken, RunDuplicatesProperties(Duration.ofMinutes(10), Duration.ofMinutes(1)))
+        val duplicates = RunDuplicates(broken, RunDuplicatesProperties(Duration.ofMinutes(10)))
 
         assertThatCode { duplicates.record(UUID.randomUUID()) }.doesNotThrowAnyException()
     }

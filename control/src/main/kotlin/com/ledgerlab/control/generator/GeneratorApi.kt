@@ -1,6 +1,5 @@
 package com.ledgerlab.control.generator
 
-import java.time.Instant
 import java.util.UUID
 
 /** Control's model of the generator's internal API, checked against generator/openapi.json. */
@@ -29,7 +28,6 @@ enum class SimulationState(val active: Boolean) {
 data class SimulationStatus(
     val runId: UUID,
     val state: SimulationState,
-    val finishedAt: Instant?,
     val requested: Long,
     val acknowledged: Long,
     val failed: Long,
@@ -61,14 +59,11 @@ data class JournalTotals(
     val acknowledgedAmountCents: Long,
 )
 
-data class StatementTotals(val rows: Long, val amountCents: Long, val byStatus: Map<String, Long>)
-
 data class ClientReconciliationReport(
     val runId: UUID,
     val balanced: Boolean,
     val statementFinal: Boolean,
     val journal: JournalTotals,
-    val statement: StatementTotals,
     val breaks: ReconciliationBreaks,
     val unknownResolved: UnknownResolved,
 )

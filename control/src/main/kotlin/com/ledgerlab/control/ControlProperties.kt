@@ -6,7 +6,6 @@ import java.time.Duration
 @ConfigurationProperties("control")
 data class ControlProperties(
     val runs: Runs,
-    val queue: Queue,
     val ledger: Ledger,
     val gateway: Gateway,
     val generator: Generator,
@@ -37,8 +36,6 @@ data class ControlProperties(
     }
 
     data class Accounts(val count: Int, val openingBalanceCents: Long, val blocked: Int, val dailyLimitCents: Long)
-
-    data class Queue(val pollInterval: Duration)
 
     data class Ledger(val baseUrl: String, val transferPartitions: Int)
 

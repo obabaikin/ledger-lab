@@ -10,7 +10,6 @@ import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 
 class ClientLatencyTest {
@@ -47,7 +46,7 @@ class ClientLatencyTest {
     fun `a final status to a client that did not wait gives no client latency`() {
         val mapper = jacksonObjectMapper()
         val alreadyFinal = { request: SubmitTransferRequest ->
-            mapper.writeValueAsString(TransferResponse(request.transferId!!, request.runId!!, TransferStatus.POSTED, null, Instant.now(), null))
+            mapper.writeValueAsString(TransferResponse(request.transferId!!, request.runId!!, TransferStatus.POSTED, null))
         }
         FakeGateway(rawAnswer = alreadyFinal).use { gateway ->
             val simulation = simulation(gateway, waitShare = 0.0)

@@ -14,6 +14,6 @@ data class GatewayProperties(
     /** How long closing a period waits for inserts in flight; meanwhile new submissions of the run wait too. */
     val closeLockTimeout: Duration,
 ) {
-    data class Outbox(val publishInterval: Duration, val batchSize: Int, val sendTimeout: Duration)
+    data class Outbox(val batchSize: Int, val sendTimeout: Duration)
     data class Consumer(val retryBackoff: Duration)
 }

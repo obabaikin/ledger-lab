@@ -2,7 +2,7 @@ import type { ChaosInRun, SecondStats } from './api/client'
 import { count } from './format'
 import { fullBankSeconds, fullClientSeconds } from './fullSeconds'
 
-export type Point = [number, number | null]
+type Point = [number, number | null]
 type Line = { name: string; color: string; points: Point[] }
 
 const W = 420

@@ -2,7 +2,7 @@ import { vi } from 'vitest'
 import type { RunReport, RunView, SessionView } from '../api/client'
 
 export type Answer = { status: number; body?: unknown; headers?: Record<string, string> }
-export type Call = { method: string; path: string; body: unknown }
+type Call = { method: string; path: string; body: unknown }
 
 export function fakeControl(answers: Record<string, Answer | (() => Answer)>) {
   const calls: Call[] = []

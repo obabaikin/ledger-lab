@@ -37,7 +37,6 @@ data class Run(
     val clientLost: Boolean = false,
     val drainStartedAt: Instant? = null,
     val closedAt: Instant? = null,
-    val drainProgress: Long? = null,
     val drainProgressAt: Instant? = null,
     val booksFinalAt: Instant? = null,
     val result: RunResult? = null,

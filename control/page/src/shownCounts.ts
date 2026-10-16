@@ -1,6 +1,6 @@
 import type { LiveView } from './api/client'
 
-export type BankCounts = { accepted: number; posted: number; rejected: number }
+type BankCounts = { accepted: number; posted: number; rejected: number }
 
 /**
  * Accepted, booked and rejected come from one snapshot of the projection, which may see a result before its acceptance:
@@ -14,7 +14,7 @@ export function inFlight(t: BankCounts): number {
   return Math.max(0, t.accepted - t.posted - t.rejected)
 }
 
-export type LiveCounters = { accepted: number; posted: number; rejected: number; movedCents: number; requested: number | null }
+type LiveCounters = { accepted: number; posted: number; rejected: number; movedCents: number; requested: number | null }
 
 export function liveCounters(live: LiveView | null): LiveCounters | null {
   if (!live?.stats) return null

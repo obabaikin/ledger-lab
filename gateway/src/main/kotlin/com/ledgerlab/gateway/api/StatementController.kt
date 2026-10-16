@@ -41,7 +41,7 @@ class StatementController(private val periods: PeriodService) {
 
     @ExceptionHandler(PeriodNotClosedException::class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    fun notClosed(e: PeriodNotClosedException) = ApiError(GatewayErrors.PERIOD_NOT_CLOSED)
+    fun notClosed() = ApiError(GatewayErrors.PERIOD_NOT_CLOSED)
 
     @ExceptionHandler(IllegalArgumentException::class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)

@@ -185,7 +185,6 @@ class TransferRepository(private val jdbc: JdbcClient) {
         status = TransferStatus.valueOf(getString("status")),
         rejectReason = getString("reject_reason")?.let(::rejectReasonOf),
         acceptedAt = getObject("accepted_at", Timestamp::class.java).toInstant(),
-        publishedAt = getObject("published_at", Timestamp::class.java)?.toInstant(),
         resultedAt = getObject("resulted_at", Timestamp::class.java)?.toInstant(),
     )
 }

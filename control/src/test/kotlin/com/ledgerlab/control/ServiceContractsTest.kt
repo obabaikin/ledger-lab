@@ -10,7 +10,6 @@ import com.ledgerlab.control.generator.ReconciliationBreaks
 import com.ledgerlab.control.generator.SimulationState
 import com.ledgerlab.control.generator.SimulationStatus
 import com.ledgerlab.control.generator.StartSimulationRequest
-import com.ledgerlab.control.generator.StatementTotals
 import com.ledgerlab.control.generator.TransferIds
 import com.ledgerlab.control.generator.UnknownResolved
 import com.ledgerlab.control.ledger.LedgerApi
@@ -90,7 +89,7 @@ class ServiceContractsTest {
             gateway to listOf(RunSummary::class, ClosedPeriod::class),
             generator to listOf(
                 StartSimulationRequest::class, SimulationStatus::class, ClientReconciliationReport::class, JournalTotals::class,
-                StatementTotals::class, ReconciliationBreaks::class, TransferIds::class, UnknownResolved::class,
+                ReconciliationBreaks::class, TransferIds::class, UnknownResolved::class,
             ),
             reporting to reportingModels,
         )
@@ -129,7 +128,7 @@ class ServiceContractsTest {
             ledger to listOf(ReconciliationReport::class),
             gateway to listOf(RunSummary::class, ClosedPeriod::class),
             generator to listOf(
-                SimulationStatus::class, ClientReconciliationReport::class, JournalTotals::class, StatementTotals::class,
+                SimulationStatus::class, ClientReconciliationReport::class, JournalTotals::class,
                 ReconciliationBreaks::class, TransferIds::class, UnknownResolved::class,
             ),
             reporting to reportingModels,
