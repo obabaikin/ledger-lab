@@ -92,12 +92,18 @@ function Legend({ lines }: { lines: Line[] }) {
   )
 }
 
-/** A crash lasts until the first second after it in which the ledger booked again. */
-function crashBands(chaos: ChaosInRun[], booked: Point[], lastSecond: number): [number, number][] {
+/** Instances still book for a moment after the crash; the outage starts with the first second without bookings. */
+const OUTAGE_STARTS_WITHIN_SECONDS = 2
+
+/** A crash lasts until the start of the first second in which the ledger booked again after its outage. */
+export function crashBands(chaos: ChaosInRun[], booked: Point[], lastSecond: number): [number, number][] {
   return chaos.map((c) => {
     const from = c.offsetMs / MS_PER_SECOND
-    const back = booked.find(([s, v]) => s > from + 1 && v !== null && v > 0)
-    return [from, back?.[0] ?? lastSecond]
+    const after = booked.filter(([s, v]) => s > from && v !== null)
+    const outage = after.findIndex(([s, v]) => v === 0 && s <= from + 1 + OUTAGE_STARTS_WITHIN_SECONDS)
+    if (outage < 0) return [from, from + 1]
+    const back = after.slice(outage).find(([, v]) => v !== null && v > 0)
+    return [from, back === undefined ? lastSecond : back[0] - 1]
   })
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { NO_DATA, shown } from './format'
 import { booksFinal, PHASES, phaseOf } from './phase'
 import { inFlight, liveCounters, shownAccepted } from './shownCounts'
-import { segments } from './Charts'
+import { crashBands, segments } from './Charts'
 import { podState, podStates } from './Diagram'
 import { between } from './smooth'
 import { otherRunInProgress, runToShow } from './selectRun'
@@ -171,6 +171,26 @@ describe('latency line', () => {
 
   it('is one line without gaps', () => {
     expect(segments([[1, 12], [2, 13]])).toEqual([[[1, 12], [2, 13]]])
+  })
+})
+
+describe('crash band', () => {
+  // Run 1eaad4d9 of 2026-10-16: crash at 7.963 s; a point sits at the end of its second.
+  const booked: [number, number][] = [[6, 495], [7, 507], [8, 488], [9, 87], [10, 0], [11, 0], [12, 0], [13, 0], [14, 0], [15, 0], [16, 16], [17, 330]]
+  const crash = { offsetMs: 7963, instances: ['ledger-0', 'ledger-1', 'ledger-2'] }
+
+  it('lasts until the ledger books again, past the bookings it still made while going down', () => {
+    expect(crashBands([crash], booked, 32)).toEqual([[7.963, 15]])
+  })
+
+  it('lasts to the end when the ledger has not booked again yet', () => {
+    expect(crashBands([crash], booked.slice(0, 8), 32)).toEqual([[7.963, 32]])
+  })
+
+  it('is one second wide when the ledger never stopped booking', () => {
+    const [[from, to]] = crashBands([crash], [[8, 500], [9, 480], [10, 510]], 32) as [[number, number]]
+    expect(from).toBe(7.963)
+    expect(to).toBeCloseTo(8.963)
   })
 })
 
