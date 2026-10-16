@@ -180,7 +180,7 @@ describe('crash band', () => {
   const crash = { offsetMs: 7963, instances: ['ledger-0', 'ledger-1', 'ledger-2'] }
 
   it('lasts until the ledger books again, past the bookings it still made while going down', () => {
-    expect(crashBands([crash], booked, 32)).toEqual([[7.963, 15]])
+    expect(crashBands([crash], booked, 32)).toEqual([[7.963, 16]])
   })
 
   it('lasts to the end when the ledger has not booked again yet', () => {
