@@ -17,6 +17,7 @@ enum class RunState(val isFinal: Boolean, val holdsSlot: Boolean) {
 }
 
 val UNFINISHED_STATES = RunState.entries.filterNot { it.isFinal }
+val SLOT_STATES = RunState.entries.filter { it.holdsSlot }
 
 enum class RunResult { BALANCED, BREAKS, INCOMPLETE }
 

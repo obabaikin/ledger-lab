@@ -29,25 +29,19 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
         jdbc.sql("$SELECT_WITH_POSITION WHERE r.session_id = :sessionId AND r.run_id = :runId")
             .param("sessionId", sessionId)
             .param("runId", runId)
-            .query { rs, _ -> rs.toRun() }
-            .optional()
-            .orElse(null)
+            .oneRun()
 
     fun findByRequest(sessionId: UUID, requestId: UUID): Run? =
         jdbc.sql("$SELECT_WITH_POSITION WHERE r.session_id = :sessionId AND r.request_id = :requestId")
             .param("sessionId", sessionId)
             .param("requestId", requestId)
-            .query { rs, _ -> rs.toRun() }
-            .optional()
-            .orElse(null)
+            .oneRun()
 
     fun findForUpdate(sessionId: UUID, runId: UUID): Run? =
-        jdbc.sql("SELECT r.*, NULL AS position FROM runs r WHERE r.session_id = :sessionId AND r.run_id = :runId FOR UPDATE")
+        jdbc.sql("$SELECT_WITHOUT_POSITION WHERE r.session_id = :sessionId AND r.run_id = :runId FOR UPDATE")
             .param("sessionId", sessionId)
             .param("runId", runId)
-            .query { rs, _ -> rs.toRun() }
-            .optional()
-            .orElse(null)
+            .oneRun()
 
     fun hasRun(sessionId: UUID, states: Collection<RunState>): Boolean =
         jdbc.sql("SELECT EXISTS (SELECT 1 FROM runs WHERE session_id = :sessionId AND state IN (:states))")
@@ -57,10 +51,9 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .single()
 
     fun inProgress(): List<Run> =
-        jdbc.sql("SELECT r.*, NULL AS position FROM runs r WHERE r.state IN (:states) ORDER BY r.admitted_at, r.run_id")
-            .param("states", listOf(RunState.CREATED, RunState.RUNNING, RunState.DRAINING).map { it.name })
-            .query { rs, _ -> rs.toRun() }
-            .list()
+        jdbc.sql("$SELECT_WITHOUT_POSITION WHERE r.state IN (:states) ORDER BY r.admitted_at, r.run_id")
+            .param("states", SLOT_STATES.map { it.name })
+            .runs()
 
     fun reportOf(runId: UUID): RunReport? =
         jdbc.sql("SELECT report::text FROM runs WHERE run_id = :runId")
@@ -88,7 +81,12 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .param("runId", runId)
             .update()
 
-    fun markStarted(runId: UUID): Int = move(runId, RunState.CREATED, RunState.RUNNING, "started_at = clock_timestamp()")
+    fun markStarted(runId: UUID): Int =
+        jdbc.sql("UPDATE runs SET state = :running, started_at = clock_timestamp() WHERE run_id = :runId AND state = :created")
+            .param("running", RunState.RUNNING.name)
+            .param("created", RunState.CREATED.name)
+            .param("runId", runId)
+            .update()
 
     fun startDraining(runId: UUID, clientLost: Boolean): Int =
         jdbc.sql(
@@ -179,18 +177,14 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .param("runId", runId)
             .update()
 
-    private fun move(runId: UUID, from: RunState, to: RunState, also: String): Int =
-        jdbc.sql("UPDATE runs SET state = :to, $also WHERE run_id = :runId AND state = :from")
-            .param("to", to.name)
-            .param("from", from.name)
-            .param("runId", runId)
-            .update()
+    private fun JdbcClient.StatementSpec.oneRun(): Run? = query { rs, _ -> rs.toRun() }.optional().orElse(null)
+
+    private fun JdbcClient.StatementSpec.runs(): List<Run> = query { rs, _ -> rs.toRun() }.list()
 
     fun listOf(sessionId: UUID): List<Run> =
         jdbc.sql("$SELECT_WITH_POSITION WHERE r.session_id = :sessionId ORDER BY r.created_at DESC, r.run_id DESC")
             .param("sessionId", sessionId)
-            .query { rs, _ -> rs.toRun() }
-            .list()
+            .runs()
 
     fun insertQueued(sessionId: UUID, token: String, requestId: UUID, request: RunRequest): UUID {
         val runId = UUID.randomUUID()
@@ -301,6 +295,7 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
 
     private companion object {
         const val QUEUE_LOCK = "control.run-queue"
+        const val SELECT_WITHOUT_POSITION = "SELECT r.*, NULL AS position FROM runs r"
         val SELECT_WITH_POSITION = """
             SELECT r.*,
                    CASE WHEN r.state = '${RunState.QUEUED.name}' THEN

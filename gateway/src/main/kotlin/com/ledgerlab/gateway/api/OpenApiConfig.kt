@@ -15,7 +15,7 @@ class OpenApiConfig {
 
     @Bean
     fun bankApi(): OpenAPI = OpenAPI().info(
-        Info().title("Ledger Lab bank API").version("1").description("Transfers and the statement of a closed period."),
+        Info().title("Ledger Lab bank API").version(ApiVersioning.VERSION).description("Transfers and the statement of a closed period."),
     )
 
     @Bean
@@ -26,7 +26,7 @@ class OpenApiConfig {
         .group(INTERNAL_GROUP)
         .pathsToMatch(INTERNAL_PATHS)
         .addOpenApiCustomizer { api ->
-            api.info(Info().title("Ledger Lab gateway internal API").version("1").description("Run summary, period close and run deletion, for control."))
+            api.info(Info().title("Ledger Lab gateway internal API").version(ApiVersioning.VERSION).description("Run summary, period close and run deletion, for control."))
         }
         .build()
 

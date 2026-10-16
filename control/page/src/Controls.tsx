@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { chaosWaitShown, nextChaosReadyAt } from './chaosReady'
 import { api, ApiFailure, type RunView, type SessionView } from './api/client'
+import { MS_PER_SECOND } from './format'
 import { newRequestId } from './requestId'
 
 const SECONDS_PER_MINUTE = 60
-const MS_PER_SECOND = 1000
 export const RUN_NOT_FINISHED = 'Your run is not finished yet'
 export const NO_RANDOM_ID = 'Not started: the browser gave no random id.'
 const CRASH_LABEL = '⚡ Crash the ledger (all 3 instances)'

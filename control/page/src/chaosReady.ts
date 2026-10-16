@@ -1,4 +1,5 @@
-const MS_PER_SECOND = 1000
+import { MS_PER_SECOND } from './format'
+
 /** Rounding up on the server plus the answer's way back; a deadline later by less than this is the same deadline. */
 const SAME_DEADLINE_MS = 2 * MS_PER_SECOND
 

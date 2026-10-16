@@ -17,6 +17,7 @@ import java.net.InetSocketAddress
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -46,6 +47,7 @@ class FakeGateway(
     private val server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
     val attemptsById = ConcurrentHashMap<String, AtomicInteger>()
     val requests = AtomicInteger()
+    @Volatile var answersHeld: CountDownLatch? = null
     private val accepted = LinkedHashMap<UUID, StatementLine>()
     private val statementRequests = AtomicInteger()
 
@@ -55,6 +57,7 @@ class FakeGateway(
         server.executor = Executors.newVirtualThreadPerTaskExecutor()
         server.createContext(GatewayApi.TRANSFERS_PATH) { exchange ->
             requests.incrementAndGet()
+            answersHeld?.await()
             val request = objectMapper.readValue<SubmitTransferRequest>(exchange.requestBody.readAllBytes())
             val id = request.transferId.toString()
             val attempt = attemptsById.computeIfAbsent(id) { AtomicInteger() }.incrementAndGet()

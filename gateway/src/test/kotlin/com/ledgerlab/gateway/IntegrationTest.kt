@@ -52,6 +52,6 @@ abstract class IntegrationTest {
 
     /** A result event as a newer ledger might write it, with values this gateway may not know. */
     protected fun publishRawResult(runId: UUID, transferId: UUID, json: String) {
-        kafka.send(props.resultsTopic, "$runId:$transferId", json).get()
+        kafka.send(props.resultsTopic, TransferResultEvent.partitionKey(runId, transferId), json).get()
     }
 }

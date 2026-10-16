@@ -84,7 +84,7 @@ class TransferController(
     @ApiResponse(responseCode = "400", description = "Invalid body", content = [Content()])
     @ApiResponse(responseCode = "409", description = "The run's period is closed", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "422", description = "The key was used with a different body", content = [Content(schema = Schema(implementation = ApiError::class))])
-    @PostMapping(version = "v1")
+    @PostMapping(version = ApiVersioning.PATH_VERSION)
     fun submit(
         @Valid @RequestBody request: SubmitTransferRequest,
         @Parameter(description = "ISO-8601 duration to wait for the final status, capped by the bank")
@@ -124,7 +124,7 @@ class TransferController(
     @ApiResponse(responseCode = "200", description = "Final status")
     @ApiResponse(responseCode = "202", description = "Not final yet; Retry-After says when to ask again")
     @ApiResponse(responseCode = "404", description = "Unknown transfer", content = [Content()])
-    @GetMapping("/{transferId}", version = "v1")
+    @GetMapping("/{transferId}", version = ApiVersioning.PATH_VERSION)
     fun status(@PathVariable transferId: UUID): ResponseEntity<TransferResponse> =
         service.find(transferId)?.let { respond(it) } ?: ResponseEntity.notFound().build()
 
