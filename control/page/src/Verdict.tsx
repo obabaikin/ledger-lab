@@ -52,7 +52,7 @@ export function verdictLine(r: RunReport): string {
   const accepted = r.gateway.accepted
   const share = sent === null || sent === 0 ? NO_DATA : `${((accepted / sent) * PERCENT).toFixed(1)} %`
   const sentText = sent === null ? NO_DATA : count(sent)
-  return `Accepted ${count(accepted)} of ${sentText} sent (${share}) · bank p50 ${seconds(r.bankLatencyP50Ms)} / p99 ${seconds(r.bankLatencyP99Ms)}`
+  return `Accepted ${count(accepted)} of ${sentText} sent (${share}) · gateway - ledger p50 ${seconds(r.bankLatencyP50Ms)} / p99 ${seconds(r.bankLatencyP99Ms)}`
 }
 
 const MARK = (passed: boolean | null) => (passed === null ? '–' : passed ? '✓' : '✗')

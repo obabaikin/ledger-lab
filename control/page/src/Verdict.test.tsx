@@ -5,11 +5,11 @@ import { Verdict, verdictLine } from './Verdict'
 
 describe('verdict line', () => {
   it('says what the bank accepted of what the clients sent and how fast it answered, from the report', () => {
-    expect(verdictLine(report())).toBe('Accepted 995 of 1,000 sent (99.5 %) · bank p50 0.01 s / p99 0.48 s')
+    expect(verdictLine(report())).toBe('Accepted 995 of 1,000 sent (99.5 %) · gateway - ledger p50 0.01 s / p99 0.48 s')
   })
 
   it('shows a dash for the clients\' side when the client was lost', () => {
-    expect(verdictLine(report({ client: null, bankLatencyP99Ms: null }))).toBe('Accepted 995 of — sent (—) · bank p50 0.01 s / p99 —')
+    expect(verdictLine(report({ client: null, bankLatencyP99Ms: null }))).toBe('Accepted 995 of — sent (—) · gateway - ledger p50 0.01 s / p99 —')
   })
 
   it('stands under the verdict word', () => {
