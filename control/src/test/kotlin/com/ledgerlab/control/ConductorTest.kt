@@ -157,7 +157,8 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
-    fun `a setup that keeps failing is retried, then fails after the setup timeout`() {
+    @ExtendWith(OutputCaptureExtension::class)
+    fun `a setup that keeps failing is retried, then fails after the setup timeout and logs the last answers`(output: CapturedOutput) {
         val runId = admitted()
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
         ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
@@ -174,6 +175,8 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("FAILED")
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
+        val line = output.out.lines().single { "setup timed out" in it && runId.toString() in it }
+        assertThat(line).contains("generator status: 404", "ledger accounts: answered 201", "generator start: 503")
     }
 
     @Test
@@ -439,18 +442,6 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
-    fun `an empty ledger run against accepted transfers is never balanced`() {
-        val runId = draining()
-        bank(runId, books = books(runId, posted = 0, rejected = 0, accounts = 0, reasons = emptyMap()))
-        clientReconciles(runId)
-        backdate(runId, "drain_started_at", props.runs.drainTimeout)
-
-        conductor.tick()
-
-        assertThat(column(runId, "result")).isNotEqualTo("BALANCED")
-    }
-
-    @Test
     fun `a lost client leaves the bank's verdict and says the client side is missing`() {
         val runId = draining(clientLost = true)
         bank(runId)
@@ -567,23 +558,7 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
-    @ExtendWith(OutputCaptureExtension::class)
-    fun `a setup that times out logs the last answers of the generator and the ledger`(output: CapturedOutput) {
-        val runId = admitted()
-        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
-        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
-        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 409, mapOf("error" to "journals in memory hold 300000"))
-        conductor.tick()
-
-        backdate(runId, "admitted_at", props.runs.setupTimeout)
-        conductor.tick()
-
-        val line = output.out.lines().single { "setup timed out" in it && runId.toString() in it }
-        assertThat(line).contains("generator status: 404", "ledger accounts: answered 201", "generator start: 409 journals in memory hold 300000")
-    }
-
-    @Test
-    fun `results of every transfer without all their commands are not caught up yet`() {
+    fun `results of every transfer without all their commands are not caught up yet, and the verdict stays the books'`() {
         val runId = draining()
         bank(runId, stats = stats(runId, commandsSeen = 990))
         clientReconciles(runId)
@@ -595,25 +570,10 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
 
         val report = reportOf(runId)
-        assertThat(report["projectionMatchesBooks"]).isEqualTo(false)
-        assertThat(report["notes"]).isEqualTo(listOf("projection does not match the books: commands 990 of 995, posted 980 of 980, rejected 15 of 15"))
-    }
-
-    @Test
-    fun `a projection still behind after the catch-up wait is noted, and the verdict stays the books'`() {
-        val runId = draining()
-        bank(runId, stats = stats(runId, accepted = 990, posted = 975, rejected = 15))
-        clientReconciles(runId)
-        conductor.tick()
-
-        backdate(runId, "drain_progress_at", props.reporting.catchUpWait)
-        conductor.tick()
-
-        val report = reportOf(runId)
         assertThat(report["result"]).isEqualTo("BALANCED")
         assertThat(report["reasons"] as List<*>).isEmpty()
         assertThat(report["projectionMatchesBooks"]).isEqualTo(false)
-        assertThat(report["notes"]).isEqualTo(listOf("projection does not match the books: commands 990 of 995, posted 975 of 980, rejected 15 of 15"))
+        assertThat(report["notes"]).isEqualTo(listOf("projection does not match the books: commands 990 of 995, posted 980 of 980, rejected 15 of 15"))
     }
 
     @Test

@@ -198,8 +198,8 @@ describe('session page', () => {
     control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: null }) })])
     renderAt(`/s/${SESSION_ID}`)
 
-    await waitFor(() => expect(screen.getByTestId('clients-number')).toHaveTextContent('— sent'))
     await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
+    expect(screen.getByTestId('clients-number')).toHaveTextContent('— sent')
   })
 
   it('keeps the last numbers and says so when control stops answering', async () => {

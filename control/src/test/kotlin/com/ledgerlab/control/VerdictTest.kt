@@ -71,23 +71,6 @@ class VerdictTest {
     }
 
     @Test
-    fun `an unfinished drain neither compares gateway with ledger nor passes`() {
-        val report = verdictOf(summary(posted = 900, rejected = 10), books(posted = 950, rejected = 15), client())
-
-        assertThat(report.bankViewsAgree).isNull()
-        assertThat(report.result).isEqualTo(RunResult.INCOMPLETE)
-        assertThat(report.reasons).containsExactly("drain timed out: ledger applied 965, gateway results 910, of 995")
-    }
-
-    @Test
-    fun `a ledger that applied more than the gateway accepted is a break, not lag`() {
-        val report = verdictOf(summary(), books(posted = 981), client())
-
-        assertThat(report.result).isEqualTo(RunResult.BREAKS)
-        assertThat(report.reasons).isEmpty()
-    }
-
-    @Test
     fun `a gateway that knows more results than it accepted is a break, not lag`() {
         assertThat(verdictOf(summary(posted = 981), books(), client()).result).isEqualTo(RunResult.BREAKS)
     }

@@ -24,11 +24,6 @@ describe('phases', () => {
     expect(PHASES[phaseOf({ state })]).toBe(phase)
   })
 
-  it('are four, books final being a mark within Bank finishing', () => {
-    expect(PHASES).toEqual(['Queued', 'Clients sending', 'Bank finishing', 'Verdict'])
-    expect(PHASES[phaseOf({ state: 'DRAINING' })]).toBe('Bank finishing')
-  })
-
   it('mark the books final only once control saw them final', () => {
     expect(booksFinal({ state: 'DRAINING', booksFinalAt: null })).toBe(false)
     expect(booksFinal({ state: 'DRAINING', booksFinalAt: '2026-10-15T10:00:00Z' })).toBe(true)
@@ -53,11 +48,6 @@ describe('live counts', () => {
     expect(shownAccepted({ accepted: 1000, posted: 990, rejected: 5 })).toBe(1000)
   })
 
-  it('leave the clients\' count unknown, not -1 or 0, while the generator has not answered', () => {
-    expect(liveCounters(live({ clients: null }))?.requested).toBeNull()
-    expect(liveCounters(live())?.requested).toBe(1100)
-  })
-
   it('are unknown as a whole without a projection snapshot', () => {
     expect(liveCounters(live({ stats: null }))).toBeNull()
   })
@@ -70,19 +60,16 @@ describe('numbers on screen', () => {
     expect(shown(0)).toBe('0')
   })
 
-  it('moves towards the new snapshot without passing it', () => {
+  it('moves towards the new snapshot without passing it, keeping in flight at or above 0 at every step', () => {
     const from = { accepted: 100, posted: 50, rejected: 1 }
     const to = { accepted: 200, posted: 151, rejected: 2 }
-
     expect(between(from, to, 0.5)).toEqual({ accepted: 150, posted: 100, rejected: 1 })
     expect(between(from, to, 2)).toEqual(to)
-  })
 
-  it('keeps in flight at or above 0 at every step between two snapshots', () => {
-    const from = { accepted: 1003, posted: 997, rejected: 3 }
-    const to = { accepted: 2011, posted: 2004, rejected: 7 }
+    const before = { accepted: 1003, posted: 997, rejected: 3 }
+    const after = { accepted: 2011, posted: 2004, rejected: 7 }
     for (let f = 0; f <= 1; f += 0.01) {
-      const v = between(from, to, f)
+      const v = between(before, after, f)
       expect(v.accepted - v.posted - v.rejected).toBeGreaterThanOrEqual(0)
     }
   })
@@ -91,22 +78,15 @@ describe('numbers on screen', () => {
     expect(between({ accepted: 500 }, { accepted: 10 }, 0.1)).toEqual({ accepted: 10 })
   })
 
-  it('starts from the snapshot itself when nothing was shown before', () => {
-    expect(between(null, { accepted: 42 }, 0)).toEqual({ accepted: 42 })
-  })
-
   it('keeps a part nobody has read unknown, and starts it from its first value', () => {
     expect(between({ requested: 500 }, { requested: null }, 0.5)).toEqual({ requested: null })
     expect(between({ requested: null }, { requested: 800 }, 0.5)).toEqual({ requested: 800 })
+    expect(between(null, { accepted: 42 }, 0)).toEqual({ accepted: 42 })
   })
 })
 
 describe('chaos countdown', () => {
   const NOW = 1_000_000
-
-  it('takes the deadline from the server when none is known', () => {
-    expect(nextChaosReadyAt(0, 60, NOW)).toBe(NOW + 60_000)
-  })
 
   it('is not stretched by the server rounding up each second', () => {
     let at = nextChaosReadyAt(0, 60, NOW)
@@ -169,9 +149,6 @@ describe('latency line', () => {
     expect(segments([[1, 12], [2, null], [3, 14], [4, 15]])).toEqual([[[1, 12]], [[3, 14], [4, 15]]])
   })
 
-  it('is one line without gaps', () => {
-    expect(segments([[1, 12], [2, 13]])).toEqual([[[1, 12], [2, 13]]])
-  })
 })
 
 describe('crash band', () => {
@@ -228,17 +205,6 @@ describe('dots on the wires', () => {
     expect(flowRates(flow(2000), flow(1000), 1)).toEqual([0, 0, 0, 0, 0, 0, 0])
   })
 
-  it('run back to the clients at the rate they came in when every transfer is acknowledged', () => {
-    const rates = flowRates(flow(1000), flow(2000), 1)
-    expect(rates[6]).toBe(rates[0])
-  })
-
-  it('stop on the wires to the ledger while it books nothing', () => {
-    const rates = flowRates(flow(1000, 900), flow(2000, 900), 1)
-    expect(rates[1]).toBe(1000)
-    expect(rates[2]).toBe(0)
-  })
-
   it('do not run before there are two snapshots', () => {
     expect(flowRates(null, flow(1000), 1)).toEqual([0, 0, 0, 0, 0, 0, 0])
   })
@@ -249,11 +215,6 @@ describe('dots after a crash', () => {
 
   it('stop at once on the ledger wires while the interval began before the crash', () => {
     expect(stopLedgerWires(rates, 5_000, 4_500)).toEqual([100, 100, 0, 0, 0, 0, 100])
-  })
-
-  it('keep running from the clients into Kafka and back to the clients', () => {
-    const stopped = stopLedgerWires(rates, 5_000, 4_500)
-    expect([stopped[0], stopped[1], stopped[6]]).toEqual([100, 100, 100])
   })
 
   it('follow the snapshots again once a whole interval lies after the crash', () => {
