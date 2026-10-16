@@ -61,6 +61,8 @@ draining is refused with 409; a repeat of that run's `requestId` still gets that
 under the queue's lock, so two tabs pressing Start at once make one run. The page holds Start back
 with the reason on the button. A queued run cannot be cancelled: it leaves the queue by starting or
 by expiring after `queue-timeout`, and the session waits for it.
+The page does not need a secure context: the request id comes from `crypto.getRandomValues`, which
+browsers offer over plain `http://` too.
 
 **Buttons act only when they can.** Stop acts only while the clients send; otherwise it is held back
 with "while clients are sending" on it. The crash button is shown when control says chaos is available

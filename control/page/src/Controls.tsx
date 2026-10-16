@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { chaosWaitShown, nextChaosReadyAt } from './chaosReady'
 import { api, ApiFailure, type RunView, type SessionView } from './api/client'
+import { newRequestId } from './requestId'
 
 const SECONDS_PER_MINUTE = 60
 const MS_PER_SECOND = 1000
 export const RUN_NOT_FINISHED = 'Your run is not finished yet'
+export const NO_RANDOM_ID = 'Not started: the browser gave no random id.'
 const CRASH_LABEL = '⚡ Crash the ledger (all 3 instances)'
 
 function refusal(e: unknown): string {
@@ -58,9 +60,15 @@ export function Controls(props: {
 
   const start = async (event: FormEvent) => {
     event.preventDefault()
-    pendingRequestId.current ??= crypto.randomUUID()
     setSending(true)
     setMessage(null)
+    try {
+      pendingRequestId.current ??= newRequestId()
+    } catch {
+      setMessage(NO_RANDOM_ID)
+      setSending(false)
+      return
+    }
     try {
       const run = await api.startRun(props.sessionId, { requestId: pendingRequestId.current, tps, durationSeconds })
       pendingRequestId.current = null

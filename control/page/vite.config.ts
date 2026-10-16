@@ -17,5 +17,5 @@ export default defineConfig({
   define: { __BUILD_COMMIT__: JSON.stringify(build()), __BUILD_AT__: JSON.stringify(new Date().toISOString()) },
   build: { outDir: '../build/page', emptyOutDir: true },
   server: { proxy: { '/api': 'http://localhost:8083' } },
-  test: { environment: 'jsdom', setupFiles: ['src/test/setup.ts'] },
+  test: { environment: 'jsdom', setupFiles: ['src/test/setup.ts'], unstubGlobals: true },
 })
