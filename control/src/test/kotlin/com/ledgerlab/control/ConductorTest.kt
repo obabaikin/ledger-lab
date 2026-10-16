@@ -167,7 +167,7 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("CREATED")
 
-        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 503)
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 503, mapOf("error" to "gateway unavailable"))
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("CREATED")
 
@@ -176,7 +176,7 @@ class ConductorTest : IntegrationTest() {
         assertThat(stateOf(runId)).isEqualTo("FAILED")
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
         val line = output.out.lines().single { "setup timed out" in it && runId.toString() in it }
-        assertThat(line).contains("generator status: 404", "ledger accounts: answered 201", "generator start: 503")
+        assertThat(line).contains("generator status: 404", "ledger accounts: answered 201", "generator start: 503 gateway unavailable")
     }
 
     @Test

@@ -15,6 +15,7 @@ import tools.jackson.module.kotlin.jacksonObjectMapper
 import tools.jackson.module.kotlin.readValue
 import java.net.InetSocketAddress
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -63,8 +64,7 @@ class FakeGateway(
             val attempt = attemptsById.computeIfAbsent(id) { AtomicInteger() }.incrementAndGet()
             val waited = exchange.requestURI.query?.contains("${GatewayApi.WAIT_PARAM}=") == true
             Thread.sleep(if (attempt > FIRST_ATTEMPT) repeatDelay else responseDelay)
-            fun answer(status: TransferStatus, reason: RejectReason? = null) =
-                objectMapper.writeValueAsString(TransferResponse(request.transferId!!, request.runId!!, status, reason))
+            fun answer(status: TransferStatus, reason: RejectReason? = null) = bankAnswer(request, status, reason)
             val (code, response) = when {
                 failFirstAttempt && attempt == FIRST_ATTEMPT -> HttpStatus.SERVICE_UNAVAILABLE.value() to """{"error":"unavailable"}"""
                 refuseWith != null -> refuseWith to """{"error":"refused"}"""
@@ -120,4 +120,19 @@ class FakeGateway(
     }
 
     override fun close() = server.stop(0)
+
+    companion object {
+        private val answerMapper = jacksonObjectMapper()
+
+        /** Shaped as gateway/openapi.json's TransferResponse, timestamps included, though the generator reads fewer fields. */
+        fun bankAnswer(request: SubmitTransferRequest, status: TransferStatus, reason: RejectReason? = null): String {
+            val now = Instant.now().toString()
+            return answerMapper.writeValueAsString(
+                mapOf(
+                    "transferId" to request.transferId, "runId" to request.runId, "status" to status, "rejectReason" to reason,
+                    "acceptedAt" to now, "resultedAt" to now.takeIf { status.isFinal },
+                ),
+            )
+        }
+    }
 }

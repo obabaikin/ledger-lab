@@ -1,7 +1,6 @@
 package com.ledgerlab.generator
 
 import com.ledgerlab.generator.bank.SubmitTransferRequest
-import com.ledgerlab.generator.bank.TransferResponse
 import com.ledgerlab.generator.bank.TransferStatus
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
@@ -44,10 +43,7 @@ class ClientLatencyTest {
 
     @Test
     fun `a final status to a client that did not wait gives no client latency`() {
-        val mapper = jacksonObjectMapper()
-        val alreadyFinal = { request: SubmitTransferRequest ->
-            mapper.writeValueAsString(TransferResponse(request.transferId!!, request.runId!!, TransferStatus.POSTED, null))
-        }
+        val alreadyFinal = { request: SubmitTransferRequest -> FakeGateway.bankAnswer(request, TransferStatus.POSTED) }
         FakeGateway(rawAnswer = alreadyFinal).use { gateway ->
             val simulation = simulation(gateway, waitShare = 0.0)
 
