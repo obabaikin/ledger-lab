@@ -141,7 +141,7 @@ export function Charts(props: {
         <Chart lines={rate} maxSecond={maxSecond} bands={bands} />
       </div>
       <div className="card chart">
-        <h3>Time until the bank's answer, ms</h3>
+        <h3>Time gateway - ledger, ms</h3>
         <Legend lines={latency} />
         <Chart lines={latency} maxSecond={maxSecond} bands={bands} />
       </div>
