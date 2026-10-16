@@ -3,8 +3,10 @@ package com.ledgerlab.control
 import com.ledgerlab.control.gateway.RunSummary
 import com.ledgerlab.control.generator.ClientReconciliationReport
 import com.ledgerlab.control.ledger.ReconciliationReport
+import com.ledgerlab.control.reporting.RunStats
 import com.ledgerlab.control.runs.ClientSide
 import com.ledgerlab.control.runs.RunResult
+import com.ledgerlab.control.runs.projectionMatchesBooks
 import com.ledgerlab.control.runs.verdictOf
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -24,6 +26,8 @@ class VerdictTest {
 
     private fun books(posted: Long = 980, rejected: Long = 15, balanced: Boolean = true, reasons: Map<String, Long> = mapOf("BLOCKED_ACCOUNT" to 15L)): ReconciliationReport =
         read(RunFixtures.books(runId, posted = posted, rejected = rejected, balanced = balanced, reasons = reasons))
+
+    private fun stats(posted: Long = 980, rejected: Long = 15): RunStats = read(RunFixtures.stats(runId, posted = posted, rejected = rejected))
 
     private fun client(balanced: Boolean = true, statementFinal: Boolean = true): ClientSide =
         ClientSide.Reconciled(read<ClientReconciliationReport>(RunFixtures.clientReport(runId, balanced, statementFinal)))
@@ -109,5 +113,12 @@ class VerdictTest {
         val report = verdictOf(summary(reasons = mapOf("INSUFFICIENT_FUNDS" to 15L)), books(), client())
 
         assertThat(report.rejectionsByReason).isEqualTo(mapOf("BLOCKED_ACCOUNT" to 15L))
+    }
+
+    @Test
+    fun `a projection that differs from the books only in posted, or only in rejected, does not match them`() {
+        assertThat(projectionMatchesBooks(stats(), summary(), books())).isTrue()
+        assertThat(projectionMatchesBooks(stats(posted = 979), summary(), books())).isFalse()
+        assertThat(projectionMatchesBooks(stats(rejected = 14), summary(), books())).isFalse()
     }
 }

@@ -318,10 +318,10 @@ class RunStartTest : IntegrationTest() {
     }
 
     @Test
-    fun `concurrent starts beyond the queue get exactly its free places`() {
-        val token = invite()
+    fun `concurrent starts from different invites beyond the queue get exactly its free places`() {
+        val sessions = List(3 * props.runs.maxQueued) { sessionOf(invite()) }.iterator()
 
-        val statuses = concurrently(3 * props.runs.maxQueued) { start(sessionOf(token)).statusCode }
+        val statuses = concurrently(3 * props.runs.maxQueued) { start(synchronized(sessions) { sessions.next() }).statusCode }
 
         assertThat(statuses.count { it == HttpStatus.ACCEPTED }).isEqualTo(props.runs.maxQueued)
         assertThat(statuses.count { it == HttpStatus.TOO_MANY_REQUESTS }).isEqualTo(2 * props.runs.maxQueued)

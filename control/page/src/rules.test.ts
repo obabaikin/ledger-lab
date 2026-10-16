@@ -219,7 +219,13 @@ describe('dots on the wires', () => {
   const flow = (n: number, finished = n, rejected = 0) => ({ requested: n, accepted: n, finished, rejected, acknowledged: n })
 
   it('run at the rate each count grew between two snapshots', () => {
-    expect(flowRates(flow(1000, 900, 10), flow(3000, 1900, 30), 2)).toEqual([1000, 1000, 500, 500, 10, 500, 1000])
+    const before = { requested: 1000, accepted: 950, finished: 900, rejected: 10, acknowledged: 880 }
+    const after = { requested: 3000, accepted: 2850, finished: 1900, rejected: 30, acknowledged: 1780 }
+    expect(flowRates(before, after, 2)).toEqual([1000, 950, 500, 500, 10, 500, 450])
+  })
+
+  it('stand still, not backwards, where a count went down', () => {
+    expect(flowRates(flow(2000), flow(1000), 1)).toEqual([0, 0, 0, 0, 0, 0, 0])
   })
 
   it('run back to the clients at the rate they came in when every transfer is acknowledged', () => {
@@ -293,6 +299,10 @@ describe('link to the run in progress', () => {
 
   it('hides while the viewer looks at the run in progress', () => {
     expect(otherRunInProgress([running, done], running)).toBeNull()
+  })
+
+  it('hides while a run only waits in the queue', () => {
+    expect(otherRunInProgress([run({ runId: 'q', state: 'QUEUED' }), done], done)).toBeNull()
   })
 
   it('hides when nothing is in progress', () => {
