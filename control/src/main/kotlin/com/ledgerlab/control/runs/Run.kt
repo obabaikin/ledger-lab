@@ -17,6 +17,7 @@ enum class RunState(val isFinal: Boolean, val holdsSlot: Boolean) {
 }
 
 val UNFINISHED_STATES = RunState.entries.filterNot { it.isFinal }
+val SLOT_STATES = RunState.entries.filter { it.holdsSlot }
 
 enum class RunResult { BALANCED, BREAKS, INCOMPLETE }
 
@@ -37,7 +38,6 @@ data class Run(
     val clientLost: Boolean = false,
     val drainStartedAt: Instant? = null,
     val closedAt: Instant? = null,
-    val drainProgress: Long? = null,
     val drainProgressAt: Instant? = null,
     val booksFinalAt: Instant? = null,
     val result: RunResult? = null,

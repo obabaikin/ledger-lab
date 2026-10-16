@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { LiveView, RunView } from './api/client'
-import { RUN_NOT_FINISHED } from './Controls'
+import { NO_RANDOM_ID, RUN_NOT_FINISHED } from './Controls'
 import { RUNS_LISTED } from './SessionPage'
 import { fakeControl, run, RUN_ID, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
@@ -64,6 +64,55 @@ describe('session page', () => {
 
     const phases = await screen.findByLabelText('Phases')
     await waitFor(() => expect(within(phases).getByText(/Queued/)).toHaveTextContent('Queued · #1 in line'), { timeout: 3000 })
+  })
+
+  it('starts a run outside a secure context, where the browser has no crypto.randomUUID', async () => {
+    const browserCrypto = globalThis.crypto
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => browserCrypto.getRandomValues(bytes) })
+    const queued = run()
+    const calls = control([], { [`POST ${RUNS}`]: { status: 202, body: queued } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    const sent = calls.find((c) => c.method === 'POST')?.body as { requestId: string }
+    expect(sent.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  })
+
+  it('sends the same request id again after an answer that was lost', async () => {
+    let tries = 0
+    const calls = control([], {
+      [`POST ${RUNS}`]: () => {
+        tries += 1
+        if (tries === 1) throw new TypeError('Failed to fetch')
+        return { status: 202, body: run() }
+      },
+    })
+    renderAt(`/s/${SESSION_ID}`)
+
+    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
+    await screen.findByText(/Control did not answer/)
+    screen.getByRole('button', { name: /Start the run/ }).click()
+
+    await waitFor(() => expect(tries).toBe(2))
+    const [first, second] = calls.filter((c) => c.method === 'POST').map((c) => (c.body as { requestId: string }).requestId)
+    expect(second).toBe(first)
+  })
+
+  it('says the browser gave no random id when it cannot make one, and sends nothing', async () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues: () => {
+        throw new Error('no entropy')
+      },
+    })
+    const calls = control([])
+    renderAt(`/s/${SESSION_ID}`)
+
+    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(NO_RANDOM_ID)
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 
   it('names an unknown session', async () => {
@@ -149,8 +198,8 @@ describe('session page', () => {
     control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: null }) })])
     renderAt(`/s/${SESSION_ID}`)
 
-    await waitFor(() => expect(screen.getByTestId('clients-number')).toHaveTextContent('— sent'))
     await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
+    expect(screen.getByTestId('clients-number')).toHaveTextContent('— sent')
   })
 
   it('keeps the last numbers and says so when control stops answering', async () => {

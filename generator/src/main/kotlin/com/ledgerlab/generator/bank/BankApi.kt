@@ -1,6 +1,5 @@
 package com.ledgerlab.generator.bank
 
-import java.time.Instant
 import java.util.UUID
 
 /*
@@ -21,8 +20,6 @@ data class TransferResponse(
     val runId: UUID,
     val status: TransferStatus,
     val rejectReason: RejectReason?,
-    val acceptedAt: Instant,
-    val resultedAt: Instant?,
 )
 
 enum class TransferStatus {

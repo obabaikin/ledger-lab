@@ -4,7 +4,6 @@ import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.TransferStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.time.Instant
 import java.util.UUID
 
 class JournalTest {

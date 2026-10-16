@@ -5,7 +5,7 @@ import { Charts } from './Charts'
 import { Controls } from './Controls'
 import { Diagram, NO_NUMBERS, PodLegend, type DiagramNumbers } from './Diagram'
 import { flowRates, stopLedgerWires, type Flow } from './FlowDots'
-import { euros, shown } from './format'
+import { euros, MS_PER_SECOND, shown } from './format'
 import { BuildInfo } from './BuildInfo'
 import { Hero } from './Hero'
 import { BANK_FINISHING_PHASE, booksFinal, PHASES, phaseOf, phaseName, VERDICT_PHASE } from './phase'
@@ -15,9 +15,8 @@ import { useSmoothed } from './smooth'
 import { usePolling } from './usePolling'
 import { Verdict } from './Verdict'
 
-export const POLL_INTERVAL_MS = 1000
+const POLL_INTERVAL_MS = 1000
 export const RUNS_LISTED = 10
-const MS_PER_SECOND = 1000
 
 /** What the page keeps of a run's live view after it ends: the report has no per-second series of the clients. */
 type Seen = { runId: string; live: LiveView }

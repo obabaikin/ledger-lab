@@ -1,6 +1,5 @@
 import type { SecondStats } from './api/client'
-
-const MS_PER_SECOND = 1000
+import { MS_PER_SECOND } from './format'
 
 /**
  * Seconds of the bank's series that are over: not the one still running at the snapshot, and not the one in which the

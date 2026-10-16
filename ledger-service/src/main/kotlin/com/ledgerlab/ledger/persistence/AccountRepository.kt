@@ -1,7 +1,6 @@
 package com.ledgerlab.ledger.persistence
 
 import com.ledgerlab.ledger.domain.Account
-import com.ledgerlab.ledger.domain.AccountStatus
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.core.simple.JdbcClient

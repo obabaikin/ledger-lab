@@ -44,6 +44,7 @@ export function FlowDots({ rates }: { rates: number[] }) {
     if (!g || !svg) return
     const paths = Array.from(svg.querySelectorAll<SVGPathElement>('path.wire'))
     if (paths.some((p) => typeof p.getTotalLength !== 'function')) return
+    const lengths = paths.map((p) => p.getTotalLength())
     const dots: Dot[] = []
     const owed = paths.map(() => 0)
     let last = performance.now()
@@ -58,7 +59,7 @@ export function FlowDots({ rates }: { rates: number[] }) {
           el.setAttribute('r', k === REJECTED_WIRE ? '4' : '3')
           el.style.fill = COLOR[k] ?? 'var(--flow)'
           g.appendChild(el)
-          dots.push({ el, path, length: path.getTotalLength(), born: now })
+          dots.push({ el, path, length: lengths[k] ?? 0, born: now })
         }
         owed[k] = due
       })

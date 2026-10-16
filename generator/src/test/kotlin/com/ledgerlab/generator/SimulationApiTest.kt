@@ -13,6 +13,7 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
@@ -58,9 +59,17 @@ class SimulationApiTest {
     fun `a stop is accepted at once and completes in the background`() {
         val runId = UUID.randomUUID()
         val request = mapOf("runId" to runId, "tps" to 50, "durationSeconds" to 30, "accountCount" to 10)
-        http.postForEntity("/internal/simulations", request, Map::class.java)
-
-        val stopping = http.postForEntity("/internal/simulations/$runId/stop", null, Map::class.java)
+        val held = CountDownLatch(1)
+        gateway.answersHeld = held
+        val stopping = try {
+            val sentBefore = gateway.requests.get()
+            http.postForEntity("/internal/simulations", request, Map::class.java)
+            await().atMost(Duration.ofSeconds(5)).until { gateway.requests.get() > sentBefore }
+            http.postForEntity("/internal/simulations/$runId/stop", null, Map::class.java)
+        } finally {
+            gateway.answersHeld = null
+            held.countDown()
+        }
         assertThat(stopping.statusCode).isEqualTo(HttpStatus.ACCEPTED)
 
         await().atMost(Duration.ofSeconds(15)).untilAsserted {

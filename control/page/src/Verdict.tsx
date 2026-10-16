@@ -1,9 +1,8 @@
 import type { RunReport } from './api/client'
 import { REPOSITORY_URL } from './Diagram'
-import { count, euros, NO_DATA } from './format'
+import { count, euros, MS_PER_SECOND, NO_DATA, shown } from './format'
 
 const TESTS_URL = `${REPOSITORY_URL}/tree/main/control/src/test`
-const MS_PER_SECOND = 1000
 
 const HEADLINE: Record<RunReport['result'], { mark: string; title: string; tone: string }> = {
   BALANCED: { mark: '✓', title: 'Every cent accounted for', tone: 'ok' },
@@ -44,14 +43,14 @@ function checks(r: RunReport): Check[] {
 
 const PERCENT = 100
 
-const seconds = (ms: number | null) => (ms === null ? NO_DATA : `${(ms / MS_PER_SECOND).toFixed(2)} s`)
+const seconds = (ms: number | null) => shown(ms, (v) => `${(v / MS_PER_SECOND).toFixed(2)} s`)
 
 /** What the bank took and how fast it answered, from the report alone; a side without data is a dash. */
 export function verdictLine(r: RunReport): string {
   const sent = r.client?.requested ?? null
   const accepted = r.gateway.accepted
   const share = sent === null || sent === 0 ? NO_DATA : `${((accepted / sent) * PERCENT).toFixed(1)} %`
-  const sentText = sent === null ? NO_DATA : count(sent)
+  const sentText = shown(sent)
   return `Accepted ${count(accepted)} of ${sentText} sent (${share}) · gateway - ledger p50 ${seconds(r.bankLatencyP50Ms)} / p99 ${seconds(r.bankLatencyP99Ms)}`
 }
 

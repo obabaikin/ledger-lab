@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-export type Counters = Record<string, number | null>
+type Counters = Record<string, number | null>
 
 /**
  * Moves from the counters shown when the new snapshot came towards it, never past it: no extrapolation.

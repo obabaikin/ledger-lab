@@ -13,6 +13,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -124,9 +126,6 @@ class Simulation(
             )
         }
     }
-    /** Completed by a stop, so that duplicates still waiting for their moment are not sent. */
-    private val stopSignal = Job()
-
     lateinit var startedAt: Instant
         private set
     private var startNanos = 0L
@@ -135,8 +134,9 @@ class Simulation(
         private set
     val journalCapacity: Long = journalCapacity(targetTps, duration)
     @Volatile var finishedAt: Instant? = null
-    @Volatile var state: SimulationState = SimulationState.RUNNING
         private set
+    private val states = MutableStateFlow(SimulationState.RUNNING)
+    val state: SimulationState get() = states.value
 
     @Volatile private var pacer: Job? = null
 
@@ -189,7 +189,7 @@ class Simulation(
                 }
                 delay(PACER_TICK.toMillis())
             }
-            while (open.get() > 0 && isActive) delay(DRAIN_POLL.toMillis())
+            awaitDrained()
             transition(SimulationState.RUNNING, SimulationState.FINISHED)
         }
     }
@@ -201,22 +201,23 @@ class Simulation(
      */
     fun stop() {
         if (!transition(SimulationState.RUNNING, SimulationState.STOPPING)) return
-        stopSignal.complete()
         scope.launch {
             // Until the pacer has finished, it may still be counting a submission it was launching.
             pacer?.cancelAndJoin()
-            val drained = withTimeoutOrNull(stopGrace.toMillis()) {
-                while (open.get() > 0) delay(DRAIN_POLL.toMillis())
-            } != null
+            val drained = withTimeoutOrNull(stopGrace.toMillis()) { awaitDrained() } != null
             if (!drained) submissions.cancelAndJoin()
             transition(SimulationState.STOPPING, SimulationState.STOPPED)
         }
     }
 
+    private suspend fun awaitDrained() {
+        while (open.get() > 0) delay(DRAIN_POLL.toMillis())
+    }
+
     @Synchronized
     private fun transition(from: SimulationState, to: SimulationState): Boolean {
         if (state != from) return false
-        state = to
+        states.value = to
         if (!to.active) {
             finishedAt = Instant.now()
             log.info(
@@ -249,12 +250,10 @@ class Simulation(
                 retries.add((main.attempts - FIRST_ATTEMPT).toLong())
                 recordSubmissionLatency(main, wait, SendKind.FIRST)
             }
-        } catch (e: CancellationException) {
-            settle(entry, combine(inOrder(answers) + CUT_SHORT))
-            throw e
         } catch (e: Exception) {
-            log.warn("Submission in simulation {} ended with an error", runId, e)
             settle(entry, combine(inOrder(answers) + CUT_SHORT))
+            if (e is CancellationException) throw e
+            log.warn("Submission in simulation {} ended with an error", runId, e)
             return
         }
         settle(entry, combine(inOrder(answers)))
@@ -264,7 +263,7 @@ class Simulation(
         answers.sortedBy { it.endedNanos }.map { it.result }
 
     private suspend fun sendDuplicate(transfer: PlannedTransfer, wait: Duration?, entry: JournalEntry, delay: Duration): Answer? {
-        val stopped = withTimeoutOrNull(delay.toMillis()) { stopSignal.join() } != null
+        val stopped = withTimeoutOrNull(delay.toMillis()) { states.first { it != SimulationState.RUNNING } } != null
         if (stopped || state != SimulationState.RUNNING) return null
         duplicatesSent.increment()
         val result = try {
@@ -326,7 +325,7 @@ class Simulation(
         }
     }
 
-    fun finishedBefore(instant: Instant): Boolean = !state.active && finishedAt?.isBefore(instant) == true
+    fun finishedBefore(instant: Instant): Boolean = finishedAt?.isBefore(instant) == true
 
     fun releaseJournal() {
         check(!state.active) { "journal of an active run cannot be released" }
@@ -336,12 +335,14 @@ class Simulation(
     fun status(): SimulationStatus {
         val end = finishedAt ?: Instant.now()
         val seconds = Duration.between(startedAt, end).toNanos().coerceAtLeast(1).toDouble() / NANOS_PER_SECOND
+        val sent = requested.sum()
+        val waited = waitedLatenciesNanos.sorted()
         return SimulationStatus(
             runId, state, targetTps, duration.toSeconds().toInt(), startedAt, finishedAt,
-            requested.sum(), acknowledged.sum(), posted.sum(), rejected.sum(),
+            sent, acknowledged.sum(), posted.sum(), rejected.sum(),
             rejectedByReason.mapValues { it.value.sum() }, failed.sum(), unknown.sum(), retries.sum(),
-            duplicatesSent.sum(), open.get(), requested.sum() / seconds,
-            waitedLatencyMs(P50), waitedLatencyMs(P99),
+            duplicatesSent.sum(), open.get(), sent / seconds,
+            waitedLatencyMs(waited, P50), waitedLatencyMs(waited, P99),
             List(secondsSoFar(end)) { requestedPerSecond.get(it) },
         )
     }
@@ -349,8 +350,8 @@ class Simulation(
     private fun secondsSoFar(end: Instant): Int =
         (Duration.between(startedAt, end).toSeconds().toInt() + 1).coerceIn(0, requestedPerSecond.length())
 
-    private fun waitedLatencyMs(p: Double): Double? =
-        percentileCont(waitedLatenciesNanos.sorted(), p)?.let { it / NANOS_PER_MILLI }
+    private fun waitedLatencyMs(sorted: List<Long>, p: Double): Double? =
+        percentileCont(sorted, p)?.let { it / NANOS_PER_MILLI }
 }
 
 private val SendKind.tag: String get() = name.lowercase()

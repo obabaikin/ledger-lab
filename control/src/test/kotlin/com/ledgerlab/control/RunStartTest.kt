@@ -76,7 +76,7 @@ class RunStartTest : IntegrationTest() {
     }
 
     @Test
-    fun `an unknown session is reported before a missing requestId`() {
+    fun `a start in an unknown session is 404, even without a requestId`() {
         val response = startWithoutRequestId(UUID.randomUUID())
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
@@ -194,27 +194,6 @@ class RunStartTest : IntegrationTest() {
     }
 
     @Test
-    fun `a repeat is recognised before the quota`() {
-        val token = invite(quota = 1)
-        val sessionId = sessionOf(token)
-        val requestId = UUID.randomUUID()
-        start(sessionId, requestId)
-
-        assertThat(start(sessionId, requestId).statusCode).isEqualTo(HttpStatus.ACCEPTED)
-        assertThat(start(sessionOf(token)).statusCode).isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
-    }
-
-    @Test
-    fun `an invite no longer valid is reported before its used-up quota`() {
-        val token = invite(quota = 1)
-        val other = sessionOf(token)
-        start(sessionOf(token))
-        jdbc.sql("UPDATE invite_tokens SET active = false WHERE token = :token").param("token", token).update()
-
-        assertThat(start(other).body!!["error"]).isEqualTo(ControlErrors.INVITE_NOT_VALID)
-    }
-
-    @Test
     fun `a used-up quota is reported before a full queue`() {
         val token = invite(quota = props.runs.maxQueued)
         repeat(props.runs.maxQueued) { start(sessionOf(token)) }
@@ -226,21 +205,12 @@ class RunStartTest : IntegrationTest() {
     }
 
     @Test
-    fun `a repeat is recognised before the invite is checked`() {
+    fun `a repeat gets its run even after the invite was turned off and the tps options changed`() {
         val token = invite()
         val sessionId = sessionOf(token)
         val requestId = UUID.randomUUID()
-        start(sessionId, requestId)
-        jdbc.sql("UPDATE invite_tokens SET active = false WHERE token = :token").param("token", token).update()
-
-        assertThat(start(sessionId, requestId).statusCode).isEqualTo(HttpStatus.ACCEPTED)
-    }
-
-    @Test
-    fun `a repeat is recognised before the options are checked`() {
-        val sessionId = sessionOf(invite())
-        val requestId = UUID.randomUUID()
         val runId = start(sessionId, requestId).body!!["runId"]
+        jdbc.sql("UPDATE invite_tokens SET active = false WHERE token = :token").param("token", token).update()
         jdbc.sql("UPDATE runs SET tps = 200 WHERE run_id = CAST(:runId AS uuid)").param("runId", runId.toString()).update()
 
         assertThat(start(sessionId, requestId, tps = 200).statusCode).isEqualTo(HttpStatus.ACCEPTED)
@@ -268,7 +238,7 @@ class RunStartTest : IntegrationTest() {
 
     @Test
     fun `an invite that expired after the session opened starts no run, and the session still reads its runs`() {
-        val token = invite()
+        val token = invite(quota = 1)
         val sessionId = sessionOf(token)
         val other = sessionOf(token)
         val runId = start(sessionId).body!!["runId"]
@@ -279,14 +249,6 @@ class RunStartTest : IntegrationTest() {
         assertThat(response.statusCode).isEqualTo(HttpStatus.FORBIDDEN)
         assertThat(response.body!!["error"]).isEqualTo(ControlErrors.INVITE_NOT_VALID)
         assertThat(getRun(sessionId, runId).body!!["state"]).isEqualTo("QUEUED")
-    }
-
-    @Test
-    fun `a start in an unknown session is 404`() {
-        val response = start(UUID.randomUUID())
-
-        assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
-        assertThat(response.body!!["error"]).isEqualTo(ControlErrors.SESSION_NOT_FOUND)
     }
 
     @Test
@@ -318,10 +280,10 @@ class RunStartTest : IntegrationTest() {
     }
 
     @Test
-    fun `concurrent starts beyond the queue get exactly its free places`() {
-        val token = invite()
+    fun `concurrent starts from different invites beyond the queue get exactly its free places`() {
+        val sessions = List(3 * props.runs.maxQueued) { sessionOf(invite()) }.iterator()
 
-        val statuses = concurrently(3 * props.runs.maxQueued) { start(sessionOf(token)).statusCode }
+        val statuses = concurrently(3 * props.runs.maxQueued) { start(synchronized(sessions) { sessions.next() }).statusCode }
 
         assertThat(statuses.count { it == HttpStatus.ACCEPTED }).isEqualTo(props.runs.maxQueued)
         assertThat(statuses.count { it == HttpStatus.TOO_MANY_REQUESTS }).isEqualTo(2 * props.runs.maxQueued)
@@ -355,19 +317,6 @@ class RunStartTest : IntegrationTest() {
     }
 
     @Test
-    fun `a repeat of the run that is not final gets that run, not a conflict`() {
-        val sessionId = sessionOf(invite())
-        val requestId = UUID.randomUUID()
-        val runId = start(sessionId, requestId).body!!["runId"]
-        setRun(runId, state = "RUNNING")
-
-        val repeat = start(sessionId, requestId)
-
-        assertThat(repeat.statusCode).isEqualTo(HttpStatus.ACCEPTED)
-        assertThat(repeat.body!!["runId"]).isEqualTo(runId)
-    }
-
-    @Test
     fun `a final run does not hold back the next start`() {
         val sessionId = sessionOf(invite())
 
@@ -376,14 +325,6 @@ class RunStartTest : IntegrationTest() {
             assertThat(start(sessionId).statusCode).`as`(state).isEqualTo(HttpStatus.ACCEPTED)
             jdbc.sql("UPDATE runs SET state = 'EXPIRED' WHERE session_id = :sessionId").param("sessionId", sessionId).update()
         }
-    }
-
-    @Test
-    fun `a run not final in one session does not hold back another session`() {
-        val token = invite()
-        start(sessionOf(token))
-
-        assertThat(start(sessionOf(token)).statusCode).isEqualTo(HttpStatus.ACCEPTED)
     }
 
     @Test

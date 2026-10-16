@@ -8,7 +8,7 @@ object PrometheusApi {
 
 data class PrometheusResponse(val status: String, val data: PrometheusData?)
 
-data class PrometheusData(val resultType: String, val result: List<PrometheusSample>)
+data class PrometheusData(val result: List<PrometheusSample>)
 
 /** [value] is a Unix time in seconds and the value as text, as Prometheus sends them. */
 data class PrometheusSample(val metric: Map<String, String>, val value: List<Any>) {

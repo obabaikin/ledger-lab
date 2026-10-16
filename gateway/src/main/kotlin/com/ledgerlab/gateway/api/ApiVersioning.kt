@@ -16,4 +16,9 @@ class ApiVersioning : WebMvcConfigurer {
             .usePathSegment(0) { path -> path.value().startsWith("/v") }
             .setVersionRequired(false)
     }
+
+    companion object {
+        const val VERSION = "1"
+        const val PATH_VERSION = "v$VERSION"
+    }
 }

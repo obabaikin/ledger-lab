@@ -65,10 +65,6 @@ class RunController(private val runs: RunService, private val reconciliation: Re
             ),
         )
 
-    @ApiResponse(responseCode = "200", description = "The run's accounts")
-    @GetMapping("/accounts")
-    fun accounts(@PathVariable runId: UUID): List<Account> = runs.listAccounts(runId)
-
     @ApiResponse(responseCode = "200", description = "The ledger's checks; an unknown run has no accounts and zeros")
     @ApiResponse(
         responseCode = "503",

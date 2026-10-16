@@ -18,6 +18,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -47,6 +48,7 @@ class FakeGateway(
     private val server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
     val attemptsById = ConcurrentHashMap<String, AtomicInteger>()
     val requests = AtomicInteger()
+    @Volatile var answersHeld: CountDownLatch? = null
     private val accepted = LinkedHashMap<UUID, StatementLine>()
     private val statementRequests = AtomicInteger()
 
@@ -56,13 +58,13 @@ class FakeGateway(
         server.executor = Executors.newVirtualThreadPerTaskExecutor()
         server.createContext(GatewayApi.TRANSFERS_PATH) { exchange ->
             requests.incrementAndGet()
+            answersHeld?.await()
             val request = objectMapper.readValue<SubmitTransferRequest>(exchange.requestBody.readAllBytes())
             val id = request.transferId.toString()
             val attempt = attemptsById.computeIfAbsent(id) { AtomicInteger() }.incrementAndGet()
             val waited = exchange.requestURI.query?.contains("${GatewayApi.WAIT_PARAM}=") == true
             Thread.sleep(if (attempt > FIRST_ATTEMPT) repeatDelay else responseDelay)
-            fun answer(status: TransferStatus, reason: RejectReason? = null) =
-                objectMapper.writeValueAsString(TransferResponse(request.transferId!!, request.runId!!, status, reason, Instant.now(), null))
+            fun answer(status: TransferStatus, reason: RejectReason? = null) = bankAnswer(request, status, reason)
             val (code, response) = when {
                 failFirstAttempt && attempt == FIRST_ATTEMPT -> HttpStatus.SERVICE_UNAVAILABLE.value() to """{"error":"unavailable"}"""
                 refuseWith != null -> refuseWith to """{"error":"refused"}"""
@@ -85,7 +87,7 @@ class FakeGateway(
                 failure != null -> respond(exchange, failure, """{"error":"failed"}""")
                 !periodClosed -> respond(exchange, HttpStatus.CONFLICT.value(), """{"error":"period not closed"}""")
                 rawStatement != null -> respond(exchange, HttpStatus.OK.value(), rawStatement)
-                else -> respond(exchange, HttpStatus.OK.value(), objectMapper.writeValueAsString(tamperStatement(pageNumber, statement(runId, after))))
+                else -> respond(exchange, HttpStatus.OK.value(), objectMapper.writeValueAsString(tamperStatement(pageNumber, statement(after))))
             }
         }
         server.start()
@@ -102,7 +104,7 @@ class FakeGateway(
         )
     }
 
-    private fun statement(runId: UUID, after: UUID?): Statement = synchronized(accepted) {
+    private fun statement(after: UUID?): Statement = synchronized(accepted) {
         val lines = accepted.values.toList()
         val from = after?.let { id -> lines.indexOfFirst { it.transferId == id } + 1 } ?: 0
         val page = lines.drop(from).take(statementPage)
@@ -118,4 +120,19 @@ class FakeGateway(
     }
 
     override fun close() = server.stop(0)
+
+    companion object {
+        private val answerMapper = jacksonObjectMapper()
+
+        /** Shaped as gateway/openapi.json's TransferResponse, timestamps included, though the generator reads fewer fields. */
+        fun bankAnswer(request: SubmitTransferRequest, status: TransferStatus, reason: RejectReason? = null): String {
+            val now = Instant.now().toString()
+            return answerMapper.writeValueAsString(
+                mapOf(
+                    "transferId" to request.transferId, "runId" to request.runId, "status" to status, "rejectReason" to reason,
+                    "acceptedAt" to now, "resultedAt" to now.takeIf { status.isFinal },
+                ),
+            )
+        }
+    }
 }

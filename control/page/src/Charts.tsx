@@ -1,8 +1,8 @@
 import type { ChaosInRun, SecondStats } from './api/client'
-import { count } from './format'
+import { count, MS_PER_SECOND } from './format'
 import { fullBankSeconds, fullClientSeconds } from './fullSeconds'
 
-export type Point = [number, number | null]
+type Point = [number, number | null]
 type Line = { name: string; color: string; points: Point[] }
 
 const W = 420
@@ -10,7 +10,6 @@ const H = 170
 const LEFT = 44
 const BOTTOM = 22
 const TOP = 8
-const MS_PER_SECOND = 1000
 const HEADROOM = 1.15
 const MIN_TOP = 10
 

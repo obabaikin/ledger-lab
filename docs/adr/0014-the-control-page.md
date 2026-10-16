@@ -62,6 +62,9 @@ under the queue's lock, so two tabs pressing Start at once make one run. The pag
 with the reason on the button. A queued run cannot be cancelled: it leaves the queue by starting or
 by expiring after `queue-timeout`, and the session waits for it.
 
+**No secure context needed.** The page makes the `requestId` from `crypto.getRandomValues`, which
+browsers offer over plain `http://` too; `crypto.randomUUID` exists only in a secure context.
+
 **Buttons act only when they can.** Stop acts only while the clients send; otherwise it is held back
 with "while clients are sending" on it. The crash button is shown when control says chaos is available
 and is held back the same way, with its reason on it: a countdown from control's seconds, which may

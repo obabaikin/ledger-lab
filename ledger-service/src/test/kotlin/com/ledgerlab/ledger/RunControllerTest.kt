@@ -33,8 +33,8 @@ class RunControllerTest : IntegrationTest() {
         assertThat(report.body!!["accounts"]).isEqualTo(5)
 
         http.delete("/internal/runs/$runId")
-        val afterDelete = http.getForEntity("/internal/runs/$runId/accounts", List::class.java)
-        assertThat(afterDelete.body).isEmpty()
+        val afterDelete = http.getForEntity("/internal/runs/$runId/reconciliation", Map::class.java)
+        assertThat(afterDelete.body!!["accounts"]).isEqualTo(0)
     }
 
     @Test

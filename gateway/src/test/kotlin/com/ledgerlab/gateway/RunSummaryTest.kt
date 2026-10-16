@@ -25,7 +25,6 @@ class RunSummaryTest : IntegrationTest() {
             assertThat(summary["published"]).isEqualTo(3)
             assertThat(summary["posted"]).isEqualTo(1)
             assertThat(summary["rejected"]).isEqualTo(1)
-            assertThat(summary["pending"]).isEqualTo(1)
             assertThat(summary["rejectionsByReason"]).isEqualTo(mapOf(RejectReason.BLOCKED_ACCOUNT.name to 1))
             assertThat(summary["latencyP50Ms"]).isNotNull()
         }

@@ -41,7 +41,7 @@ class RunController(private val service: TransferService, private val periods: P
 
     @ExceptionHandler(CannotAcquireLockException::class)
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
-    fun lockTimeout(e: CannotAcquireLockException) = ApiError(GatewayErrors.CLOSE_LOCK_TIMEOUT)
+    fun lockTimeout() = ApiError(GatewayErrors.CLOSE_LOCK_TIMEOUT)
 }
 
 data class ClosedPeriod(val runId: UUID, val closedAt: Instant)

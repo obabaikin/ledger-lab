@@ -7,7 +7,7 @@ export function runToShow(runs: RunView[], pickedId: string | null): RunView | n
   return runs.find((r) => r.runId === pickedId) ?? runInProgress(runs) ?? runs[0] ?? null
 }
 
-export function runInProgress(runs: RunView[]): RunView | null {
+function runInProgress(runs: RunView[]): RunView | null {
   return [...runs].reverse().find((r) => IN_PROGRESS.has(r.state)) ?? null
 }
 

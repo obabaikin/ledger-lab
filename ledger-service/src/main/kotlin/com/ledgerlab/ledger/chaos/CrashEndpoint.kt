@@ -12,7 +12,7 @@ import org.springframework.http.HttpStatus
 import java.time.Duration
 
 @ConfigurationProperties("ledger.chaos")
-data class ChaosProperties(val enabled: Boolean, val haltDelay: Duration)
+data class ChaosProperties(val haltDelay: Duration)
 
 fun interface Halter {
     fun halt()

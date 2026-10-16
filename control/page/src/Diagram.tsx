@@ -24,7 +24,7 @@ export const NO_NUMBERS: DiagramNumbers = {
   duplicatesSent: null,
 }
 
-export type PodState = 'consuming' | 'starting' | 'down' | 'unknown'
+type PodState = 'consuming' | 'starting' | 'down' | 'unknown'
 
 const POD_COLOR: Record<PodState, string> = {
   consuming: 'var(--ok)',
@@ -33,7 +33,7 @@ const POD_COLOR: Record<PodState, string> = {
   unknown: 'var(--muted)',
 }
 
-export const POD_LEGEND: Record<PodState, string> = {
+const POD_LEGEND: Record<PodState, string> = {
   consuming: 'consuming',
   starting: 'starting',
   down: 'no answer to Prometheus',

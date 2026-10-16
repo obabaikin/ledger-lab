@@ -26,12 +26,12 @@ class StatementController(private val periods: PeriodService) {
     @ApiResponse(responseCode = "200", description = "The page")
     @ApiResponse(responseCode = "400", description = "Invalid limit, or `after` is not a transfer of the run", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "409", description = "The period is not closed yet", content = [Content(schema = Schema(implementation = ApiError::class))])
-    @GetMapping(version = "v1")
+    @GetMapping(version = ApiVersioning.PATH_VERSION)
     fun statement(
         @PathVariable runId: UUID,
         @Parameter(description = "The `next` of the previous page; omit for the first page")
         @RequestParam after: UUID?,
-        @Parameter(description = "Page size, 1 to 1000, default 100")
+        @Parameter(description = "Page size, 1 to $MAX_PAGE, default $DEFAULT_PAGE")
         @RequestParam limit: Int?,
     ): Statement {
         val pageSize = limit ?: DEFAULT_PAGE
@@ -41,7 +41,7 @@ class StatementController(private val periods: PeriodService) {
 
     @ExceptionHandler(PeriodNotClosedException::class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    fun notClosed(e: PeriodNotClosedException) = ApiError(GatewayErrors.PERIOD_NOT_CLOSED)
+    fun notClosed() = ApiError(GatewayErrors.PERIOD_NOT_CLOSED)
 
     @ExceptionHandler(IllegalArgumentException::class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)

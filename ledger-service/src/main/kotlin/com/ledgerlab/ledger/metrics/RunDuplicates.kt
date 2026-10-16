@@ -11,7 +11,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 @ConfigurationProperties("ledger.run-duplicates")
-data class RunDuplicatesProperties(val idleRetention: Duration, val sweepInterval: Duration)
+data class RunDuplicatesProperties(val idleRetention: Duration)
 
 /**
  * Redeliveries the ledger skipped, per run: not in any event, so only monitoring sees them (ADR 0015).

@@ -10,5 +10,9 @@ data class TransferResultEvent(
     val rejectReason: RejectReason?,
     val processedAt: Instant,
 ) {
-    fun partitionKey(): String = "$runId:$transferId"
+    fun partitionKey(): String = partitionKey(runId, transferId)
+
+    companion object {
+        fun partitionKey(runId: UUID, transferId: UUID): String = "$runId:$transferId"
+    }
 }

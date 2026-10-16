@@ -29,7 +29,6 @@ data class Transfer(
     val status: TransferStatus,
     val rejectReason: RejectReason?,
     val acceptedAt: Instant,
-    val publishedAt: Instant?,
     val resultedAt: Instant?,
 )
 
@@ -43,9 +42,7 @@ data class RunSummary(
     val rejectionsByReason: Map<String, Long>,
     val latencyP50Ms: Double?,
     val latencyP99Ms: Double?,
-) {
-    val pending: Long = accepted - posted - rejected
-}
+)
 
 data class RunPeriod(val runId: UUID, val closedAt: Instant, val entryCount: Long)
 

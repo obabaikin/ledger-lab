@@ -27,7 +27,6 @@ data class GeneratorProperties(
     val retryBackoff: Duration,
     val maxInFlight: Int,
     val retention: Duration,
-    val retentionSweepInterval: Duration,
     val journal: JournalProperties,
     val profile: ProfileProperties,
 )

@@ -16,7 +16,6 @@ data class TopicProperties(val name: String)
 @ConfigurationProperties("ledger.results")
 data class ResultsProperties(
     val topic: String,
-    val publishInterval: Duration,
     val batchSize: Int,
     val sendTimeout: Duration,
 )

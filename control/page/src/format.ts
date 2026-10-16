@@ -1,4 +1,5 @@
 export const NO_DATA = '—'
+export const MS_PER_SECOND = 1000
 
 export const count = (n: number) => Math.round(n).toLocaleString('en-US')
 
