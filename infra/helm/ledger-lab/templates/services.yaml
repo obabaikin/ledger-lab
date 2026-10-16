@@ -88,6 +88,7 @@ spec:
             - {name: CONTROL_LEDGER_TRANSFERPARTITIONS, value: {{ $root.Values.kafka.partitions | quote }}}
             - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
+            - {name: CONTROL_RUNS_MAXTOTALTPS, value: {{ $root.Values.runs.maxTotalTps | quote }}}
             {{- range $i := until (int $root.Values.services.ledger.replicas) }}
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_NAME, value: "ledger-{{ $i }}"}
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_URL, value: "http://ledger-{{ $i }}.ledger:{{ $root.Values.managementPort }}"}

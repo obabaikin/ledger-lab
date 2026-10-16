@@ -7,6 +7,7 @@ CLUSTER="${CLUSTER:-ledger-lab}"
 NAMESPACE="${NAMESPACE:-ledger-lab}"
 K3S_IMAGE="${K3S_IMAGE:-rancher/k3s:v1.36.4-k3s1}"
 NODE_MEMORY="${NODE_MEMORY:-8g}"
+NODE_CPUS="${NODE_CPUS:-6}"
 CONTROL_PORT="${CONTROL_PORT:-8083}"
 TAG="dev-$(date +%Y%m%d%H%M%S)"
 MODULES="ledger-service gateway generator control reporting"
@@ -22,6 +23,10 @@ elif [ "$(docker inspect -f '{{.State.Running}}' "k3d-$CLUSTER-server-0")" = tru
   && ! docker exec "k3d-$CLUSTER-server-0" test -f "$KUBELET_DROP_IN"; then
   echo "recreate the cluster (down.sh, up.sh) to cap the crash-loop backoff"
 fi
+
+# Pinned to cores, not a CPU quota: with a quota every JVM in the cluster still counts all the host's cores and sizes its
+# GC and pools by them; the target server has 6 vCPU.
+docker update --cpuset-cpus "0-$((NODE_CPUS - 1))" "k3d-$CLUSTER-server-0" >/dev/null
 
 # A jar of an earlier version left in build/libs would give the image build two to choose from.
 rm -f "$ROOT"/*/build/libs/*.jar

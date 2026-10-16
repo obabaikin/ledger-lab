@@ -2,6 +2,7 @@ package com.ledgerlab.control
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpHeaders
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.cfg.JsonNodeFeature
 import tools.jackson.databind.node.ObjectNode
@@ -27,11 +28,43 @@ class OpenApiSpecTest : IntegrationTest() {
         }
     }
 
+    @Test
+    fun `every error answer is declared as JSON with its error text required`() {
+        val spec = committed()
+        val errors = spec["paths"].properties().flatMap { (path, item) ->
+            item.properties().flatMap { (method, operation) ->
+                operation["responses"].properties().filter { it.key.first() in "45" }.map { "$method $path ${it.key}" to it.value }
+            }
+        }
+
+        assertThat(errors).isNotEmpty
+        errors.forEach { (name, response) -> assertThat(response["content"].propertyNames().toList()).`as`(name).containsExactly(JSON) }
+        assertThat(spec["components"]["schemas"]["ApiError"]["required"].toString()).isEqualTo("""["error"]""")
+    }
+
+    @Test
+    fun `a refusal to wait declares Retry-After, a created or accepted run or session declares its Location`() {
+        val paths = committed()["paths"]
+        val headersOf = { path: String, status: String -> paths[path]["post"]["responses"][status]["headers"]?.propertyNames().orEmpty() }
+
+        assertThat(headersOf(RUNS, "429")).contains(HttpHeaders.RETRY_AFTER)
+        assertThat(headersOf(CHAOS, "429")).contains(HttpHeaders.RETRY_AFTER)
+        assertThat(headersOf(RUNS, "202")).contains(HttpHeaders.LOCATION)
+        assertThat(headersOf(RUNS, "200")).contains(HttpHeaders.LOCATION)
+        assertThat(headersOf(SESSIONS, "201")).contains(HttpHeaders.LOCATION)
+    }
+
+    private fun committed(): JsonNode = objectMapper.readTree(Path.of(System.getProperty("openapi.dir"), FILE_NAME).toFile())
+
     /** The server URL carries the test's random port; it is not part of the contract. */
     private fun normalized(spec: JsonNode): JsonNode = (spec.deepCopy() as ObjectNode).apply { remove(SERVERS) }
 
     private companion object {
         const val FILE_NAME = "openapi.json"
         const val SERVERS = "servers"
+        const val JSON = "application/json"
+        const val RUNS = "/api/sessions/{sessionId}/runs"
+        const val CHAOS = "/api/sessions/{sessionId}/chaos"
+        const val SESSIONS = "/api/sessions"
     }
 }

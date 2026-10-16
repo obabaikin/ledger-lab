@@ -8,6 +8,7 @@ object ControlErrors {
     const val SESSION_NOT_FOUND = "session not found"
     const val RUN_NOT_FOUND = "run not found"
     const val REQUEST_ID_CONFLICT = "requestId already used with a different request"
+    const val RUN_NOT_FINAL = "a run of this session is not final"
     const val RUN_QUOTA_EXCEEDED = "run quota exceeded"
     const val RUN_QUEUE_FULL = "run queue full"
     const val REQUEST_ID_REQUIRED = "requestId is required"

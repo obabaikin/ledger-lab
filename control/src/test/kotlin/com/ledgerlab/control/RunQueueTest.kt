@@ -14,8 +14,8 @@ class RunQueueTest : IntegrationTest() {
     @Autowired lateinit var scheduler: QueueScheduler
 
     private fun queued(count: Int): List<Any?> {
-        val sessionId = sessionOf(invite())
-        return (1..count).map { start(sessionId).body!!["runId"] }
+        val token = invite()
+        return (1..count).map { start(sessionOf(token)).body!!["runId"] }
     }
 
     @Test
@@ -55,8 +55,8 @@ class RunQueueTest : IntegrationTest() {
     }
 
     private fun queuedAt(vararg tps: Int): List<Any?> {
-        val sessionId = sessionOf(invite())
-        return tps.map { start(sessionId, tps = it).body!!["runId"] }
+        val token = invite()
+        return tps.map { start(sessionOf(token), tps = it).body!!["runId"] }
     }
 
     @Test
@@ -126,13 +126,11 @@ class RunQueueTest : IntegrationTest() {
 
     @Test
     fun `positions close up when a run leaves the queue`() {
-        val sessionId = sessionOf(invite())
-        val runs = (1..3).map { start(sessionId).body!!["runId"] }
-        setRun(runs[0], state = "CREATED")
+        val token = invite()
+        val runs = (1..3).map { sessionOf(token).let { sessionId -> sessionId to start(sessionId).body!!["runId"] } }
+        setRun(runs[0].second, state = "CREATED")
 
-        assertThat(getRun(sessionId, runs[0]).body!!["position"]).isNull()
-        assertThat(getRun(sessionId, runs[1]).body!!["position"]).isEqualTo(1)
-        assertThat(getRun(sessionId, runs[2]).body!!["position"]).isEqualTo(2)
+        assertThat(runs.map { (sessionId, runId) -> getRun(sessionId, runId).body!!["position"] }).containsExactly(null, 1, 2)
     }
 
     @Test

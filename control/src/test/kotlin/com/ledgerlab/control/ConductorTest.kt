@@ -15,6 +15,9 @@ import com.ledgerlab.control.runs.Conductor
 import com.ledgerlab.control.runs.RunQueue
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.beans.factory.annotation.Autowired
 import java.time.Duration
 import java.util.UUID
@@ -533,6 +536,50 @@ class ConductorTest : IntegrationTest() {
         assertThat(report["projectionMatchesBooks"]).isEqualTo(true)
         assertThat(report["notes"] as List<*>).isEmpty()
         assertThat(((report["stats"] as Map<*, *>)["totals"] as Map<*, *>)["accepted"]).isEqualTo(995)
+    }
+
+    @Test
+    fun `the books are marked final once, when the drain first finds them final, and the mark survives a restart`() {
+        val runId = draining()
+        bank(runId, stats = stats(runId, accepted = 990, posted = 975, rejected = 15))
+        clientReconciles(runId)
+
+        conductor.tick()
+        val first = column(runId, "books_final_at")
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+        assertThat(first).isNotNull()
+        assertThat(column(runId, "books_final_at")).isEqualTo(first)
+        val sessionId = jdbc.sql("SELECT session_id FROM runs WHERE run_id = :id").param("id", runId).query(UUID::class.java).single()
+        assertThat(java.time.Instant.parse(getRun(sessionId, runId).body!!["booksFinalAt"] as String))
+            .isEqualTo((first as java.sql.Timestamp).toInstant())
+    }
+
+    @Test
+    fun `books not final yet are not marked`() {
+        val runId = draining()
+        bank(runId, books = books(runId, posted = 900))
+
+        conductor.tick()
+
+        assertThat(column(runId, "books_final_at")).isNull()
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension::class)
+    fun `a setup that times out logs the last answers of the generator and the ledger`(output: CapturedOutput) {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 409, mapOf("error" to "journals in memory hold 300000"))
+        conductor.tick()
+
+        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        conductor.tick()
+
+        val line = output.out.lines().single { "setup timed out" in it && runId.toString() in it }
+        assertThat(line).contains("generator status: 404", "ledger accounts: answered 201", "generator start: 409 journals in memory hold 300000")
     }
 
     @Test

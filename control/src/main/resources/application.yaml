@@ -4,6 +4,13 @@ spring:
   threads:
     virtual:
       enabled: true
+  # A cached index keeps an old page after a deploy (ADR 0014).
+  web:
+    resources:
+      cache:
+        use-last-modified: false
+        cachecontrol:
+          no-cache: true
   datasource:
     url: jdbc:postgresql://localhost:5432/ledgerlab
     username: control
@@ -67,6 +74,7 @@ control:
 springdoc:
   # Each endpoint lists its own answers; otherwise every error handler is added to every operation.
   override-with-generic-response: false
+  default-produces-media-type: application/json
 
 management:
   endpoints:

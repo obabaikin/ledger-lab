@@ -4,6 +4,7 @@ import com.ledgerlab.control.generator.GeneratorClient
 import com.ledgerlab.control.http.Reply
 import com.ledgerlab.control.reporting.ReportingClient
 import com.ledgerlab.control.reporting.RunStats
+import com.ledgerlab.control.runs.ChaosInRun
 import io.swagger.v3.oas.annotations.media.Schema
 import org.springframework.stereotype.Component
 import java.time.Instant
@@ -21,6 +22,8 @@ data class ClientCounts(
     val retries: Long,
     @field:Schema(description = "Second presses of the same transfer; the gateway answers them without a new transfer.")
     val duplicatesSent: Long,
+    @field:Schema(description = "New transfers per second from the clients' start; index 0 is the first second.")
+    val requestedPerSecond: List<Long>,
 )
 
 @Schema(description = "One instance of a service, from Prometheus; approximate, a scrape or two behind.")
@@ -45,6 +48,8 @@ data class LiveView(
     val ledgerDuplicatesAtLeast: Long?,
     @field:Schema(description = "When control last read any part, by its own clock.")
     val readAt: Instant,
+    @field:Schema(description = "Ledger crashes since the run was admitted, in order; empty if none.")
+    val chaos: List<ChaosInRun> = emptyList(),
 )
 
 @Component
@@ -93,7 +98,7 @@ class LiveRuns(
 
     private fun clients(runId: UUID): ClientCounts? =
         (generator.status(runId) as? Reply.Answered)?.body?.let {
-            ClientCounts(it.requested, it.acknowledged, it.failed, it.unknown, it.retries, it.duplicatesSent)
+            ClientCounts(it.requested, it.acknowledged, it.failed, it.unknown, it.retries, it.duplicatesSent, it.requestedPerSecond)
         }
 
     private fun pods(): List<PodView>? {

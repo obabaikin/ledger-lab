@@ -49,7 +49,13 @@ class ReconciliationRepository(private val jdbc: JdbcClient, private val props: 
             .associate { RejectReason.valueOf(it["reject_reason"] as String) to (it["n"] as Number).toLong() }
 
         val journalTotals = jdbc.sql(
-            "SELECT count(*) AS entries, coalesce(sum(amount_cents), 0) AS total FROM journal_entries WHERE run_id = :runId",
+            """
+            SELECT count(*) AS entries,
+                   coalesce(sum(amount_cents), 0) AS total,
+                   coalesce(-sum(amount_cents) FILTER (WHERE amount_cents < 0), 0) AS debits,
+                   coalesce(sum(amount_cents) FILTER (WHERE amount_cents > 0), 0) AS credits
+            FROM journal_entries WHERE run_id = :runId
+            """,
         ).param("runId", runId).query().singleRow()
 
         // Per-transfer lookup on purpose: its plan does not depend on statistics of a run Postgres has not analyzed yet,
@@ -100,6 +106,8 @@ class ReconciliationRepository(private val jdbc: JdbcClient, private val props: 
             rejectionsByReason = rejections,
             journalEntries = journalTotals.long("entries"),
             journalSumCents = journalTotals.long("total"),
+            debitsCents = journalTotals.long("debits"),
+            creditsCents = journalTotals.long("credits"),
             transfersWithInvalidJournal = invalidJournal,
             accountsOutOfBalance = outOfBalance,
         )

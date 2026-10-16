@@ -58,3 +58,7 @@ services:
     port: 8084
     replicas: 1
     memory: 448Mi
+
+runs:
+  # Transfers per second of all active runs together; 1000 from measurements in k3d (ADR 0012).
+  maxTotalTps: 1000

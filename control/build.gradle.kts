@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.spring)
     alias(libs.plugins.spring.boot)
     alias(libs.plugins.spring.dependency.management)
+    alias(libs.plugins.node.gradle)
 }
 
 kotlin {
@@ -11,6 +12,46 @@ kotlin {
         javaParameters = true
         freeCompilerArgs.add("-Xjsr305=strict")
     }
+}
+
+node {
+    download = true
+    version = "24.21.0"
+    npmInstallCommand = "ci"
+    nodeProjectDir = file("page")
+}
+
+val pageTypes by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    dependsOn(tasks.npmInstall)
+    npmCommand = listOf("run", "types")
+    inputs.file("openapi.json")
+    outputs.file("page/src/api/schema.d.ts")
+}
+
+val pageSources = fileTree("page") { exclude("node_modules", "src/api/schema.d.ts") }
+
+val pageTest by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    dependsOn(pageTypes)
+    npmCommand = listOf("run", "test")
+    inputs.files(pageSources, "openapi.json")
+    outputs.upToDateWhen { true }
+}
+
+// The page shows the commit it was built from; a new commit with the same sources must still rebuild it.
+val gitState = providers.exec { commandLine("git", "status", "--porcelain", "--untracked-files=no") }.standardOutput.asText
+val gitHead = providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText
+
+val pageBuild by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    dependsOn(pageTypes)
+    npmCommand = listOf("run", "build")
+    inputs.files(pageSources, "openapi.json")
+    inputs.property("gitHead", gitHead)
+    inputs.property("gitState", gitState)
+    outputs.dir(layout.buildDirectory.dir("page"))
+}
+
+tasks.processResources {
+    from(pageBuild) { into("static") }
 }
 
 dependencies {
@@ -35,6 +76,7 @@ dependencies {
 }
 
 tasks.test {
+    dependsOn(pageTest)
     useJUnitPlatform()
     inputs.files("openapi.json").withPropertyName("openapiSpec")
     systemProperty("openapi.dir", projectDir.path)

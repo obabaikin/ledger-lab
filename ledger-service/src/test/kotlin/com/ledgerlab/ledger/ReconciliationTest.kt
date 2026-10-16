@@ -26,6 +26,20 @@ class ReconciliationTest : IntegrationTest() {
     }
 
     @Test
+    fun `sums debits and credits of the journal apart, each as a positive amount, without a rejected transfer`() {
+        val (runId, _) = runWithOnePosting()
+        ledger.apply(transfer(runId, from = 2, to = 3, amountCents = 50))
+        ledger.apply(transfer(runId, from = 3, to = 1, amountCents = 1_000_000))
+
+        val report = runs.reconcile(runId)
+
+        assertThat(report.debitsCents).isEqualTo(150)
+        assertThat(report.creditsCents).isEqualTo(150)
+        assertThat(report.openingTotalCents).isEqualTo(report.balanceTotalCents)
+        assertThat(report.rejectedTransfers).isEqualTo(1)
+    }
+
+    @Test
     fun `detects a credit booked to the wrong account even when every total still agrees`() {
         val (runId, transferId) = runWithOnePosting()
         // Move 100 from account 1 to 3 in the journal without touching balances: totals stay intact.

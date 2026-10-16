@@ -49,10 +49,10 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .optional()
             .orElse(null)
 
-    fun hasRun(sessionId: UUID, state: RunState): Boolean =
-        jdbc.sql("SELECT EXISTS (SELECT 1 FROM runs WHERE session_id = :sessionId AND state = :state)")
+    fun hasRun(sessionId: UUID, states: Collection<RunState>): Boolean =
+        jdbc.sql("SELECT EXISTS (SELECT 1 FROM runs WHERE session_id = :sessionId AND state IN (:states))")
             .param("sessionId", sessionId)
-            .param("state", state.name)
+            .param("states", states.map { it.name })
             .query(Boolean::class.java)
             .single()
 
@@ -111,6 +111,12 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             """,
         )
             .param("closedAt", Timestamp.from(closedAt))
+            .param("draining", RunState.DRAINING.name)
+            .param("runId", runId)
+            .update()
+
+    fun markBooksFinal(runId: UUID): Int =
+        jdbc.sql("UPDATE runs SET books_final_at = clock_timestamp() WHERE run_id = :runId AND state = :draining AND books_final_at IS NULL")
             .param("draining", RunState.DRAINING.name)
             .param("runId", runId)
             .update()
@@ -289,6 +295,7 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
         closedAt = getObject("closed_at", Timestamp::class.java)?.toInstant(),
         drainProgress = getObject("drain_progress")?.let { getLong("drain_progress") },
         drainProgressAt = getObject("drain_progress_at", Timestamp::class.java)?.toInstant(),
+        booksFinalAt = getObject("books_final_at", Timestamp::class.java)?.toInstant(),
         result = getString("result")?.let { RunResult.valueOf(it) },
         failure = getString("failure"),
     )

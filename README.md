@@ -7,8 +7,8 @@ still balance. Built to answer one question properly: *how do you prove no money
 duplicated when consumers crash?*
 
 > Status: work in progress. Ledger, gateway and generator are done; control takes a run from the
-> queue through the bank to a stored verdict. The whole system runs in a local Kubernetes cluster.
-> The page, the deployment to a server and the load investigation follow.
+> queue through the bank to a stored verdict and shows it on its page. The whole system runs in a
+> local Kubernetes cluster. The deployment to a server and the load investigation follow.
 
 ## What it does
 
@@ -27,7 +27,7 @@ duplicated when consumers crash?*
   journal and the transfer log. Any disagreement turns the run red, and so does a verdict that
   could not be completed.
 - A **chaos button** crashes every ledger instance in the middle of a run, as `kill -9` would.
-  Reconciliation must still pass. The API is done; the button on the page follows.
+  Reconciliation must still pass.
 
 ## Stack
 
@@ -43,7 +43,7 @@ Micrometer / Prometheus · Helm · k3s; planned: Grafana, Terraform (Contabo)
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait | done |
 | `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) | done |
 | `reporting` | The bank's numbers per run, projected from its Kafka events, internal API | done |
-| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | in progress: entry by invite, quota, run queue, orchestration, the verdict and chaos; the page follows |
+| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI | done |
 
 ## Running locally
 
@@ -56,7 +56,7 @@ docker compose up -d                      # Postgres (one schema per service), K
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
 ./gradlew :reporting:bootRun              # :8084, the run's numbers from the bank's events
-./gradlew :control:bootRun                # :8083, invites, the run queue and orchestration (needs the other four)
+./gradlew :control:bootRun                # :8083, the page, invites, the run queue and orchestration (needs the other four)
 ```
 
 A run through control, once an invite exists (see below):
@@ -113,6 +113,25 @@ the ledger instances hold all partitions; the rest wait in a queue for up to fiv
 ([ADR 0013](docs/adr/0013-orchestrating-a-run-and-the-verdict.md)). While it runs, it carries live
 numbers projected from the bank's own events ([ADR 0015](docs/adr/0015-live-numbers-from-the-banks-events.md)).
 The API is described in [`control/openapi.json`](control/openapi.json), checked against the running service.
+
+## The page
+
+Control serves the page at `/`; the invite link opens a session at `/s/<sessionId>`. It shows a run as
+four phases (queued, clients sending, bank finishing, verdict), the way a transfer takes from the
+clients through the gateway and Kafka to the ledger with live counts and the state of each instance,
+transfers per second and the time from the gateway to the ledger, the crash button, and after the run
+the verdict with the sums of the books: debits against credits and the total of all accounts before and
+after. A session runs one run at a time. Every live number comes from a named source, and a number not
+read yet shows as "—" ([ADR 0014](docs/adr/0014-the-control-page.md)).
+
+The page is React and TypeScript in `control/page`; its types are generated from `control/openapi.json`.
+Gradle downloads Node, runs the page's tests with control's and puts the built page into control's jar,
+so `infra/k3d/up.sh` deploys it like the rest. For work on the page alone, with control on
+`localhost:8083`:
+
+```bash
+cd control/page && npm ci && npm run types && npm run dev   # Vite on localhost:5173, /api proxied to control
+```
 
 ## Scope and non-goals
 

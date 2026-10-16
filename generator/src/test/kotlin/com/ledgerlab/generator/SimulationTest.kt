@@ -91,6 +91,24 @@ class SimulationTest {
     }
 
     @Test
+    fun `counts new transfers per second of the run, a slot for each second begun, adding up to the requested`() {
+        FakeGateway().use { gateway ->
+            val simulation = simulation(client(gateway.url), tps = 200, seconds = 3)
+
+            simulation.start()
+            Thread.sleep(1_500)
+            val midway = simulation.status().requestedPerSecond
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            val status = simulation.status()
+            assertThat(midway).hasSize(2)
+            assertThat(status.requestedPerSecond).hasSize(4)
+            assertThat(status.requestedPerSecond.sum()).isEqualTo(status.requested)
+            assertThat(status.requestedPerSecond.take(3)).allSatisfy { assertThat(it).isBetween(150L, 250L) }
+        }
+    }
+
+    @Test
     fun `retries a failed submission with the same transfer id`() {
         FakeGateway(failFirstAttempt = true).use { gateway ->
             val simulation = simulation(client(gateway.url), tps = 50, seconds = 1)

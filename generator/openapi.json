@@ -247,6 +247,14 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "requestedPerSecond" : {
+            "description" : "New transfers per second of the run, from its start; index 0 is the first second.",
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "array"
+          },
           "retries" : {
             "format" : "int64",
             "type" : "integer"
