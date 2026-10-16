@@ -35,7 +35,7 @@ class RunStatsRepository(private val jdbc: JdbcTemplate) {
                 bankLatency = BankLatency(rs.nullableDouble("p50"), rs.nullableDouble("p99")),
                 series = series,
             )
-        }, POSTED, REJECTED, POSTED, runId)!!
+        }, POSTED, REJECTED, POSTED, runId)
     }
 
     private fun secondStats(rs: ResultSet) = SecondStats(

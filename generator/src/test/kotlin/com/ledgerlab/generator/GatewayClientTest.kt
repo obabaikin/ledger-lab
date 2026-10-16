@@ -46,7 +46,7 @@ class GatewayClientTest {
         assertThat(result.attempts).isEqualTo(2)
         val view = entry.view()
         assertThat(view.first!!.result).isEqualTo(SendResult.NOT_CONNECTED)
-        assertThat(view.first!!.httpStatus).isNull()
+        assertThat(view.first.httpStatus).isNull()
         assertThat(view.resends.map { it.number to it.result }).containsExactly(2 to SendResult.NOT_CONNECTED)
     }
 

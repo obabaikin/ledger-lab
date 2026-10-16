@@ -84,7 +84,7 @@ class SimulationTest {
             simulation.assertJournalMatchesStatus()
             assertThat(simulation.entries()).allSatisfy {
                 assertThat(it.first!!.result).isEqualTo(SendResult.RESPONSE)
-                assertThat(it.first!!.httpStatus).isIn(200, 202)
+                assertThat(it.first.httpStatus).isIn(200, 202)
                 assertThat(it.resends).isEmpty()
             }
         }
@@ -128,7 +128,7 @@ class SimulationTest {
                     assertThat(resend.number).isEqualTo(2)
                     assertThat(resend.result).isEqualTo(SendResult.RESPONSE)
                     assertThat(resend.httpStatus).isEqualTo(202)
-                    assertThat(resend.offsetMs).isGreaterThanOrEqualTo(entry.first!!.offsetMs + entry.first!!.latencyMs)
+                    assertThat(resend.offsetMs).isGreaterThanOrEqualTo(entry.first.offsetMs + entry.first.latencyMs)
                 })
             }
         }
