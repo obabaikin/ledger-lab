@@ -37,6 +37,17 @@ val pageTest by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class
     outputs.upToDateWhen { true }
 }
 
+val pageKnip by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    dependsOn(pageTypes)
+    npmCommand = listOf("run", "knip")
+    inputs.files(pageSources, "openapi.json")
+    outputs.upToDateWhen { true }
+}
+
+tasks.check {
+    dependsOn(pageKnip)
+}
+
 // The page shows the commit it was built from; a new commit with the same sources must still rebuild it.
 val gitState = providers.exec { commandLine("git", "status", "--porcelain", "--untracked-files=no") }.standardOutput.asText
 val gitHead = providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText

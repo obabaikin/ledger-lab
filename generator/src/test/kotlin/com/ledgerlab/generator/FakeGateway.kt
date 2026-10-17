@@ -4,7 +4,6 @@ import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.Statement
 import com.ledgerlab.generator.bank.StatementLine
 import com.ledgerlab.generator.bank.SubmitTransferRequest
-import com.ledgerlab.generator.bank.TransferResponse
 import com.ledgerlab.generator.bank.TransferStatus
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
@@ -95,9 +94,9 @@ class FakeGateway(
 
     private fun record(request: SubmitTransferRequest) = synchronized(accepted) {
         accepted.putIfAbsent(
-            request.transferId!!,
+            request.transferId,
             StatementLine(
-                request.transferId!!, request.fromAccount, request.toAccount, request.amountCents,
+                request.transferId, request.fromAccount, request.toAccount, request.amountCents,
                 if (rejectReason != null) TransferStatus.REJECTED else TransferStatus.POSTED,
                 rejectReason,
             ),
