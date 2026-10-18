@@ -9,6 +9,10 @@ app.kubernetes.io/part-of: ledger-lab
 
 {{- define "ledger-lab.scrape" -}}
 prometheus.io/scrape: "true"
-prometheus.io/port: {{ .Values.managementPort | quote }}
 prometheus.io/path: /actuator/prometheus
+{{- end }}
+
+{{- define "ledger-lab.restricted" -}}
+allowPrivilegeEscalation: false
+capabilities: {drop: [ALL]}
 {{- end }}

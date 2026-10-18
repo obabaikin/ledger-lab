@@ -33,11 +33,16 @@ spec:
       labels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 8 }}
       annotations: {{- include "ledger-lab.scrape" $root | nindent 8 }}
     spec:
+      # The services never call the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
       initContainers:
         {{- if $usesDatabase }}
         - name: wait-for-postgres
           image: {{ $root.Values.postgres.image }}
           command: ["sh", "-c", "until pg_isready -h postgres -p 5432; do sleep 1; done"]
+          securityContext: {{- include "ledger-lab.restricted" $root | nindent 12 }}
           resources:
             limits: {memory: {{ $root.Values.initMemory }}}
         {{- end }}
@@ -47,7 +52,9 @@ spec:
           command:
             - sh
             - -c
-            - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic transfers,transfer-results >/dev/null 2>&1; do sleep 2; done
+            # One topic per call: a list is read as a pattern and passes when any one of them exists.
+            - for topic in transfers transfer-results; do until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic "$topic" >/dev/null 2>&1; do sleep 2; done; done
+          securityContext: {{- include "ledger-lab.restricted" $root | nindent 12 }}
           resources:
             limits: {memory: {{ $root.Values.kafka.toolsMemory }}}
         {{- end }}
@@ -55,6 +62,9 @@ spec:
         - name: {{ $name }}
           image: {{ include "ledger-lab.image" (dict "root" $root "service" $service) }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            {{- include "ledger-lab.restricted" $root | nindent 12 }}
           env:
             - {name: SERVER_PORT, value: {{ $service.port | quote }}}
             - {name: MANAGEMENT_SERVER_PORT, value: {{ $root.Values.managementPort | quote }}}

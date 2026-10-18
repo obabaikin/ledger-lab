@@ -1,0 +1,19 @@
+#!/usr/sbin/nft -f
+# A second layer under the provider's firewall: from outside, only SSH reaches the host itself. HTTP and HTTPS are
+# DNAT'd to Traefik's pod before routing, so they pass the forward hook, not this one. A table of its own: the
+# system's nftables.conf starts with "flush ruleset" and would remove the rules k3s keeps too.
+table inet ledger_lab
+delete table inet ledger_lab
+
+table inet ledger_lab {
+  chain input {
+    type filter hook input priority filter; policy accept;
+    # The host itself and its pods: kubelet, the API server and flannel are reached from here.
+    iifname { "lo", "cni0", "flannel.1" } accept
+    ct state established,related accept
+    # IPv6 needs neighbour discovery.
+    meta l4proto { icmp, ipv6-icmp } accept
+    tcp dport 22 accept
+    drop
+  }
+}

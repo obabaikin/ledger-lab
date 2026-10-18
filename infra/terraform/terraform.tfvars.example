@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars (gitignored) with the real values.
+instance_id = 100000000
+domain      = "example.org"

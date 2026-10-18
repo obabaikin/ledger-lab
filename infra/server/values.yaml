@@ -1,0 +1,14 @@
+# The server's values over the chart's defaults; passwords and the host come from deploy.sh.
+image:
+  repository: ghcr.io/obabaikin/ledger-lab
+
+ingress:
+  tls:
+    issuer: letsencrypt-prod
+  securityHeaders:
+    enabled: true
+  rateLimit:
+    enabled: true
+
+certManager:
+  enabled: true

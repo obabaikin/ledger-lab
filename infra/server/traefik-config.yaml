@@ -1,0 +1,15 @@
+# k3s applies this to its bundled Traefik. The rate limit counts requests per client address; with the default
+# Cluster policy the load balancer replaces that address with the node's own.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        externalTrafficPolicy: Local
+    resources:
+      requests: {memory: 256Mi}
+      limits: {memory: 256Mi}
