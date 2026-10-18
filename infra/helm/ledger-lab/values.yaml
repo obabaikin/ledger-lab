@@ -33,12 +33,15 @@ prometheus:
   image: prom/prometheus:v3.5.0
   memory: 512Mi
 
-# Off in k3d: the server sets a host, a Let's Encrypt issuer and the rate limit (infra/server/values.yaml).
+# Off in k3d: the server sets a host, a Let's Encrypt issuer, security headers and the rate limit (infra/server/values.yaml).
 ingress:
   host: ""
   tls:
     issuer: ""
     secretName: control-tls
+  securityHeaders:
+    enabled: false
+    hstsSeconds: 31536000
   rateLimit:
     enabled: false
     average: 20

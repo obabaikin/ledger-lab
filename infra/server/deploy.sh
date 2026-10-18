@@ -11,7 +11,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 IMAGE_REPOSITORY=ghcr.io/obabaikin/ledger-lab
 MODULES="ledger-service gateway generator control reporting"
-CERT_MANAGER_VERSION=v1.21.2
+CERT_MANAGER_CHART="oci://quay.io/jetstack/charts/cert-manager:v1.21.2@sha256:634dce9c13b56677a2c05e2ab76c312d0be2664022d5dd05815da67e1fd5f610"
 MANIFEST_TYPES="application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json"
 CHART="$ROOT/infra/helm/ledger-lab"
 PASSWORDS="$CONFIG_DIR/values-server.yaml"
@@ -77,10 +77,15 @@ if [ -n "$(helm list --namespace "$NAMESPACE" --pending --short)" ]; then
   exit 1
 fi
 
-helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager --version "$CERT_MANAGER_VERSION" \
+helm upgrade --install cert-manager "$CERT_MANAGER_CHART" \
   --namespace cert-manager --create-namespace -f "$HERE/cert-manager-values.yaml" --wait --timeout 5m
 helm upgrade --install ledger-lab "$CHART" --namespace "$NAMESPACE" --create-namespace \
   -f "$HERE/values.yaml" -f "$PASSWORDS" --set image.repository="$IMAGE_REPOSITORY" --set image.tag="$SHA" \
   --set ingress.host="$DOMAIN" --wait --wait-for-jobs --timeout 10m "$@"
 kubectl --namespace "$NAMESPACE" get pods
 echo "control: https://$DOMAIN"
+
+# Updates install without a reboot (apt-unattended-upgrades.conf), so a new kernel waits for one by hand.
+if [ -n "${SERVER:-}" ] && ssh -o BatchMode=yes "root@$SERVER" test -f /var/run/reboot-required; then
+  echo "the server needs a reboot to finish its updates; between runs: ssh root@$SERVER systemctl reboot" >&2
+fi

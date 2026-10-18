@@ -1,5 +1,6 @@
 #!/bin/sh
-# Prepares the server over SSH from the development machine: SSH by key only, security updates, k3s, a kubeconfig.
+# Prepares the server over SSH from the development machine: SSH by key only, a host firewall, security updates,
+# k3s, a kubeconfig.
 # Usage: SERVER=<server ip> infra/server/bootstrap.sh. Safe to run again: changes only what differs.
 set -eu
 
@@ -18,6 +19,9 @@ SSHD_DROP_IN=/etc/ssh/sshd_config.d/00-ledger-lab.conf
 APT_DROP_IN=/etc/apt/apt.conf.d/52ledger-lab
 KUBELET_DROP_IN=/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-crash-loop-backoff.conf
 TRAEFIK_CONFIG=/var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+FIREWALL_RULES=/etc/ledger-lab/firewall.nft
+FIREWALL_UNIT=/etc/systemd/system/ledger-lab-firewall.service
+FIREWALL_REVERT_SECONDS=120
 
 # One connection for the whole run: it stays open while sshd reloads, a way back in if the new config locks keys out.
 SOCKET_DIR="$(mktemp -d)"
@@ -59,6 +63,23 @@ esac
 remote "dpkg -s unattended-upgrades >/dev/null 2>&1 \
   || (apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q unattended-upgrades)"
 put "$HERE/apt-unattended-upgrades.conf" "$APT_DROP_IN" || true
+
+firewall_changed=false
+put "$HERE/firewall.nft" "$FIREWALL_RULES" && firewall_changed=true
+put "$HERE/ledger-lab-firewall.service" "$FIREWALL_UNIT" && firewall_changed=true
+if [ "$firewall_changed" = true ] || ! remote "nft list table inet ledger_lab >/dev/null 2>&1"; then
+  # Rules that lock SSH out undo themselves: the timer removes them unless a new login gets through first.
+  remote "systemctl daemon-reload \
+    && systemd-run --quiet --collect --timer-property=RemainAfterElapse=no --unit=ledger-lab-firewall-revert \
+      --on-active=$FIREWALL_REVERT_SECONDS nft delete table inet ledger_lab \
+    && systemctl restart ledger-lab-firewall"
+  if ! ssh -o ControlPath=none -o BatchMode=yes -o ConnectTimeout=10 "root@$SERVER" true; then
+    echo "no new SSH login with the host firewall on; it removes itself in $FIREWALL_REVERT_SECONDS s" >&2
+    exit 1
+  fi
+  remote "systemctl stop ledger-lab-firewall-revert.timer && systemctl enable --quiet ledger-lab-firewall"
+  echo "host firewall on"
+fi
 
 kubelet_changed=false
 put "$ROOT/infra/k3d/kubelet-crash-loop-backoff.yaml" "$KUBELET_DROP_IN" && kubelet_changed=true

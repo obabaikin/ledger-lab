@@ -105,7 +105,7 @@ configuration that can buy one should not exist. Terraform (`infra/terraform`) o
 manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS record.
 
 ```bash
-SERVER=<ip> infra/server/bootstrap.sh       # over SSH: key-only login, security updates, k3s, a kubeconfig; safe to run again
+SERVER=<ip> infra/server/bootstrap.sh       # over SSH: key-only login, a host firewall, security updates, k3s, a kubeconfig; safe to run again
 ssh -fNL 16443:127.0.0.1:6443 root@<ip>     # the cluster's API is reached only through this tunnel
 infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with that commit's images
 ```
@@ -120,6 +120,12 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
   14 days before the certificate expires.
 - **Operator access** is SSH with a key only: `kubectl` and `psql` (via `kubectl exec`) through the
   tunnel. Nothing but the page is published.
+- **Hardening:** a host firewall (nftables) under the provider's lets only SSH reach the host itself;
+  `bootstrap.sh` puts it on with a timer that removes it again unless a new SSH login gets through.
+  Security updates install on their own, and a reboot for a new kernel is done by hand between runs:
+  `deploy.sh` says when one is due. The services run as a non-root user without capabilities or a
+  Kubernetes API token; responses carry HSTS, `nosniff`, frame-deny and no-referrer headers.
+  cert-manager's chart and images are pinned by digest.
 
 A live instance runs on that server; invites on request.
 

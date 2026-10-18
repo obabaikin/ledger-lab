@@ -11,3 +11,8 @@ app.kubernetes.io/part-of: ledger-lab
 prometheus.io/scrape: "true"
 prometheus.io/path: /actuator/prometheus
 {{- end }}
+
+{{- define "ledger-lab.restricted" -}}
+allowPrivilegeEscalation: false
+capabilities: {drop: [ALL]}
+{{- end }}

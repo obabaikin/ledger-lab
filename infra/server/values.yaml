@@ -5,6 +5,8 @@ image:
 ingress:
   tls:
     issuer: letsencrypt-prod
+  securityHeaders:
+    enabled: true
   rateLimit:
     enabled: true
 
