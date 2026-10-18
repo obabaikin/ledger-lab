@@ -38,7 +38,7 @@ export function Controls(props: {
   onCrashed: (at: string) => void
 }) {
   const { session, selected } = props
-  const [tps, setTps] = useState(session.tpsOptions.at(-1) ?? 0)
+  const [tps, setTps] = useState(session.defaultTps)
   const [durationSeconds, setDurationSeconds] = useState(session.durationOptions.at(-1) ?? 0)
   const [sending, setSending] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -132,7 +132,6 @@ export function Controls(props: {
         </button>
         <button type="button" className="primary" disabled={!running || selected.stopRequested} onClick={stop}>
           ■ Stop
-          {!running ? <small className="why">while clients are sending</small> : selected.stopRequested && <small className="why">stopping</small>}
         </button>
         {session.chaosAvailable && (
           <button type="button" className="danger" disabled={crashBlocked !== null} onClick={crash}>

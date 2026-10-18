@@ -78,6 +78,7 @@ class EntryTest : IntegrationTest() {
         assertThat(view["runsPerHour"]).isEqualTo(5)
         assertThat(view["runsLastHour"]).isEqualTo(2)
         assertThat(view["tpsOptions"]).isEqualTo(listOf(100, 500, 1000))
+        assertThat(view["defaultTps"]).isEqualTo(1000)
         assertThat(view["durationOptions"]).isEqualTo(listOf(10, 20, 30))
     }
 

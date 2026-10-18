@@ -31,6 +31,7 @@ control:
     max-total-tps: 1000
     queue-timeout: 5m
     tps-options: 100, 500, 1000
+    default-tps: 1000
     duration-options: 10s, 20s, 30s
     setup-timeout: 30s
     running-grace: 60s

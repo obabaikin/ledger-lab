@@ -600,6 +600,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "defaultTps" : {
+            "description" : "Transfers per second chosen when the page opens; one of tpsOptions.",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "durationOptions" : {
             "description" : "Allowed run durations, seconds.",
             "items" : {
@@ -635,7 +640,7 @@
             "type" : "array"
           }
         },
-        "required" : [ "chaosAvailable", "chaosReadyInSeconds", "durationOptions", "inviteValid", "runsLastHour", "runsPerHour", "sessionId", "tpsOptions" ],
+        "required" : [ "chaosAvailable", "chaosReadyInSeconds", "defaultTps", "durationOptions", "inviteValid", "runsLastHour", "runsPerHour", "sessionId", "tpsOptions" ],
         "type" : "object"
       },
       "StartRunRequest" : {

@@ -177,14 +177,21 @@ describe('session page', () => {
     await waitFor(() => expect(within(phases).getByText(/Bank finishing/)).toHaveTextContent('Bank finishing · books final ✓'))
   })
 
-  it('lets Stop act only while the clients are sending, with the reason on it', async () => {
+  it('lets Stop act only while the clients are sending, with nothing added to it that would widen it', async () => {
     control([run({ state: 'DRAINING', startedAt: '2026-10-12T09:01:00Z', live: live() })])
     renderAt(`/s/${SESSION_ID}`)
 
     await waitFor(() => expect(within(screen.getByLabelText('Phases')).getByText(/Bank finishing/)).toHaveClass('now'))
     const stop = screen.getByRole('button', { name: /Stop/ })
     expect(stop).toBeDisabled()
-    expect(stop).toHaveTextContent('while clients are sending')
+    expect(stop).toHaveTextContent(/^■ Stop$/)
+  })
+
+  it('opens with the default transfers per second chosen, not the largest', async () => {
+    control([], { [`GET ${SESSION}`]: { status: 200, body: session({ tpsOptions: [50, 100, 300], defaultTps: 100 }) } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByRole('combobox', { name: 'Transfers per second' })).toHaveValue('100')
   })
 
   it('lets Stop act while the clients are sending', async () => {
