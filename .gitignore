@@ -17,6 +17,8 @@ node_modules/
 
 # Env and secrets
 .env
+*.env
+*.tfplan
 *.tfvars
 *.tfstate
 *.tfstate.*

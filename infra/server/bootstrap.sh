@@ -26,14 +26,21 @@ remote() {
   ssh -o ControlMaster=auto -o ControlPath="$SOCKET_DIR/master" -o ControlPersist=300 "root@$SERVER" "$@"
 }
 
-# Copies a file when its content differs; succeeds only if it copied.
+# Copies a file when its content differs; succeeds only if it copied. Always called as a condition, where set -e is
+# off, so a failed copy exits explicitly.
 put() {
   wanted=$(sha256sum <"$1" | cut -d ' ' -f 1)
-  present=$(remote "sha256sum '$2' 2>/dev/null" | cut -d ' ' -f 1)
+  present=$(remote "sha256sum '$2' 2>/dev/null || true" | cut -d ' ' -f 1) || exit 1
   [ "$wanted" = "$present" ] && return 1
-  remote "mkdir -p '$(dirname "$2")' && cat >'$2.new' && mv '$2.new' '$2'" <"$1"
+  remote "mkdir -p '$(dirname "$2")' && cat >'$2.new' && mv '$2.new' '$2'" <"$1" || exit 1
   echo "updated $2"
 }
+
+# Key-only sshd must not be switched on for an operator who got in some other way.
+if ! ssh -o ControlPath=none -o BatchMode=yes "root@$SERVER" true; then
+  echo "no login by key to root@$SERVER: add the key to /root/.ssh/authorized_keys first" >&2
+  exit 1
+fi
 
 if put "$HERE/sshd-ledger-lab.conf" "$SSHD_DROP_IN"; then
   remote "sshd -t && systemctl reload ssh"
@@ -43,7 +50,6 @@ if [ "$effective" != "kbdinteractiveauthentication no passwordauthentication no 
   echo "sshd still allows more than keys: $effective" >&2
   exit 1
 fi
-ssh -o ControlPath=none -o BatchMode=yes "root@$SERVER" true
 without_key=$(ssh -o ControlPath=none -o BatchMode=yes -o PubkeyAuthentication=no "root@$SERVER" true 2>&1 || true)
 case "$without_key" in
   *"Permission denied (publickey)."*) ;;
@@ -58,7 +64,9 @@ kubelet_changed=false
 put "$ROOT/infra/k3d/kubelet-crash-loop-backoff.yaml" "$KUBELET_DROP_IN" && kubelet_changed=true
 put "$HERE/traefik-config.yaml" "$TRAEFIK_CONFIG" || true
 
-if ! remote "k3s --version 2>/dev/null" | grep -qF "k3s version $K3S_VERSION "; then
+# An interrupted install can leave the binary in place without a running service; the installer is safe to rerun.
+if ! remote "k3s --version 2>/dev/null" | grep -qF "k3s version $K3S_VERSION " \
+  || ! remote "systemctl is-active --quiet k3s"; then
   # The installer checks the k3s binary against the release's sha256sum file; this checks the installer.
   remote "curl -sSfL -o /root/k3s-install.sh '$K3S_INSTALLER_URL' \
     && echo '$K3S_INSTALLER_SHA256  /root/k3s-install.sh' | sha256sum --check --quiet \

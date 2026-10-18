@@ -72,7 +72,7 @@ jobs:
           persist-credentials: false
       - name: Terraform cannot order a server
         run: |
-          if grep -rn 'resource "contabo_instance"' infra/terraform; then
+          if grep -rEn 'resource +"contabo_(instance|object_storage|private_network|image)"' infra/terraform; then
             echo "the server is bought by hand; Terraform only reads it" >&2
             exit 1
           fi

@@ -1,6 +1,7 @@
 #!/bin/sh
 # Deploys a commit's images from GHCR to the server through the SSH tunnel: cert-manager, then the chart.
 # Usage: infra/server/deploy.sh <commit sha> [--force] [helm args]. --force deploys while runs are in progress.
+# The first deploy on a new domain: add --set ingress.tls.issuer=letsencrypt-staging, then deploy again without it.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -30,10 +31,14 @@ fi
 require_domain
 require_cluster
 
-if [ "$force" = false ] && kubectl --namespace "$NAMESPACE" get pod postgres-0 >/dev/null 2>&1 \
-  && [ "$(psql_admin -tAc "SELECT to_regclass('control.runs') IS NOT NULL")" = t ]; then
-  active=$(psql_admin -tAc "SELECT count(*) FROM control.runs WHERE state IN ($ACTIVE_RUN_STATES)")
-  if [ "$active" -gt 0 ]; then
+# Only a first install skips the check; a database that cannot be asked refuses the deploy like a running run.
+if [ "$force" = false ] && helm status ledger-lab --namespace "$NAMESPACE" >/dev/null 2>&1; then
+  if ! has_runs=$(psql_admin -tAc "SELECT to_regclass('control.runs') IS NOT NULL") \
+    || { [ "$has_runs" = t ] && ! active=$(psql_admin -tAc "SELECT count(*) FROM control.runs WHERE state IN ($ACTIVE_RUN_STATES)"); }; then
+    echo "cannot read the runs from Postgres: fix that, or deploy with --force" >&2
+    exit 1
+  fi
+  if [ "$has_runs" = t ] && [ "$active" -gt 0 ]; then
     echo "$active runs in progress: wait for them to finish, or deploy with --force" >&2
     exit 1
   fi
@@ -47,10 +52,11 @@ if [ ! -f "$PASSWORDS" ]; then
     {
       echo "passwords:"
       for role in $roles; do
-        echo "  $role: $(openssl rand -hex 24)"
+        password=$(openssl rand -hex 24) || exit 1
+        echo "  $role: $password"
       done
     } >"$PASSWORDS"
-  )
+  ) || { rm -f "$PASSWORDS"; exit 1; }
   echo "generated $PASSWORDS: keep a copy, the database roles are created with these passwords"
 fi
 
