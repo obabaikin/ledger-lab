@@ -139,10 +139,6 @@ INSERT INTO control.invite_tokens (token, expires_at, quota)
 VALUES ('<random token>', now() + interval '30 days', 5);  -- runs per hour
 ```
 
-On the server, `infra/server/create-invite.sh <days> <runs per hour> <label>` does the same and prints
-the link; the label stays in a local file. `infra/server/invite-report.sh` shows per invite its visits,
-sessions and runs.
-
 At most three runs hold a place at once, together at most 1000 transactions per second, and only once
 the ledger instances hold all partitions; the rest wait in a queue for up to five minutes
 ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)). A run ends with a report:
