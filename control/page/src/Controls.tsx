@@ -7,7 +7,7 @@ import { newRequestId } from './requestId'
 const SECONDS_PER_MINUTE = 60
 export const RUN_NOT_FINISHED = 'Your run is not finished yet'
 export const NO_RANDOM_ID = 'Not started: the browser gave no random id.'
-const CRASH_LABEL = '⚡ Crash the ledger (all 3 instances)'
+const CRASH_LABEL = '⚡ Crash the ledger (all)'
 
 function refusal(e: unknown): string {
   if (!(e instanceof ApiFailure)) return 'Control did not answer. Press Start again: the same run is not started twice.'
