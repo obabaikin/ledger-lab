@@ -25,7 +25,7 @@ const WIRE_COUNT_ZEROS = [0, 0, 0, 0, 0, 0, 0]
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DOT_TRAVEL_MS = 600
 const RATE_CAP = 2000
-const DOTS_PER_THOUSAND = 30
+const DOTS_PER_THOUSAND = 90
 const REJECTED_WIRE = 4
 /** About 1 in 100 transfers is rejected: at the common scale its dot would hardly ever show. */
 const BOOST: Record<number, number> = { [REJECTED_WIRE]: 6 }
