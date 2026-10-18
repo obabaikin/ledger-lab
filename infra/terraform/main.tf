@@ -31,6 +31,18 @@ resource "contabo_firewall" "server" {
         ipv6 = ["::/0"]
       }
     }
+
+    # Contabo appends its default deny as a rule of its own; left out, every plan would remove it.
+    inbound {
+      action     = "drop"
+      status     = "active"
+      dest_ports = []
+
+      src_cidr {
+        ipv4 = []
+        ipv6 = []
+      }
+    }
   }
 }
 
