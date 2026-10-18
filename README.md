@@ -8,7 +8,7 @@ duplicated when consumers crash?*
 
 > Status: work in progress. Ledger, gateway and generator are done; control takes a run from the
 > queue through the bank to a stored verdict and shows it on its page. The whole system runs in a
-> local Kubernetes cluster. The deployment to a server and the load investigation follow.
+> local Kubernetes cluster and on one server. The load investigation follows.
 
 ## What it does
 
@@ -32,7 +32,7 @@ duplicated when consumers crash?*
 ## Stack
 
 Kotlin · Spring Boot 4 · Apache Kafka · PostgreSQL · Flyway · Testcontainers ·
-Micrometer / Prometheus · Helm · k3s; planned: Grafana, Terraform (Contabo)
+Micrometer / Prometheus · Helm · k3s · cert-manager · Terraform (firewall, DNS); planned: Grafana
 
 ## Modules
 
@@ -97,6 +97,32 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
   (`infra/k3d/kubelet-crash-loop-backoff.yaml`), otherwise a second crash in a row waits 10 s, then twice as long.
   A cluster created before needs `down.sh` and `up.sh`.
 
+## Running on a server
+
+One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the pods' memory limits still fit in 8 GB.
+The server is ordered by hand, and Terraform does not manage it: there is one server, and a
+configuration that can buy one should not exist. Terraform (`infra/terraform`) only reads it and
+manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS record.
+
+```bash
+SERVER=<ip> infra/server/bootstrap.sh       # over SSH: key-only login, security updates, k3s, a kubeconfig; safe to run again
+ssh -fNL 16443:127.0.0.1:6443 root@<ip>     # the cluster's API is reached only through this tunnel
+infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with that commit's images
+```
+
+- **Images:** every push to `main` builds the five images in CI and publishes them to GHCR, tagged
+  with the commit. Merging deploys nothing.
+- **Deploying** is by hand, `deploy.sh <sha>`. It refuses while runs are in progress (`--force`
+  overrides), and before Helm when an image is missing. The first deploy generates the database
+  passwords into a local file outside the repository.
+- **HTTPS:** cert-manager gets a Let's Encrypt certificate (HTTP-01 through Traefik); plain HTTP
+  redirects to HTTPS, and Traefik limits requests per client address. Prometheus raises an alert
+  14 days before the certificate expires.
+- **Operator access** is SSH with a key only: `kubectl` and `psql` (via `kubectl exec`) through the
+  tunnel. Nothing but the page is published.
+
+A live instance runs on that server; invites on request.
+
 ## Invites and the run queue
 
 The page is opened with an invite link, `/?ref=<token>`. Invites are created by hand in the
@@ -106,6 +132,10 @@ database; there is no endpoint for them:
 INSERT INTO control.invite_tokens (token, expires_at, quota)
 VALUES ('<random token>', now() + interval '30 days', 5);  -- runs per hour
 ```
+
+On the server, `infra/server/create-invite.sh <days> <runs per hour> <label>` does the same and prints
+the link; the label stays in a local file. `infra/server/invite-report.sh` shows per invite its visits,
+sessions and runs.
 
 At most three runs hold a place at once, together at most 1000 transactions per second, and only once
 the ledger instances hold all partitions; the rest wait in a queue for up to five minutes
@@ -147,6 +177,8 @@ What is deliberately left out, and what production would add:
 - **No schema registry or contract broker.** Contracts are pinned by tests. A reader that meets a
   status or reason it does not know yet keeps what it can apply, and logs and counts the rest. Production would add a schema
   registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
+- **One node, no failover.** The server is a single k3s node; if it goes down, so does the system.
+- **No database backups.** Runs are disposable and deleted after 24 hours; invites are re-issued.
 - **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
   the status. Production would add signed webhooks with retried delivery.
 

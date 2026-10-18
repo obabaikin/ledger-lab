@@ -47,7 +47,8 @@ spec:
           command:
             - sh
             - -c
-            - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic transfers,transfer-results >/dev/null 2>&1; do sleep 2; done
+            # One topic per call: a list is read as a pattern and passes when any one of them exists.
+            - for topic in transfers transfer-results; do until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic "$topic" >/dev/null 2>&1; do sleep 2; done; done
           resources:
             limits: {memory: {{ $root.Values.kafka.toolsMemory }}}
         {{- end }}

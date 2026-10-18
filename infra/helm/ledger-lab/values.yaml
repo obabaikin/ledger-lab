@@ -8,6 +8,7 @@ managementPort: 9000
 chaos: true
 initMemory: 64Mi
 
+# Roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand in Postgres.
 passwords:
   postgres: change-me-postgres
   ledger: change-me-ledger
@@ -31,6 +32,23 @@ postgres:
 prometheus:
   image: prom/prometheus:v3.5.0
   memory: 512Mi
+
+# Off in k3d: the server sets a host, a Let's Encrypt issuer and the rate limit (infra/server/values.yaml).
+ingress:
+  host: ""
+  tls:
+    issuer: ""
+    secretName: control-tls
+  rateLimit:
+    enabled: false
+    average: 20
+    burst: 50
+
+# cert-manager is installed beside the chart by infra/server/deploy.sh; this adds its issuers, scrape and alert.
+certManager:
+  enabled: false
+  metricsTarget: cert-manager.cert-manager.svc:9402
+  expiryAlertDays: 14
 
 services:
   ledger:

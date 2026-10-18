@@ -1,0 +1,17 @@
+crds:
+  enabled: true
+resources:
+  requests: {memory: 128Mi}
+  limits: {memory: 128Mi}
+webhook:
+  resources:
+    requests: {memory: 64Mi}
+    limits: {memory: 64Mi}
+cainjector:
+  resources:
+    requests: {memory: 128Mi}
+    limits: {memory: 128Mi}
+startupapicheck:
+  resources:
+    requests: {memory: 64Mi}
+    limits: {memory: 64Mi}

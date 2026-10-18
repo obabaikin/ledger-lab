@@ -25,38 +25,6 @@ subjects:
     name: prometheus
     namespace: {{ .Release.Namespace }}
 ---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus
-data:
-  prometheus.yml: |
-    # Control reads the pods and the ledger's duplicates from here (ADR 0015): job is the service, instance the pod.
-    global:
-      scrape_interval: 1s
-      scrape_timeout: 800ms
-    scrape_configs:
-      - job_name: pods
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names: [{{ .Release.Namespace }}]
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-            regex: "true"
-            action: keep
-          - source_labels: [__meta_kubernetes_pod_container_init]
-            regex: "true"
-            action: drop
-          - source_labels: [__meta_kubernetes_pod_container_port_name]
-            regex: management
-            action: keep
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-            target_label: __metrics_path__
-          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
-            target_label: job
-          - source_labels: [__meta_kubernetes_pod_name]
-            target_label: instance
 ---
 apiVersion: v1
 kind: Service
@@ -80,6 +48,9 @@ spec:
   template:
     metadata:
       labels: {{- include "ledger-lab.labels" (dict "name" "prometheus") | nindent 8 }}
+      annotations:
+        # Prometheus reads its config only at start; a changed config has to restart the pod.
+        checksum/config: {{ include (print $.Template.BasePath "/prometheus-config.yaml") . | sha256sum }}
     spec:
       serviceAccountName: prometheus
       containers:
