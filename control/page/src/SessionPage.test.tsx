@@ -262,6 +262,7 @@ describe('visitor without an invite', () => {
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Can a bank lose a server')
     expect(screen.getByText(/To start your own run, ask the author for an invite on/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Oleksii Babaikin' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
     expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
     expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', expect.stringContaining('#what-it-does'))
     expect(screen.getByRole('link', { name: 'Design decisions' })).toHaveAttribute('href', expect.stringContaining('/docs/adr'))

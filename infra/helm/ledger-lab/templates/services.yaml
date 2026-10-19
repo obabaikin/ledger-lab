@@ -1,4 +1,7 @@
 {{- $root := . }}
+{{- if ne (empty .Values.runs.tpsOptions) (empty .Values.runs.defaultTps) }}
+{{- fail "runs.tpsOptions and runs.defaultTps are set together: control refuses a default that is not one of the options" }}
+{{- end }}
 {{- range $name, $service := .Values.services }}
 {{- $usesDatabase := ne $name "generator" }}
 {{- $usesKafka := has $name (list "ledger" "gateway" "reporting") }}

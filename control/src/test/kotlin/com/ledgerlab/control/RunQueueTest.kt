@@ -92,8 +92,10 @@ class RunQueueTest : IntegrationTest() {
 
     @Test
     fun `run settings with a rate option above the total are refused`() {
-        assertThatThrownBy { props.runs.copy(tpsOptions = listOf(props.runs.maxTotalTps + 1)) }
+        val aboveTotal = props.runs.maxTotalTps + 1
+        assertThatThrownBy { props.runs.copy(tpsOptions = listOf(aboveTotal), defaultTps = aboveTotal) }
             .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("would never fit")
     }
 
     @Test

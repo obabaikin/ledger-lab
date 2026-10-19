@@ -1,6 +1,7 @@
 package com.ledgerlab.control.api
 
 import io.swagger.v3.oas.annotations.Hidden
+import jakarta.servlet.RequestDispatcher
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.boot.webmvc.autoconfigure.error.ErrorViewResolver
 import org.springframework.http.HttpStatus
@@ -18,18 +19,20 @@ class PageController {
     fun session(): String = "forward:/index.html"
 }
 
-/** A browser that asks for an address the page does not have lands on the start instead of Spring's error page. */
 @Component
 class UnknownPageRedirect : ErrorViewResolver {
 
     override fun resolveErrorView(request: HttpServletRequest, status: HttpStatus, model: Map<String, Any>): ModelAndView? {
-        val path = model[PATH_ATTRIBUTE] as? String ?: return null
-        return if (status == HttpStatus.NOT_FOUND && !path.startsWith(API_PREFIX)) ModelAndView(REDIRECT_TO_START) else null
+        val path = request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI) as? String ?: return null
+        if (status != HttpStatus.NOT_FOUND || path.startsWith(API_PREFIX)) return null
+        val target = SESSION_ADDRESS.find(path)?.value ?: START
+        val query = (request.getAttribute(RequestDispatcher.ERROR_QUERY_STRING) as? String)?.let { "?$it" }.orEmpty()
+        return ModelAndView("redirect:$target$query")
     }
 
     companion object {
-        private const val PATH_ATTRIBUTE = "path"
         private const val API_PREFIX = "/api/"
-        private const val REDIRECT_TO_START = "redirect:/"
+        private const val START = "/"
+        private val SESSION_ADDRESS = Regex("^/s/[0-9a-fA-F-]{36}(?=/)")
     }
 }

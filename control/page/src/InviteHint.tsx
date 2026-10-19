@@ -1,4 +1,4 @@
-const AUTHOR_URL = 'https://www.linkedin.com/in/oleksii-babaikin'
+import { AUTHOR_URL } from './author'
 
 export function InviteHint() {
   return (

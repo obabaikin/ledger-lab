@@ -128,6 +128,8 @@ What is deliberately left out, and what production would add:
   status or reason it does not know yet keeps what it can apply, and logs and counts the rest. Production would add a schema
   registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
 - **One node, no failover.** The server is a single k3s node; if it goes down, so does the system.
+- **No continuous deployment.** One server with runs in progress: a deploy is chosen by hand and
+  waits for runs to end. Production would deploy on merge with rolling updates and several instances.
 - **No database backups.** Runs are disposable and deleted after 24 hours; invites are re-issued.
 - **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
   the status. Production would add signed webhooks with retried delivery.
@@ -135,3 +137,5 @@ What is deliberately left out, and what production would add:
 ## Design notes
 
 Decisions with their trade-offs are recorded in [docs/adr](docs/adr).
+
+Built by Oleksii Babaikin · [LinkedIn](https://www.linkedin.com/in/oleksii-babaikin)
