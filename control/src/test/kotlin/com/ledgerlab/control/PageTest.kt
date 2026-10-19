@@ -49,4 +49,26 @@ class PageTest : IntegrationTest() {
     fun `an address that is neither the page nor the API is not found`() {
         assertThat(http.getForEntity("/nothing-here", String::class.java).statusCode).isEqualTo(HttpStatus.NOT_FOUND)
     }
+
+    @Test
+    fun `a browser that asks for an address the page does not have is sent to the start`() {
+        val noRedirects = http.withRedirects(org.springframework.boot.http.client.HttpRedirects.DONT_FOLLOW)
+        listOf("/s", "/s/", "/nothing-here", "/%D0%B5%D0%BA%D0%BE", "/s/${java.util.UUID.randomUUID()}/more").forEach { path ->
+            val answer = noRedirects.exchange(path, org.springframework.http.HttpMethod.GET, browser(), String::class.java)
+
+            assertThat(answer.statusCode).describedAs(path).isEqualTo(HttpStatus.FOUND)
+            assertThat(answer.headers.location?.path).describedAs(path).isEqualTo("/")
+        }
+    }
+
+    @Test
+    fun `a browser that asks for an unknown API address still gets the API's 404`() {
+        val answer = http.withRedirects(org.springframework.boot.http.client.HttpRedirects.DONT_FOLLOW).exchange("/api/nothing-here", org.springframework.http.HttpMethod.GET, browser(), String::class.java)
+
+        assertThat(answer.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
+    }
+
+    private fun browser() = org.springframework.http.HttpEntity<Void>(
+        org.springframework.http.HttpHeaders().apply { accept = listOf(MediaType.TEXT_HTML) },
+    )
 }

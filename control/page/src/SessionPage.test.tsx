@@ -115,11 +115,12 @@ describe('session page', () => {
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 
-  it('names an unknown session', async () => {
+  it('names an unknown session and says where to ask for an invite', async () => {
     fakeControl({ [`GET ${SESSION}`]: { status: 404, body: { error: 'session not found' } } })
     renderAt(`/s/${SESSION_ID}`)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Unknown session')
+    expect(await screen.findByRole('alert')).toHaveTextContent('This session has ended or the link is wrong')
+    expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
   })
 
   it('does not call the session unknown when only a run of it is not found', async () => {
@@ -129,7 +130,7 @@ describe('session page', () => {
 
     await screen.findByLabelText('Phases')
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(screen.queryByText(/Unknown session/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/This session has ended/)).not.toBeInTheDocument()
   })
 
   it('holds Start back, with the reason on the button, while a run of the session is not finished', async () => {
