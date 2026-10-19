@@ -83,9 +83,19 @@ class PageTest : IntegrationTest() {
 
     @Test
     fun `a browser that asks for an unknown API address still gets the API's 404`() {
-        assertThat(asBrowser("/api/nothing-here").statusCode).isEqualTo(HttpStatus.NOT_FOUND)
+        listOf("/api", "/api/nothing-here").forEach { path ->
+            assertThat(asBrowser(path).statusCode).describedAs(path).isEqualTo(HttpStatus.NOT_FOUND)
+        }
     }
 
-    private fun asBrowser(path: String) = http.withRedirects(HttpRedirects.DONT_FOLLOW)
-        .exchange(path, HttpMethod.GET, HttpEntity<Void>(HttpHeaders().apply { accept = listOf(MediaType.TEXT_HTML) }), String::class.java)
+    @Test
+    fun `an encoded query is passed on as it came`() {
+        val answer = asBrowser("/nothing-here?ref={ref}", "{x}")
+
+        assertThat(answer.statusCode).isEqualTo(HttpStatus.FOUND)
+        assertThat(answer.headers.location?.rawQuery).isEqualTo("ref=%7Bx%7D")
+    }
+
+    private fun asBrowser(path: String, vararg uriVariables: String) = http.withRedirects(HttpRedirects.DONT_FOLLOW)
+        .exchange(path, HttpMethod.GET, HttpEntity<Void>(HttpHeaders().apply { accept = listOf(MediaType.TEXT_HTML) }), String::class.java, *uriVariables)
 }

@@ -42,8 +42,7 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
 - **Deploying** is by hand, `deploy.sh <sha>`. It refuses while runs are in progress (`--force`
   overrides), and before Helm when an image is missing. The first deploy generates the database
   passwords into a local file outside the repository.
-- **Load:** the server offers 50 / 100 / 300 transactions per second, 100 by default, and at most
-  500 for all runs together.
+- **Load:** the server's rates are in `infra/server/values.yaml`.
 - **HTTPS:** cert-manager gets a Let's Encrypt certificate (HTTP-01 through Traefik); plain HTTP
   redirects to HTTPS, and Traefik limits requests per client address. Prometheus raises an alert
   14 days before the certificate expires.
