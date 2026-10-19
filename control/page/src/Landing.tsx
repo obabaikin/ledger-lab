@@ -5,6 +5,8 @@ import { Diagram } from './Diagram'
 import { BuildInfo } from './BuildInfo'
 import { Hero } from './Hero'
 
+const AUTHOR_URL = 'https://www.linkedin.com/in/oleksii-babaikin'
+
 export function Landing() {
   const [params] = useSearchParams()
   const token = params.get('ref')
@@ -33,7 +35,13 @@ export function Landing() {
       <section className="card">
         <div className="controls">
           {inviteRefused && <span role="alert">This invite link is not valid or has expired. </span>}
-          <span className="hint">To start your own run, ask the author for an invite.</span>
+          <span className="hint">
+            To start your own run, ask the author for an invite on{' '}
+            <a href={AUTHOR_URL} target="_blank" rel="noopener">
+              LinkedIn
+            </a>
+            .
+          </span>
         </div>
       </section>
       <section className="card">
