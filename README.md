@@ -6,7 +6,8 @@ Pick a transaction rate, run it for up to half a minute, kill the ledger mid-run
 still balance. Built to answer one question properly: *how do you prove no money was lost or
 duplicated when consumers crash?*
 
-**Live:** [ledger-lab.de](https://ledger-lab.de) opens with an invite link; invites on request.
+**Live:** [ledger-lab.de](https://ledger-lab.de) opens with an invite link; invites on request via
+[LinkedIn](https://www.linkedin.com/in/oleksii-babaikin).
 
 > Status: work in progress. Ledger, gateway and generator are done; control takes a run from the
 > queue through the bank to a stored verdict and shows it on its page. The whole system runs in a
