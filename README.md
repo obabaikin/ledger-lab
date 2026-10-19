@@ -19,8 +19,8 @@ duplicated when consumers crash?*
   stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate.
 - The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
   at-least-once; processing is idempotent, so crashes and rebalances cannot double-post.
-- A **generator** plays the bank's clients: it calls the gateway at 100 / 500 / 1000
-  transactions per second (50 / 100 / 300 on the server) and counts what was acknowledged.
+- A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 300
+  transactions per second and counts what was acknowledged.
 - Transfers can be **rejected** for domain reasons: insufficient funds, blocked account,
   daily limit. Rejections are recorded and reconciled too.
 - Every run gets its own **isolated set of accounts**, so several people can run experiments
@@ -45,9 +45,8 @@ A run ends with a report: `BALANCED`, `BREAKS` or `INCOMPLETE` with the reasons,
 is green ([ADR 0013](docs/adr/0013-orchestrating-a-run-and-the-verdict.md)). It shows the sums of the
 books: debits against credits and the total of all accounts before and after.
 
-At most three runs hold a place at once, together at most 1000 transactions per second (500 on the
-server), and only once the ledger instances hold all partitions; the rest wait in a queue for up to
-five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
+At most three runs hold a place at once, together at most 500 transactions per second, and only
+once the ledger instances hold all partitions; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
 
 ## Stack
 
