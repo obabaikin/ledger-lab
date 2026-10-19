@@ -20,6 +20,7 @@ data class ControlProperties(
         val maxQueued: Int,
         val queueTimeout: Duration,
         val tpsOptions: List<Int>,
+        val defaultTps: Int,
         val durationOptions: List<Duration>,
         val setupTimeout: Duration,
         val runningGrace: Duration,
@@ -30,6 +31,7 @@ data class ControlProperties(
     ) {
         init {
             require(tpsOptions.all { it <= maxTotalTps }) { "a run of ${tpsOptions.max()} TPS would never fit max-total-tps $maxTotalTps" }
+            require(defaultTps in tpsOptions) { "default-tps $defaultTps is not one of tps-options $tpsOptions" }
         }
 
         val durationSecondsOptions: List<Int> get() = durationOptions.map { it.toSeconds().toInt() }

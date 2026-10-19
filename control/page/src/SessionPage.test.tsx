@@ -46,6 +46,16 @@ describe('session page', () => {
     expect(screen.queryByText('Transfers per second')).not.toBeInTheDocument()
   })
 
+  it('shows the runs used this hour on a line of its own under the buttons', async () => {
+    control([])
+    renderAt(`/s/${SESSION_ID}`)
+
+    const start = await screen.findByRole('button', { name: /Start the run/ })
+    const quota = screen.getByText('Runs this hour: 2 of 10')
+    expect(start.closest('form')).not.toContainElement(quota)
+    expect(start.closest('form')!.compareDocumentPosition(quota) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('shows a run as soon as Start is pressed, without a reload', async () => {
     const queued = run({ state: 'QUEUED', position: 1 })
     let started = false
@@ -115,11 +125,12 @@ describe('session page', () => {
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 
-  it('names an unknown session', async () => {
+  it('names an unknown session and says where to ask for an invite', async () => {
     fakeControl({ [`GET ${SESSION}`]: { status: 404, body: { error: 'session not found' } } })
     renderAt(`/s/${SESSION_ID}`)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Unknown session')
+    expect(await screen.findByRole('alert')).toHaveTextContent('This session has ended or the link is wrong')
+    expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
   })
 
   it('does not call the session unknown when only a run of it is not found', async () => {
@@ -129,7 +140,7 @@ describe('session page', () => {
 
     await screen.findByLabelText('Phases')
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(screen.queryByText(/Unknown session/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/This session has ended/)).not.toBeInTheDocument()
   })
 
   it('holds Start back, with the reason on the button, while a run of the session is not finished', async () => {
@@ -177,14 +188,21 @@ describe('session page', () => {
     await waitFor(() => expect(within(phases).getByText(/Bank finishing/)).toHaveTextContent('Bank finishing · books final ✓'))
   })
 
-  it('lets Stop act only while the clients are sending, with the reason on it', async () => {
+  it('lets Stop act only while the clients are sending, with nothing added to it that would widen it', async () => {
     control([run({ state: 'DRAINING', startedAt: '2026-10-12T09:01:00Z', live: live() })])
     renderAt(`/s/${SESSION_ID}`)
 
     await waitFor(() => expect(within(screen.getByLabelText('Phases')).getByText(/Bank finishing/)).toHaveClass('now'))
     const stop = screen.getByRole('button', { name: /Stop/ })
     expect(stop).toBeDisabled()
-    expect(stop).toHaveTextContent('while clients are sending')
+    expect(stop).toHaveTextContent(/^■ Stop$/)
+  })
+
+  it('opens with the default transfers per second chosen, not the largest', async () => {
+    control([], { [`GET ${SESSION}`]: { status: 200, body: session({ tpsOptions: [50, 100, 300], defaultTps: 100 }) } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByRole('combobox', { name: 'Transfers per second' })).toHaveValue('100')
   })
 
   it('lets Stop act while the clients are sending', async () => {
@@ -253,7 +271,9 @@ describe('visitor without an invite', () => {
     renderAt('/')
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Can a bank lose a server')
-    expect(screen.getByText('To start your own run, ask the author for an invite.')).toBeInTheDocument()
+    expect(screen.getByText(/To start your own run, ask the author for an invite on/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Oleksii Babaikin' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
+    expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
     expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', expect.stringContaining('#what-it-does'))
     expect(screen.getByRole('link', { name: 'Design decisions' })).toHaveAttribute('href', expect.stringContaining('/docs/adr'))
     expect(screen.queryByRole('button', { name: /Start the run/ })).not.toBeInTheDocument()

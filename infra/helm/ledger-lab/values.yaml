@@ -20,8 +20,8 @@ kafka:
   image: apache/kafka:4.2.1
   partitions: 6
   storage: 2Gi
-  heap: 512m
-  memory: 768Mi
+  heap: 768m
+  memory: 1268Mi
   toolsMemory: 512Mi
 
 postgres:
@@ -63,7 +63,7 @@ services:
     module: gateway
     port: 8081
     replicas: 1
-    memory: 768Mi
+    memory: 1068Mi
   generator:
     module: generator
     port: 8082
@@ -83,3 +83,6 @@ services:
 runs:
   # Transfers per second of all active runs together; 1000 from measurements in k3d (ADR 0012).
   maxTotalTps: 1000
+  # Empty: control's own options and default (control/src/main/resources/application.yaml).
+  tpsOptions: []
+  defaultTps: null

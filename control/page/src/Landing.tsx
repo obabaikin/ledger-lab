@@ -4,6 +4,7 @@ import { api } from './api/client'
 import { Diagram } from './Diagram'
 import { BuildInfo } from './BuildInfo'
 import { Hero } from './Hero'
+import { InviteHint } from './InviteHint'
 
 export function Landing() {
   const [params] = useSearchParams()
@@ -33,7 +34,7 @@ export function Landing() {
       <section className="card">
         <div className="controls">
           {inviteRefused && <span role="alert">This invite link is not valid or has expired. </span>}
-          <span className="hint">To start your own run, ask the author for an invite.</span>
+          <InviteHint />
         </div>
       </section>
       <section className="card">

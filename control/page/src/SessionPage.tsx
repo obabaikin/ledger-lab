@@ -8,6 +8,7 @@ import { flowRates, stopLedgerWires, type Flow } from './FlowDots'
 import { euros, MS_PER_SECOND, shown } from './format'
 import { BuildInfo } from './BuildInfo'
 import { Hero } from './Hero'
+import { InviteHint } from './InviteHint'
 import { BANK_FINISHING_PHASE, booksFinal, PHASES, phaseOf, phaseName, VERDICT_PHASE } from './phase'
 import { otherRunInProgress, runToShow } from './selectRun'
 import { liveCounters } from './shownCounts'
@@ -166,7 +167,12 @@ export function SessionPage() {
     return (
       <main>
         <Hero />
-        <p role="alert">Unknown session. Open the invite link again to start a new one.</p>
+        <section className="card">
+          <div className="controls">
+            <span role="alert">This session has ended or the link is wrong. Open your invite link again to start a new one. </span>
+            <InviteHint />
+          </div>
+        </section>
       </main>
     )
   }

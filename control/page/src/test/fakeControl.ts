@@ -30,6 +30,7 @@ export const session = (changes: Partial<SessionView> = {}): SessionView => ({
   runsPerHour: 10,
   runsLastHour: 2,
   tpsOptions: [100, 500, 1000],
+  defaultTps: 1000,
   durationOptions: [10, 20, 30],
   chaosAvailable: false,
   chaosReadyInSeconds: 0,

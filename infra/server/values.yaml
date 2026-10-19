@@ -12,3 +12,9 @@ ingress:
 
 certManager:
   enabled: true
+
+# The server keeps up with 100 TPS; at 500 the ledger falls behind by seconds (measured on the server, LL012).
+runs:
+  maxTotalTps: 500
+  tpsOptions: [50, 100, 300]
+  defaultTps: 100

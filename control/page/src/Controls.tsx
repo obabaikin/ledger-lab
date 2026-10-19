@@ -7,7 +7,7 @@ import { newRequestId } from './requestId'
 const SECONDS_PER_MINUTE = 60
 export const RUN_NOT_FINISHED = 'Your run is not finished yet'
 export const NO_RANDOM_ID = 'Not started: the browser gave no random id.'
-const CRASH_LABEL = '⚡ Crash the ledger (all 3 instances)'
+const CRASH_LABEL = '⚡ Crash the ledger (all)'
 
 function refusal(e: unknown): string {
   if (!(e instanceof ApiFailure)) return 'Control did not answer. Press Start again: the same run is not started twice.'
@@ -38,7 +38,7 @@ export function Controls(props: {
   onCrashed: (at: string) => void
 }) {
   const { session, selected } = props
-  const [tps, setTps] = useState(session.tpsOptions.at(-1) ?? 0)
+  const [tps, setTps] = useState(session.defaultTps)
   const [durationSeconds, setDurationSeconds] = useState(session.durationOptions.at(-1) ?? 0)
   const [sending, setSending] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -132,7 +132,6 @@ export function Controls(props: {
         </button>
         <button type="button" className="primary" disabled={!running || selected.stopRequested} onClick={stop}>
           ■ Stop
-          {!running ? <small className="why">while clients are sending</small> : selected.stopRequested && <small className="why">stopping</small>}
         </button>
         {session.chaosAvailable && (
           <button type="button" className="danger" disabled={crashBlocked !== null} onClick={crash}>
@@ -140,10 +139,12 @@ export function Controls(props: {
             {crashBlocked !== null && <small className="why chaosWait">{crashBlocked}</small>}
           </button>
         )}
+      </form>
+      <p className="quota">
         <span className="pill">
           {session.inviteValid ? `Runs this hour: ${session.runsLastHour} of ${session.runsPerHour}` : 'Invite expired; runs can still be read'}
         </span>
-      </form>
+      </p>
       {message && (
         <p role="alert" className="hint">
           {message}
