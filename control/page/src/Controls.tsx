@@ -139,10 +139,12 @@ export function Controls(props: {
             {crashBlocked !== null && <small className="why chaosWait">{crashBlocked}</small>}
           </button>
         )}
+      </form>
+      <p className="quota">
         <span className="pill">
           {session.inviteValid ? `Runs this hour: ${session.runsLastHour} of ${session.runsPerHour}` : 'Invite expired; runs can still be read'}
         </span>
-      </form>
+      </p>
       {message && (
         <p role="alert" className="hint">
           {message}

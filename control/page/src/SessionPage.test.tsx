@@ -46,6 +46,16 @@ describe('session page', () => {
     expect(screen.queryByText('Transfers per second')).not.toBeInTheDocument()
   })
 
+  it('shows the runs used this hour on a line of its own under the buttons', async () => {
+    control([])
+    renderAt(`/s/${SESSION_ID}`)
+
+    const start = await screen.findByRole('button', { name: /Start the run/ })
+    const quota = screen.getByText('Runs this hour: 2 of 10')
+    expect(start.closest('form')).not.toContainElement(quota)
+    expect(start.closest('form')!.compareDocumentPosition(quota) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('shows a run as soon as Start is pressed, without a reload', async () => {
     const queued = run({ state: 'QUEUED', position: 1 })
     let started = false
