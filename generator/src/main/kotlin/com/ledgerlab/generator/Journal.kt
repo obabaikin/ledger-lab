@@ -33,19 +33,38 @@ data class Resend(
     val latencyMs: Long,
 )
 
+/** What the client reconciliation reads of one transfer. */
+interface ReconciledEntry {
+    val seq: Long
+    val transferId: UUID
+    val fromAccount: Int
+    val toAccount: Int
+    val amountCents: Long
+    val outcome: JournalOutcome
+    val gatewayStatus: TransferStatus?
+    val rejectReason: RejectReason?
+}
+
+/** What the client reconciliation reads of a journal: the entries themselves, so a large run is not copied. */
+interface ReconciledJournal {
+    val size: Int
+    fun find(transferId: UUID): ReconciledEntry?
+    fun forEach(action: (ReconciledEntry) -> Unit)
+}
+
 data class JournalEntryView(
-    val seq: Long,
-    val transferId: UUID,
-    val fromAccount: Int,
-    val toAccount: Int,
-    val amountCents: Long,
-    val outcome: JournalOutcome,
-    val gatewayStatus: TransferStatus?,
-    val rejectReason: RejectReason?,
+    override val seq: Long,
+    override val transferId: UUID,
+    override val fromAccount: Int,
+    override val toAccount: Int,
+    override val amountCents: Long,
+    override val outcome: JournalOutcome,
+    override val gatewayStatus: TransferStatus?,
+    override val rejectReason: RejectReason?,
     /** The first attempt of the submission, even when a duplicate ended earlier; null while it waits for its answer. */
     val first: Send?,
     val resends: List<Resend>,
-)
+) : ReconciledEntry
 
 data class JournalPage(val items: List<JournalEntryView>, val next: Long?)
 
@@ -74,18 +93,23 @@ fun interface SendRecorder {
  * same time; API threads read it, so every field a reader sees is published through a volatile write.
  */
 class JournalEntry(
-    val seq: Long,
+    override val seq: Long,
     private val transfer: PlannedTransfer,
     private val runStartNanos: Long,
-) {
-    @Volatile var outcome: JournalOutcome = JournalOutcome.PENDING
+) : ReconciledEntry {
+    @Volatile override var outcome: JournalOutcome = JournalOutcome.PENDING
         private set
-    @Volatile private var gatewayStatus: TransferStatus? = null
-    @Volatile private var rejectReason: RejectReason? = null
+    @Volatile override var gatewayStatus: TransferStatus? = null
+        private set
+    @Volatile override var rejectReason: RejectReason? = null
+        private set
     @Volatile private var first: Send? = null
     @Volatile private var resends: List<Resend> = emptyList()
 
-    val transferId: UUID get() = transfer.transferId
+    override val transferId: UUID get() = transfer.transferId
+    override val fromAccount: Int get() = transfer.fromAccount
+    override val toAccount: Int get() = transfer.toAccount
+    override val amountCents: Long get() = transfer.amountCents
 
     /** Resends are numbered in the order they end, so the list only grows at its end while it is read. */
     @Synchronized
@@ -116,7 +140,7 @@ class JournalEntry(
 }
 
 /** Every transfer of one run, in the order of first send; seq starts at 1 and is the paging cursor. */
-class Journal(private val runStartNanos: Long) {
+class Journal(private val runStartNanos: Long) : ReconciledJournal {
     private val entries = ArrayList<JournalEntry>()
     private val byId = HashMap<UUID, JournalEntry>()
 
@@ -131,8 +155,14 @@ class Journal(private val runStartNanos: Long) {
     @Synchronized
     fun get(transferId: UUID): JournalEntryView? = byId[transferId]?.view()
 
+    override val size: Int
+        @Synchronized get() = entries.size
+
     @Synchronized
-    fun entries(): List<JournalEntryView> = entries.map { it.view() }
+    override fun find(transferId: UUID): ReconciledEntry? = byId[transferId]
+
+    @Synchronized
+    override fun forEach(action: (ReconciledEntry) -> Unit) = entries.forEach(action)
 
     /** [complete]: no entry will be added any more, so reaching the end means there is no next page. */
     @Synchronized

@@ -28,8 +28,14 @@ class ClientReconciliationTest {
         toAccount: Int = entry.toAccount,
     ) = StatementLine(entry.transferId, fromAccount, toAccount, amountCents, status, reason)
 
+    private fun List<JournalEntryView>.asJournal() = object : ReconciledJournal {
+        override val size: Int get() = this@asJournal.size
+        override fun find(transferId: UUID): ReconciledEntry? = this@asJournal.find { it.transferId == transferId }
+        override fun forEach(action: (ReconciledEntry) -> Unit) = this@asJournal.forEach(action)
+    }
+
     private fun reconcile(journal: List<JournalEntryView>, statement: List<StatementLine>): ClientReconciliationReport =
-        ClientReconciliation(runId, journal).apply { statement.forEach(::add) }.report()
+        ClientReconciliation(runId, journal.asJournal()).apply { statement.forEach(::add) }.report()
 
     private fun ReconciliationBreaks.all() =
         listOf(notInJournal, acknowledgedNotInStatement, failedButInStatement, payloadMismatch, statusMismatch)
@@ -47,7 +53,7 @@ class ClientReconciliationTest {
     @Test
     fun `a line added again is refused and counted once`() {
         val posted = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.POSTED, amountCents = 300)
-        val reconciliation = ClientReconciliation(runId, listOf(posted))
+        val reconciliation = ClientReconciliation(runId, listOf(posted).asJournal())
 
         val first = reconciliation.add(line(posted))
         val again = reconciliation.add(line(posted, amountCents = 999))

@@ -32,8 +32,8 @@ data class StartSimulationRequest(
     @field:NotNull val runId: UUID?,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:Min(1) @field:Max(MAX_TPS) val tps: Int,
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    @field:Min(1) @field:Max(MAX_DURATION_SECONDS) val durationSeconds: Int,
+    @field:Schema(description = "At most the generator's configured maximum duration.", requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:Min(1) val durationSeconds: Int,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:Min(MIN_ACCOUNTS) val accountCount: Int,
     @field:Min(0) val blockedAccounts: Int = 0,
@@ -44,7 +44,6 @@ data class StartSimulationRequest(
 
 /** Run limits of the public demo (shared vCPUs, a person waiting on the page); raise only with a recorded reason. */
 private const val MAX_TPS = 1_000L
-private const val MAX_DURATION_SECONDS = 30L
 private const val MAX_WAIT_TIMEOUT_SECONDS = 30L
 /** A transfer needs a sender and a different receiver. */
 private const val MIN_ACCOUNTS = 2L
@@ -84,13 +83,14 @@ class SimulationController(
     private val simulations = ConcurrentHashMap<UUID, Simulation>()
 
     @ApiResponse(responseCode = "201", description = "Started")
-    @ApiResponse(responseCode = "400", description = "Invalid request, or the run alone exceeds the journal cap", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "400", description = "Invalid request, longer than the maximum duration, or the run alone exceeds the journal cap", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "409", description = "Already running, or journals in memory leave no room", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     fun start(@Valid @RequestBody request: StartSimulationRequest): SimulationStatus {
         val runId = request.runId!!
         val duration = Duration.ofSeconds(request.durationSeconds.toLong())
+        require(duration <= props.maxDuration) { "durationSeconds must be at most ${props.maxDuration.toSeconds()}" }
         val capacity = Simulation.journalCapacity(request.tps, duration)
         require(capacity <= props.journal.maxEntries) {
             "tps x durationSeconds = $capacity exceeds the journal cap of ${props.journal.maxEntries}"
@@ -172,7 +172,7 @@ class SimulationController(
     fun reconciliation(@PathVariable runId: UUID): ClientReconciliationReport {
         val simulation = simulationOf(runId)
         if (simulation.state.active) throw RunStillActiveException()
-        val reconciliation = ClientReconciliation(runId, journalOf(simulation).entries())
+        val reconciliation = ClientReconciliation(runId, journalOf(simulation))
         val cursors = HashSet<UUID>()
         var entryCount: Long? = null
         var after: UUID? = null

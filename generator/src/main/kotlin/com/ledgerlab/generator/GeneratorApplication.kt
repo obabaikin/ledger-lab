@@ -26,6 +26,7 @@ data class GeneratorProperties(
     /** Pause before the second attempt; it doubles for each further one, with jitter. */
     val retryBackoff: Duration,
     val maxInFlight: Int,
+    val maxDuration: Duration,
     val retention: Duration,
     val journal: JournalProperties,
     val profile: ProfileProperties,

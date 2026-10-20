@@ -310,8 +310,8 @@
             "type" : "integer"
           },
           "durationSeconds" : {
+            "description" : "At most the generator's configured maximum duration.",
             "format" : "int32",
-            "maximum" : 30,
             "minimum" : 1,
             "type" : "integer"
           },
@@ -434,7 +434,7 @@
                 }
               }
             },
-            "description" : "Invalid request, or the run alone exceeds the journal cap"
+            "description" : "Invalid request, longer than the maximum duration, or the run alone exceeds the journal cap"
           },
           "409" : {
             "content" : {
