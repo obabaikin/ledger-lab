@@ -2,6 +2,7 @@ import type { RunView } from './api/client'
 
 export const PHASES = ['Queued', 'Clients sending', 'Bank finishing', 'Verdict'] as const
 
+export const CLIENTS_SENDING_PHASE = 1
 export const BANK_FINISHING_PHASE = 2
 export const VERDICT_PHASE = PHASES.length - 1
 
@@ -11,7 +12,7 @@ export function phaseOf(run: Pick<RunView, 'state'>): number {
     case 'CREATED':
       return 0
     case 'RUNNING':
-      return 1
+      return CLIENTS_SENDING_PHASE
     case 'DRAINING':
       return BANK_FINISHING_PHASE
     default:

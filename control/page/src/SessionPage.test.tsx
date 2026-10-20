@@ -256,6 +256,27 @@ describe('session page', () => {
     expect(screen.getByTestId('gateway-note')).toHaveClass('busy')
   })
 
+  it('says the clients are stopping once a stop is taken, until the bank finishes', async () => {
+    let stopped = false
+    const current = () => run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', stopRequested: stopped, live: live() })
+    fakeControl({
+      [`GET ${SESSION}`]: { status: 200, body: session() },
+      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: [{ ...current(), live: null }] } }),
+      [`GET ${RUN}`]: () => ({ status: 200, body: current() }),
+      [`POST ${RUN}/stop`]: () => {
+        stopped = true
+        return { status: 202, body: current() }
+      },
+    })
+    renderAt(`/s/${SESSION_ID}`)
+    const phases = await screen.findByLabelText('Phases')
+    await waitFor(() => expect(within(phases).getByText(/Clients sending/)).toHaveTextContent(/^Clients sending$/))
+
+    screen.getByRole('button', { name: /Stop/ }).click()
+
+    await waitFor(() => expect(within(phases).getByText(/Clients sending/)).toHaveTextContent('Clients sending · stopping'))
+  })
+
   it('takes the refusal count of a reconciled run from its report', async () => {
     const reconciled = report({ client: { ...report().client!, refused: 42 } })
     control([run({ state: 'RECONCILED', result: 'BALANCED' })], { [`GET ${RUN}/report`]: { status: 200, body: reconciled } })

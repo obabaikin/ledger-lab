@@ -9,7 +9,7 @@ import { euros, MS_PER_SECOND, shown } from './format'
 import { BuildInfo } from './BuildInfo'
 import { Hero } from './Hero'
 import { InviteHint } from './InviteHint'
-import { BANK_FINISHING_PHASE, booksFinal, PHASES, phaseOf, phaseName, VERDICT_PHASE } from './phase'
+import { BANK_FINISHING_PHASE, booksFinal, CLIENTS_SENDING_PHASE, PHASES, phaseOf, phaseName, VERDICT_PHASE } from './phase'
 import { otherRunInProgress, runToShow } from './selectRun'
 import { liveCounters } from './shownCounts'
 import { useSmoothed } from './smooth'
@@ -36,6 +36,7 @@ function Phases({ run }: { run: RunView | null }) {
           {k < now ? '✓ ' : ''}
           {p}
           {k === 0 && run?.state === 'QUEUED' && run.position !== null ? ` · #${run.position} in line` : ''}
+          {k === CLIENTS_SENDING_PHASE && run?.state === 'RUNNING' && run.stopRequested ? ' · stopping' : ''}
           {k === BANK_FINISHING_PHASE && run !== null && booksFinal(run) ? ' · books final ✓' : ''}
         </span>
       ))}
