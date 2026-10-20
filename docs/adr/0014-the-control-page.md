@@ -25,7 +25,8 @@ a test checks against the running control. Control writes every field, a null on
 field is required and a nullable one says so by its type. Error bodies are declared as JSON with
 their `error` text; `Retry-After` and `Location` are declared where control sets them.
 
-**Each number from its source.** Live, the clients' count is the generator's status, accepted,
+**Each number from its source.** Live, the clients' count is the generator's status (so are the transfers refused as busy at the
+gateway: the clients count them, not the gateway), accepted,
 booked and rejected are the reporting projection (a lower bound until the drain), and the instance
 dots are Prometheus (`up` and the partitions held, a scrape or two behind). The page shows no
 relation between the clients' count and the bank's live, as none holds while the projection trails

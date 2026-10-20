@@ -10,5 +10,5 @@ fun testProperties(
     profile: ProfileProperties = ProfileProperties(0.0, emptyList(), 0.005, 0.005),
 ) = GeneratorProperties(
     url, Duration.ofSeconds(2), Duration.ofSeconds(10), maxAttempts, retryBackoff, 500,
-    Duration.ofHours(1), journal, profile,
+    Duration.ofSeconds(30), Duration.ofHours(1), journal, profile,
 )

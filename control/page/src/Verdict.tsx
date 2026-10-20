@@ -38,7 +38,19 @@ function checks(r: RunReport): Check[] {
       value: client ? `${count(client.acknowledged)} acknowledged · ${count(client.unknown)} unknown, settled` : 'not checked',
       passed: r.clientBalanced,
     },
+    {
+      rule: "bank's events = books",
+      value: projectionValue(r),
+      // The projection may trail the books without a break, so it never shows ✗; the note under the table says why.
+      passed: r.projectionMatchesBooks === true ? true : null,
+    },
   ]
+}
+
+function projectionValue(r: RunReport): string {
+  if (r.projectionMatchesBooks === null || !r.stats) return 'not checked'
+  if (!r.projectionMatchesBooks) return 'behind the books'
+  return `${count(r.stats.totals.posted)} booked · ${count(r.stats.totals.rejected)} rejected`
 }
 
 const PERCENT = 100

@@ -73,6 +73,7 @@ class ServiceContractsTest {
             Triple(generator, HttpMethod.GET, GeneratorApi.SIMULATION_PATH),
             Triple(generator, HttpMethod.POST, GeneratorApi.STOP_PATH),
             Triple(generator, HttpMethod.GET, GeneratorApi.RECONCILIATION_PATH),
+            Triple(generator, HttpMethod.DELETE, GeneratorApi.JOURNAL_PATH),
             Triple(reporting, HttpMethod.GET, ReportingApi.STATS_PATH),
             Triple(reporting, HttpMethod.DELETE, ReportingApi.RUN_PATH),
         )
@@ -111,8 +112,9 @@ class ServiceContractsTest {
             Triple(gateway, HttpMethod.DELETE to GatewayApi.RUN_PATH, listOf("204", "404")),
             Triple(generator, HttpMethod.POST to GeneratorApi.SIMULATIONS_PATH, listOf("201", "400", "409")),
             Triple(generator, HttpMethod.GET to GeneratorApi.SIMULATION_PATH, listOf("200", "404")),
-            Triple(generator, HttpMethod.POST to GeneratorApi.STOP_PATH, listOf("200", "202")),
+            Triple(generator, HttpMethod.POST to GeneratorApi.STOP_PATH, listOf("200", "202", "404")),
             Triple(generator, HttpMethod.GET to GeneratorApi.RECONCILIATION_PATH, listOf("200", "404", "409", "502", "503")),
+            Triple(generator, HttpMethod.DELETE to GeneratorApi.JOURNAL_PATH, listOf("204", "404")),
             Triple(reporting, HttpMethod.GET to ReportingApi.STATS_PATH, listOf("200")),
             Triple(reporting, HttpMethod.DELETE to ReportingApi.RUN_PATH, listOf("204", "404")),
         )
@@ -120,6 +122,13 @@ class ServiceContractsTest {
             val (method, path) = call
             assertThat(spec.operation(method, path).get("responses").propertyNames()).`as`("$method $path").containsAll(codes)
         }
+    }
+
+    @Test
+    fun `the generator names the error of clients still stopping, which control waits for`() {
+        val conflict = generator.operation(HttpMethod.GET, GeneratorApi.RECONCILIATION_PATH).get("responses").get("409")
+
+        assertThat(conflict.get("description").asString()).contains("\"${GeneratorApi.RUN_STILL_ACTIVE}\"")
     }
 
     @Test

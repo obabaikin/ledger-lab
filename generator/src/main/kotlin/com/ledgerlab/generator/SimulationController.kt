@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotNull
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -32,8 +33,8 @@ data class StartSimulationRequest(
     @field:NotNull val runId: UUID?,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:Min(1) @field:Max(MAX_TPS) val tps: Int,
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    @field:Min(1) @field:Max(MAX_DURATION_SECONDS) val durationSeconds: Int,
+    @field:Schema(description = "At most the generator's configured maximum duration.", requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:Min(1) val durationSeconds: Int,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:Min(MIN_ACCOUNTS) val accountCount: Int,
     @field:Min(0) val blockedAccounts: Int = 0,
@@ -44,7 +45,6 @@ data class StartSimulationRequest(
 
 /** Run limits of the public demo (shared vCPUs, a person waiting on the page); raise only with a recorded reason. */
 private const val MAX_TPS = 1_000L
-private const val MAX_DURATION_SECONDS = 30L
 private const val MAX_WAIT_TIMEOUT_SECONDS = 30L
 /** A transfer needs a sender and a different receiver. */
 private const val MIN_ACCOUNTS = 2L
@@ -84,13 +84,14 @@ class SimulationController(
     private val simulations = ConcurrentHashMap<UUID, Simulation>()
 
     @ApiResponse(responseCode = "201", description = "Started")
-    @ApiResponse(responseCode = "400", description = "Invalid request, or the run alone exceeds the journal cap", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "400", description = "Invalid request, longer than the maximum duration, or the run alone exceeds the journal cap", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "409", description = "Already running, or journals in memory leave no room", content = [Content(schema = Schema(implementation = ApiError::class))])
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     fun start(@Valid @RequestBody request: StartSimulationRequest): SimulationStatus {
         val runId = request.runId!!
         val duration = Duration.ofSeconds(request.durationSeconds.toLong())
+        require(duration <= props.maxDuration) { "durationSeconds must be at most ${props.maxDuration.toSeconds()}" }
         val capacity = Simulation.journalCapacity(request.tps, duration)
         require(capacity <= props.journal.maxEntries) {
             "tps x durationSeconds = $capacity exceeds the journal cap of ${props.journal.maxEntries}"
@@ -165,14 +166,14 @@ class SimulationController(
 
     @ApiResponse(responseCode = "200", description = "The report")
     @ApiResponse(responseCode = "404", description = "Unknown run, or its journal released", content = [Content(schema = Schema(implementation = ApiError::class))])
-    @ApiResponse(responseCode = "409", description = "The run is still active, or the period is not closed", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "With error \"${GeneratorErrors.RUN_STILL_ACTIVE}\": the run's clients are still sending or stopping; else the period is not closed", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "502", description = "The gateway's statement is inconsistent or unreadable", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "503", description = "The gateway did not answer", content = [Content(schema = Schema(implementation = ApiError::class))])
     @GetMapping("/{runId}/reconciliation")
     fun reconciliation(@PathVariable runId: UUID): ClientReconciliationReport {
         val simulation = simulationOf(runId)
         if (simulation.state.active) throw RunStillActiveException()
-        val reconciliation = ClientReconciliation(runId, journalOf(simulation).entries())
+        val reconciliation = ClientReconciliation(runId, journalOf(simulation), simulation.status().refused)
         val cursors = HashSet<UUID>()
         var entryCount: Long? = null
         var after: UUID? = null
@@ -193,6 +194,20 @@ class SimulationController(
             throw BadGatewayAnswerException("The statement of run $runId is incomplete: ${report.statement.rows} lines, entryCount $entryCount")
         }
         return report
+    }
+
+    @ApiResponse(responseCode = "204", description = "Released; the status stays")
+    @ApiResponse(responseCode = "404", description = "Unknown run, or its journal already released", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "The run is still active", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @DeleteMapping("/{runId}/journal")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun releaseJournal(@PathVariable runId: UUID) {
+        synchronized(simulations) {
+            val simulation = simulationOf(runId)
+            if (simulation.state.active) throw RunStillActiveException()
+            journalOf(simulation)
+            simulation.releaseJournal()
+        }
     }
 
     private fun simulationOf(runId: UUID): Simulation =

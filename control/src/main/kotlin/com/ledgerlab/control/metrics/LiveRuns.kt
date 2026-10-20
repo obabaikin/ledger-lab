@@ -1,6 +1,7 @@
 package com.ledgerlab.control.metrics
 
 import com.ledgerlab.control.generator.GeneratorClient
+import com.ledgerlab.control.generator.REFUSED_DESCRIPTION
 import com.ledgerlab.control.http.Reply
 import com.ledgerlab.control.reporting.ReportingClient
 import com.ledgerlab.control.reporting.RunStats
@@ -20,6 +21,8 @@ data class ClientCounts(
     val failed: Long,
     val unknown: Long,
     val retries: Long,
+    @field:Schema(description = REFUSED_DESCRIPTION)
+    val refused: Long,
     @field:Schema(description = "Second presses of the same transfer; the gateway answers them without a new transfer.")
     val duplicatesSent: Long,
     @field:Schema(description = "New transfers per second from the clients' start; index 0 is the first second.")
@@ -98,7 +101,7 @@ class LiveRuns(
 
     private fun clients(runId: UUID): ClientCounts? =
         (generator.status(runId) as? Reply.Answered)?.body?.let {
-            ClientCounts(it.requested, it.acknowledged, it.failed, it.unknown, it.retries, it.duplicatesSent, it.requestedPerSecond)
+            ClientCounts(it.requested, it.acknowledged, it.failed, it.unknown, it.retries, it.refused, it.duplicatesSent, it.requestedPerSecond)
         }
 
     private fun pods(): List<PodView>? {

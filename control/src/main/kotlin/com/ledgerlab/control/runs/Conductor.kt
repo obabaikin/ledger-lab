@@ -3,6 +3,7 @@ package com.ledgerlab.control.runs
 import com.ledgerlab.control.ControlProperties
 import com.ledgerlab.control.chaos.ChaosRepository
 import com.ledgerlab.control.gateway.GatewayClient
+import com.ledgerlab.control.generator.GeneratorApi
 import com.ledgerlab.control.generator.GeneratorClient
 import com.ledgerlab.control.generator.SimulationStatus
 import com.ledgerlab.control.generator.StartSimulationRequest
@@ -76,8 +77,12 @@ class Conductor(
         val status = generator.status(run.runId)
         // A start that reached the generator before a restart of control must not be sent again: it would replay the run.
         if (status is Reply.Answered) return started(run)
-        val timedOut = now >= checkNotNull(run.admittedAt) + props.runs.setupTimeout
+        // From the first attempt, not from the admission: a long tick of other runs must not use up this run's time.
+        val setupStartedAt = run.setupStartedAt ?: runs.markSetupStarted(run.runId)
+        val timedOut = now >= setupStartedAt + props.runs.setupTimeout
         if (timedOut) {
+            // A start whose answer was lost may have reached the generator: its clients would send for a period nobody closes.
+            if (run.startSent) stopClients(run)
             val earlier = setupReplies[run.runId] ?: "ledger not asked since control started"
             return failed(run, RunOutcomes.SETUP_TIMED_OUT, "generator status: ${status.summary()}; $earlier")
         }
@@ -106,6 +111,12 @@ class Conductor(
             start is Reply.NotConnected || (start is Reply.Refused && !start.isTransient) -> runs.markStartSent(run.runId, sent = false)
             else -> Unit
         }
+    }
+
+    private fun stopClients(run: Run) {
+        val reply = generator.stop(run.runId)
+        val stopped = reply is Reply.Answered || (reply is Reply.Refused && reply.status == HttpStatus.NOT_FOUND.value())
+        if (!stopped) log.warn("Run {}: clients not stopped after the failed setup ({})", run.runId, reply.summary())
     }
 
     private fun started(run: Run) {
@@ -164,7 +175,7 @@ class Conductor(
         val stalled = now >= progressAt + props.runs.drainStallTimeout
         if (!drained && !overcounted(bank, ledgerReport) && !stalled && !pastDeadline) return
 
-        val stats = (reporting.stats(run.runId) as? Reply.Answered)?.body
+        val stats = (reporting.finalStats(run.runId) as? Reply.Answered)?.body
         val catchingUp = drained && !pastDeadline && now < progressAt + props.reporting.catchUpWait
         if (catchingUp && (stats == null || !projectionMatchesBooks(stats, bank, ledgerReport))) return
 
@@ -172,12 +183,14 @@ class Conductor(
         reconciled(run, bank, ledgerReport, client, stats)
     }
 
-    /** Null while the client's reconciliation may still come: the generator answered 503 or not at all. */
+    /** Null while the client's reconciliation may still come: the generator answered 503, not at all, or is still stopping. */
     private fun clientSide(run: Run, pastDeadline: Boolean): ClientSide? {
         if (run.clientLost) return ClientSide.Missing(RunOutcomes.CLIENT_LOST)
         val reply = generator.reconciliation(run.runId)
         return when {
             reply is Reply.Answered -> ClientSide.Reconciled(checkNotNull(reply.body))
+            // The clients of a run stopped past its grace may still be stopping when the bank has drained.
+            reply is Reply.Refused && reply.status == HttpStatus.CONFLICT.value() && reply.error == GeneratorApi.RUN_STILL_ACTIVE && !pastDeadline -> null
             reply is Reply.Refused && (reply.status in CLIENT_RECONCILIATION_FINAL || !reply.isTransient) ->
                 ClientSide.Missing(RunOutcomes.clientReconciliationFailed(reply.error))
             pastDeadline -> ClientSide.Missing(RunOutcomes.CLIENT_RECONCILIATION_UNAVAILABLE)
@@ -197,7 +210,15 @@ class Conductor(
         val report = verdictOf(bank, ledgerReport, client, measurements)
         if (runs.markReconciled(run.runId, report) == 1) {
             log.info("Run {}: reconciled, {} {}", run.runId, report.result, report.reasons)
+            releaseJournal(run)
         }
+    }
+
+    /** The report holds what the verdict read, so the journal is not needed any more; the generator's retention frees it otherwise. */
+    private fun releaseJournal(run: Run) {
+        val reply = generator.releaseJournal(run.runId)
+        val released = reply is Reply.Answered || (reply is Reply.Refused && reply.status == HttpStatus.NOT_FOUND.value())
+        if (!released) log.warn("Run {}: journal not released ({}), the generator's retention frees it", run.runId, reply.summary())
     }
 
     /** From the admission: a crash while the run is set up also hits it. */

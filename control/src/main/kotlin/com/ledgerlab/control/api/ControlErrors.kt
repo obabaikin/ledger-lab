@@ -19,6 +19,7 @@ object ControlErrors {
     const val NO_RUNNING_RUN = "no running run"
     const val CHAOS_USED_RECENTLY = "chaos used recently"
     const val LEDGER_DID_NOT_ANSWER = "ledger did not answer"
+    const val BUSY = "busy"
 
     fun tpsNotAllowed(options: List<Int>) = "tps must be one of $options"
     fun durationNotAllowed(options: List<Int>) = "durationSeconds must be one of $options"

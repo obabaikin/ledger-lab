@@ -117,6 +117,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "refused" : {
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "requested" : {
             "format" : "int64",
             "type" : "integer"
@@ -232,6 +237,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "refused" : {
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "rejected" : {
             "format" : "int64",
             "type" : "integer"
@@ -305,8 +315,8 @@
             "type" : "integer"
           },
           "durationSeconds" : {
+            "description" : "At most the generator's configured maximum duration.",
             "format" : "int32",
-            "maximum" : 30,
             "minimum" : 1,
             "type" : "integer"
           },
@@ -429,7 +439,7 @@
                 }
               }
             },
-            "description" : "Invalid request, or the run alone exceeds the journal cap"
+            "description" : "Invalid request, longer than the maximum duration, or the run alone exceeds the journal cap"
           },
           "409" : {
             "content" : {
@@ -482,6 +492,46 @@
         "tags" : [ "simulation-controller" ]
       }
     },
+    "/internal/simulations/{runId}/journal" : {
+      "delete" : {
+        "operationId" : "releaseJournal",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "Released; the status stays"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown run, or its journal already released"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The run is still active"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    },
     "/internal/simulations/{runId}/reconciliation" : {
       "get" : {
         "operationId" : "reconciliation",
@@ -523,7 +573,7 @@
                 }
               }
             },
-            "description" : "The run is still active, or the period is not closed"
+            "description" : "With error \"run still active\": the run's clients are still sending or stopping; else the period is not closed"
           },
           "502" : {
             "content" : {

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { LiveView, RunView } from './api/client'
 import { NO_RANDOM_ID, RUN_NOT_FINISHED } from './Controls'
 import { RUNS_LISTED } from './SessionPage'
-import { fakeControl, run, RUN_ID, session, SESSION_ID, type Answer } from './test/fakeControl'
+import { fakeControl, report, run, RUN_ID, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
 
 const SESSION = `/api/sessions/${SESSION_ID}`
@@ -18,7 +18,7 @@ const live = (changes: Partial<LiveView> = {}): LiveView => ({
     totals: { accepted: 1000, posted: 990, rejected: 5, postedAmountCents: 99_000, commandsSeen: 1000, inFlight: 5, rejectedByReason: {} },
     series: [],
   },
-  clients: { requested: 1100, acknowledged: 990, failed: 0, unknown: 0, retries: 0, duplicatesSent: 0, requestedPerSecond: [] },
+  clients: { requested: 1100, acknowledged: 990, failed: 0, unknown: 0, retries: 0, refused: 0, duplicatesSent: 0, requestedPerSecond: [] },
   pods: null,
   ledgerDuplicatesAtLeast: 0,
   readAt: '2026-10-12T09:01:05Z',
@@ -108,6 +108,23 @@ describe('session page', () => {
     await waitFor(() => expect(tries).toBe(2))
     const [first, second] = calls.filter((c) => c.method === 'POST').map((c) => (c.body as { requestId: string }).requestId)
     expect(second).toBe(first)
+  })
+
+  it('says control is busy when a start is refused as busy, and a new press sends again', async () => {
+    let tries = 0
+    control([], {
+      [`POST ${RUNS}`]: () => {
+        tries += 1
+        return tries === 1 ? { status: 503, body: { error: 'busy' }, headers: { 'Retry-After': '1' } } : { status: 202, body: run() }
+      },
+    })
+    renderAt(`/s/${SESSION_ID}`)
+
+    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Control is busy with other starts. Press Start again in a moment.')
+    screen.getByRole('button', { name: /Start the run/ }).click()
+
+    await waitFor(() => expect(tries).toBe(2))
   })
 
   it('says the browser gave no random id when it cannot make one, and sends nothing', async () => {
@@ -218,6 +235,62 @@ describe('session page', () => {
 
     await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
     expect(screen.getByTestId('clients-number')).toHaveTextContent('— sent')
+  })
+
+  it('counts the busy refusals at the gateway as the run goes, quiet while there are none', async () => {
+    const clients = live().clients!
+    let refused = 0
+    const running = () => run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: { ...clients, refused } }) })
+    fakeControl({
+      [`GET ${SESSION}`]: { status: 200, body: session() },
+      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: [{ ...running(), live: null }] } }),
+      [`GET ${RUN}`]: () => ({ status: 200, body: running() }),
+    })
+    renderAt(`/s/${SESSION_ID}`)
+
+    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('0 refused (503)'))
+    expect(screen.getByTestId('gateway-note')).not.toHaveClass('busy')
+
+    refused = 1_250
+    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('1,250 refused (503)'), { timeout: 3000 })
+    expect(screen.getByTestId('gateway-note')).toHaveClass('busy')
+  })
+
+  it('says the clients are stopping once a stop is taken, until the bank finishes', async () => {
+    let stopped = false
+    const current = () => run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', stopRequested: stopped, live: live() })
+    fakeControl({
+      [`GET ${SESSION}`]: { status: 200, body: session() },
+      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: [{ ...current(), live: null }] } }),
+      [`GET ${RUN}`]: () => ({ status: 200, body: current() }),
+      [`POST ${RUN}/stop`]: () => {
+        stopped = true
+        return { status: 202, body: current() }
+      },
+    })
+    renderAt(`/s/${SESSION_ID}`)
+    const phases = await screen.findByLabelText('Phases')
+    await waitFor(() => expect(within(phases).getByText(/Clients sending/)).toHaveTextContent(/^Clients sending$/))
+
+    screen.getByRole('button', { name: /Stop/ }).click()
+
+    await waitFor(() => expect(within(phases).getByText(/Clients sending/)).toHaveTextContent('Clients sending · stopping'))
+  })
+
+  it('takes the refusal count of a reconciled run from its report', async () => {
+    const reconciled = report({ client: { ...report().client!, refused: 42 } })
+    control([run({ state: 'RECONCILED', result: 'BALANCED' })], { [`GET ${RUN}/report`]: { status: 200, body: reconciled } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('42 refused (503)'))
+  })
+
+  it('shows no refusal count while the generator has not answered', async () => {
+    control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: null }) })])
+    renderAt(`/s/${SESSION_ID}`)
+
+    await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
+    expect(screen.getByTestId('gateway-note')).toHaveTextContent('')
   })
 
   it('keeps the last numbers and says so when control stops answering', async () => {

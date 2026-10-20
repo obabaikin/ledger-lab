@@ -15,6 +15,8 @@ data class SubmitTransferRequest(
     val amountCents: Long,
 )
 
+data class ApiError(val error: String?)
+
 data class TransferResponse(
     val transferId: UUID,
     val runId: UUID,

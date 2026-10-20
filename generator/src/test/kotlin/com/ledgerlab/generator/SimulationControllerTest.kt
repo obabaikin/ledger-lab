@@ -77,6 +77,57 @@ class SimulationControllerTest {
         }
     }
 
+    @Test
+    fun `a journal released on request is gone at once and frees the cap, the status stays`() {
+        FakeGateway().use { gateway ->
+            val controller = controller(gateway, JournalProperties(Duration.ofMinutes(10), maxEntries = 100))
+            val runId = controller.finished(tps = 80)
+            assertThatThrownBy { controller.start(request(tps = 80, seconds = 1)) }
+                .isInstanceOf(JournalCapacityException::class.java)
+
+            controller.releaseJournal(runId)
+
+            assertThat(controller.status(runId).requested).isGreaterThan(0)
+            assertThatThrownBy { controller.transfers(runId, null, null, null, 0, 100) }
+                .isInstanceOf(NotFoundException::class.java)
+            assertThat(controller.start(request(tps = 80, seconds = 1)).state).isEqualTo(SimulationState.RUNNING)
+        }
+    }
+
+    @Test
+    fun `over HTTP a release answers 204, again 404, and 409 while the run is active`() {
+        FakeGateway().use { gateway ->
+            val controller = controller(gateway)
+            val finished = controller.finished()
+            val active = controller.start(request(tps = 10, seconds = 10)).runId
+            val mvc = MockMvcBuilders.standaloneSetup(controller).build()
+            fun release(runId: UUID) = mvc.perform(MockMvcRequestBuilders.delete("/internal/simulations/$runId/journal"))
+
+            release(finished).andExpect(MockMvcResultMatchers.status().isNoContent)
+            release(finished).andExpect(MockMvcResultMatchers.status().isNotFound)
+            release(UUID.randomUUID()).andExpect(MockMvcResultMatchers.status().isNotFound)
+            release(active).andExpect(MockMvcResultMatchers.status().isConflict)
+            assertThat(controller.transfers(active, null, null, null, 0, 100).next).`as`("the journal is still there").isNotNull()
+
+            controller.stop(active)
+        }
+    }
+
+    @Test
+    fun `an interrupted statement read is the gateway unavailable, and the interrupt is kept`() {
+        FakeGateway().use { gateway ->
+            val controller = controller(gateway)
+            val runId = controller.finished()
+
+            Thread.currentThread().interrupt()
+            try {
+                assertThatThrownBy { controller.reconciliation(runId) }.isInstanceOf(GatewayUnavailableException::class.java)
+            } finally {
+                assertThat(Thread.interrupted()).isTrue()
+            }
+        }
+    }
+
     private fun SimulationController.finished(tps: Int = 30): UUID {
         val run = start(request(tps = tps, seconds = 1))
         await().atMost(Duration.ofSeconds(15)).until { status(run.runId).state == SimulationState.FINISHED }
@@ -95,6 +146,18 @@ class SimulationControllerTest {
             assertThat(report.statementFinal).isTrue()
             assertThat(report.journal.requested).isGreaterThan(7)
             assertThat(report.statement.rows).isEqualTo(report.journal.acknowledged).isEqualTo(report.journal.requested)
+        }
+    }
+
+    @Test
+    fun `the reconciliation reports the transfers refused as busy, as the status counts them`() {
+        FakeGateway(busyAttempts = 1).use { gateway ->
+            val controller = controller(gateway)
+            val runId = controller.finished()
+
+            val refused = controller.reconciliation(runId).journal.refused
+
+            assertThat(refused).isEqualTo(controller.status(runId).requested).isEqualTo(controller.status(runId).refused)
         }
     }
 

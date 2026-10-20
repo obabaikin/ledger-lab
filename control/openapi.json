@@ -81,6 +81,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "refused" : {
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "requested" : {
             "format" : "int64",
             "type" : "integer"
@@ -102,7 +107,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "acknowledged", "duplicatesSent", "failed", "requested", "requestedPerSecond", "retries", "unknown" ],
+        "required" : [ "acknowledged", "duplicatesSent", "failed", "refused", "requested", "requestedPerSecond", "retries", "unknown" ],
         "type" : "object"
       },
       "CreateSessionRequest" : {
@@ -153,6 +158,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "refused" : {
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "requested" : {
             "format" : "int64",
             "type" : "integer"
@@ -162,7 +172,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "acknowledged", "acknowledgedAmountCents", "failed", "requested", "unknown" ],
+        "required" : [ "acknowledged", "acknowledgedAmountCents", "failed", "refused", "requested", "unknown" ],
         "type" : "object"
       },
       "LedgerCounts" : {
@@ -1086,6 +1096,25 @@
             "headers" : {
               "Retry-After" : {
                 "description" : "Seconds until the quota allows a run; absent when the queue is full",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
+          },
+          "503" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Too many starts at once; nothing was started, start again after Retry-After",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
                 "schema" : {
                   "type" : "integer"
                 },

@@ -16,7 +16,8 @@ duplicated when consumers crash?*
 ## What it does
 
 - A **gateway** accepts transfers over a client-facing API with a client-supplied idempotency key,
-  stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate.
+  stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate. When too
+  many are in progress, it refuses one with `503 busy` before writing anything, and the client retries later.
 - The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
   at-least-once; processing is idempotent, so crashes and rebalances cannot double-post.
 - A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 300
@@ -44,6 +45,25 @@ are projected from the bank's own events ([ADR 0015](docs/adr/0015-live-numbers-
 A run ends with a report: `BALANCED`, `BREAKS` or `INCOMPLETE` with the reasons, and only `BALANCED`
 is green ([ADR 0013](docs/adr/0013-orchestrating-a-run-and-the-verdict.md)). It shows the sums of the
 books: debits against credits and the total of all accounts before and after.
+
+### One hour on the server
+
+A trial run on the server: 300 transfers per second for one hour, on 6 vCPU with the bank capped at
+8 GB RAM and the load generator beside it. All three ledger instances were crashed twice. Of 1,080,000
+transfers sent, the gateway accepted 1,079,295 and the ledger booked 1,068,504 and rejected 10,791 by
+its rules. The verdict is `BALANCED`: none lost or doubled, debits equal credits, and the total of all
+accounts did not change.
+
+- 2,895 transfers met a `503 busy` from the gateway at least once; 703 met it three times, and the
+  client gave up on them as failed. The gateway refuses before it writes anything, and the statement
+  confirms none of them was booked.
+- The gateway-to-ledger p99 of 25.9 s is the crashes: transfers waited in Kafka while the ledger was
+  down. The median is 0.12 s.
+- Runs on the page last up to 30 s; this hour ran with limits raised for the trial.
+
+![The run page after the hour: the way through the bank, transfers per second and the time from the gateway to the ledger](docs/images/soak-1h-run.png)
+
+![The verdict of the hour: every accounting invariant checked after the run](docs/images/soak-1h-verdict.png)
 
 At most three runs hold a place at once, together at most 500 transactions per second, and only
 once the ledger instances hold all partitions; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
@@ -101,11 +121,13 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 
 - **Kubernetes:** one Helm chart (`infra/helm/ledger-lab`) runs in k3d on a laptop, on one node the
   size of the server, and on the server's single-node k3s. The ledger runs three instances; a crashed
-  pod restarts within a second. Every pod has a memory limit, and together they fit in 8 GB.
+  pod restarts within a second. Every pod has a memory limit; the bank fits in 8 GB together with k3s and
+  the OS, and the load generator runs beside it.
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
 - **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR;
-  `deploy.sh <sha>` deploys a commit by hand and refuses while runs are in progress.
+  `deploy.sh <sha>` deploys a commit by hand and refuses while runs are in progress. Each service stops
+  before its new version starts, and the gateway warms up before it takes traffic.
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
   a host firewall under the provider's, SSH with a key only, services without root or capabilities.
   Only the page is published.

@@ -31,5 +31,7 @@ class RunsPropertiesTest {
         drainTimeout = Duration.ofMinutes(3),
         accounts = ControlProperties.Accounts(count = 100, openingBalanceCents = 1_000_000, blocked = 2, dailyLimitCents = 5_000_000),
         maxTotalTps = 500,
+        maxConcurrentStarts = 4,
+        startWait = Duration.ofMillis(200),
     )
 }

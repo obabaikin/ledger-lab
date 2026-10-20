@@ -4,7 +4,7 @@ Status: accepted · Date: 2026-10-12
 
 ## Context
 
-Control is the only service reachable from the internet, and the cluster is a single 8 GB node.
+Control is the only service reachable from the internet, and the cluster is a single node with the bank in 8 GB.
 Anyone holding a link must be able to start a run, yet nobody may start enough runs to take the
 bank down. The author also wants to know which invite links were opened, without tracking people.
 
@@ -31,7 +31,9 @@ the same session returns the same run and costs no quota; a different body is 42
 
 **The queue.** A start answers 202 at once with the run `QUEUED` and its place. At most
 `max-queued` runs wait; one more is refused with 429 and no `Retry-After`, because no honest value
-exists. At most `max-active` runs hold a place, and together they run at most `max-total-tps`
+exists. A start holds a database connection while it waits for the queue's lock, so at most
+`max-concurrent-starts` wait at once; one more is answered 503 with error `busy` and `Retry-After` after
+`start-wait`, and nothing is started. At most `max-active` runs hold a place, and together they run at most `max-total-tps`
 transactions per second (1000: one 1000 TPS run took up to 5 cores in our measurements, and three at
 once ran the gateway and the generator out of memory). A scheduler hands free places to the oldest
 queued runs in order, while their rates fit; a run that does not fit holds back the ones behind it, so

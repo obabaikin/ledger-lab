@@ -54,7 +54,8 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
 | 400, 404 | not accepted: invalid request, unknown or missing API version | fixes the request; a retry gets the same answer |
 | 422 | not accepted: the `transferId` was already used with another payload | has a bug; a key is never reused |
 | 409 | not accepted: the run's period is closed (ADR 0009) | stops; the statement settles what is still unknown |
-| 5xx | unknown: it may already be committed | retries with the same `transferId` and payload |
+| 503 with error `busy` | not accepted: too many transfers in progress, refused before anything is written | retries with the same `transferId` after `Retry-After`; gives up as failed, or as unknown if an earlier attempt may have arrived |
+| any other 5xx | unknown: it may already be committed | retries with the same `transferId` and payload |
 | no answer (timeout, connection lost after sending) | unknown | same as 5xx |
 | connection not established | not received | retries |
 
@@ -74,6 +75,12 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
   a metric and the log for operators. 5xx still means "unknown" in the contract: the gateway
   itself cannot tell whether a commit whose acknowledgement was lost went through, and a proxy
   or a crashed process can produce one after the commit.
+- The one exception is the gateway's own refusal under load: at most
+  `gateway.admission.max-concurrent` submissions insert at once; one more waits
+  up to `gateway.admission.wait` and is then answered 503 with error `busy`, before it touches
+  the database. The error, not the code, marks it, because a proxy can answer 503 too. Without
+  the bound, virtual threads accept any number of requests, and a slow database fills the heap
+  with requests waiting for a connection (seen at 300 TPS on the server).
 
 ## Consequences
 

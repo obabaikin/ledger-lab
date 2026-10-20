@@ -152,6 +152,44 @@ class SimulationTest {
     }
 
     @Test
+    fun `a 503 busy on every attempt is a failure, not unknown, and the transfer is counted as refused once`() {
+        FakeGateway(busyAttempts = 2).use { gateway ->
+            val simulation = simulation(client(gateway.url, maxAttempts = 2), tps = 20, seconds = 1)
+
+            simulation.start()
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            val status = simulation.status()
+            assertThat(status.failed).isEqualTo(status.requested)
+            assertThat(status.unknown).isZero()
+            assertThat(status.refused).isEqualTo(status.requested)
+            status.assertSettledCounts()
+            simulation.assertJournalMatchesStatus()
+        }
+    }
+
+    @Test
+    fun `after a 503 busy the retry waits for Retry-After and is taken`() {
+        FakeGateway(busyAttempts = 1, busyRetryAfterSeconds = 1).use { gateway ->
+            val simulation = simulation(client(gateway.url), tps = 20, seconds = 1)
+
+            simulation.start()
+            await().atMost(Duration.ofSeconds(15)).until { simulation.state == SimulationState.FINISHED }
+
+            val status = simulation.status()
+            assertThat(status.acknowledged).isEqualTo(status.requested)
+            assertThat(status.refused).isEqualTo(status.requested)
+            assertThat(status.retries).isEqualTo(status.requested)
+            assertThat(simulation.entries()).allSatisfy { entry ->
+                val retry = entry.resends.single { it.kind == ResendKind.RETRY }
+                assertThat(retry.offsetMs - entry.first!!.offsetMs).isGreaterThanOrEqualTo(1_000)
+            }
+            status.assertSettledCounts()
+            simulation.assertJournalMatchesStatus()
+        }
+    }
+
+    @Test
     fun `a 4xx is a failure and is not retried`() {
         FakeGateway(refuseWith = 422).use { gateway ->
             val simulation = simulation(client(gateway.url), tps = 20, seconds = 1)

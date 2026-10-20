@@ -15,6 +15,7 @@ generator:
   max-attempts: 3
   retry-backoff: 1s
   max-in-flight: 2000
+  max-duration: 30s
   retention: 1h
   retention-sweep-interval: 1m
   journal:

@@ -1,6 +1,9 @@
 package com.ledgerlab.control.generator
 
+import io.swagger.v3.oas.annotations.media.Schema
 import java.util.UUID
+
+const val REFUSED_DESCRIPTION = "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once."
 
 /** Control's model of the generator's internal API, checked against generator/openapi.json. */
 object GeneratorApi {
@@ -8,6 +11,8 @@ object GeneratorApi {
     const val SIMULATION_PATH = "/internal/simulations/{runId}"
     const val STOP_PATH = "/internal/simulations/{runId}/stop"
     const val RECONCILIATION_PATH = "/internal/simulations/{runId}/reconciliation"
+    const val JOURNAL_PATH = "/internal/simulations/{runId}/journal"
+    const val RUN_STILL_ACTIVE = "run still active"
 }
 
 data class StartSimulationRequest(
@@ -33,6 +38,7 @@ data class SimulationStatus(
     val failed: Long,
     val unknown: Long,
     val retries: Long,
+    val refused: Long = 0,
     val duplicatesSent: Long,
     val waitedLatencyP50Ms: Double?,
     val waitedLatencyP99Ms: Double?,
@@ -57,6 +63,9 @@ data class JournalTotals(
     val failed: Long,
     val unknown: Long,
     val acknowledgedAmountCents: Long,
+    /** Reports stored before the count existed have none. */
+    @field:Schema(description = REFUSED_DESCRIPTION)
+    val refused: Long = 0,
 )
 
 data class ClientReconciliationReport(

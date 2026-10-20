@@ -27,6 +27,9 @@ spec:
   serviceName: {{ $name }}
   # Instances start and stop together; each one's partitions wait for it under its name (static membership).
   podManagementPolicy: Parallel
+  {{- else }}
+  # The old pod goes before the new one starts: two at once would not fit in the bank's 8 GB.
+  strategy: {type: Recreate}
   {{- end }}
   replicas: {{ $service.replicas }}
   selector:
@@ -112,6 +115,9 @@ spec:
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_NAME, value: "ledger-{{ $i }}"}
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_URL, value: "http://ledger-{{ $i }}.ledger:{{ $root.Values.managementPort }}"}
             {{- end }}
+            {{- end }}
+            {{- range $key, $value := $service.env }}
+            - {name: {{ $key }}, value: {{ $value | quote }}}
             {{- end }}
           ports:
             - {name: http, containerPort: {{ $service.port }}}

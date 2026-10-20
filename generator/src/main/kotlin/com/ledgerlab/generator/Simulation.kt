@@ -59,6 +59,8 @@ data class SimulationStatus(
     /** Sent, but no answer settled it: the gateway may have the transfer. */
     val unknown: Long,
     val retries: Long,
+    @field:Schema(description = REFUSED_DESCRIPTION)
+    val refused: Long,
     /** Second sends of the same transfer, as a user pressing twice; not new transfers. */
     val duplicatesSent: Long,
     val inFlight: Long,
@@ -106,6 +108,7 @@ class Simulation(
     private val failed = LongAdder()
     private val unknown = LongAdder()
     private val retries = LongAdder()
+    private val refused = LongAdder()
     private val duplicatesSent = LongAdder()
     private val open = AtomicLong()
     /** How long a user waited for a final answer to one press, retries and their pauses included. */
@@ -251,12 +254,18 @@ class Simulation(
                 recordSubmissionLatency(main, wait, SendKind.FIRST)
             }
         } catch (e: Exception) {
+            countRefused(answers)
             settle(entry, combine(inOrder(answers) + CUT_SHORT))
             if (e is CancellationException) throw e
             log.warn("Submission in simulation {} ended with an error", runId, e)
             return
         }
+        countRefused(answers)
         settle(entry, combine(inOrder(answers)))
+    }
+
+    private fun countRefused(answers: Collection<Answer>) {
+        if (answers.any { it.result.refusals > 0 }) refused.increment()
     }
 
     private fun inOrder(answers: Collection<Answer>): List<SubmissionResult> =
@@ -340,7 +349,7 @@ class Simulation(
         return SimulationStatus(
             runId, state, targetTps, duration.toSeconds().toInt(), startedAt, finishedAt,
             sent, acknowledged.sum(), posted.sum(), rejected.sum(),
-            rejectedByReason.mapValues { it.value.sum() }, failed.sum(), unknown.sum(), retries.sum(),
+            rejectedByReason.mapValues { it.value.sum() }, failed.sum(), unknown.sum(), retries.sum(), refused.sum(),
             duplicatesSent.sum(), open.get(), sent / seconds,
             waitedLatencyMs(waited, P50), waitedLatencyMs(waited, P99),
             List(secondsSoFar(end)) { requestedPerSecond.get(it) },

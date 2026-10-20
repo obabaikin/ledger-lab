@@ -97,9 +97,9 @@ class ConductorTest : IntegrationTest() {
         assertThat(column(runId, "started_at")).isNotNull()
         val accounts = objectMapper.readTree(ledger.callsTo("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId)).single().body)
         assertThat(accounts.get("accountCount").asInt()).isEqualTo(100)
-        assertThat(accounts.get("openingBalanceCents").asLong()).isEqualTo(1_000_000)
+        assertThat(accounts.get("openingBalanceCents").asLong()).isEqualTo(100_000_000)
         assertThat(accounts.get("blockedAccounts").asInt()).isEqualTo(2)
-        assertThat(accounts.get("dailyLimitCents").asLong()).isEqualTo(5_000_000)
+        assertThat(accounts.get("dailyLimitCents").asLong()).isEqualTo(20_000_000)
         val simulation = objectMapper.readTree(generator.callsTo("POST", GeneratorApi.SIMULATIONS_PATH).single().body)
         assertThat(simulation.propertyNames()).containsExactlyInAnyOrder("runId", "tps", "durationSeconds", "accountCount", "blockedAccounts")
         assertThat(simulation.get("accountCount").asInt()).isEqualTo(100)
@@ -171,12 +171,56 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("CREATED")
 
-        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("FAILED")
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
         val line = output.out.lines().single { "setup timed out" in it && runId.toString() in it }
         assertThat(line).contains("generator status: 404", "ledger accounts: answered 201", "generator start: 503 gateway unavailable")
+    }
+
+    @Test
+    fun `a run first tried long after it left the queue gets its whole setup time`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 201, simulation(runId, "RUNNING"))
+        backdate(runId, "admitted_at", props.runs.setupTimeout.plusSeconds(60))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RUNNING")
+    }
+
+    @Test
+    fun `a setup that times out after a start that may have arrived stops the clients`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 503)
+        conductor.tick()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 503)
+
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
+        conductor.tick()
+
+        assertThat(column(runId, "failure")).isEqualTo("setup timed out")
+        assertThat(generator.callsTo("POST", GeneratorApi.STOP_PATH.forRun(runId))).hasSize(1)
+    }
+
+    @Test
+    fun `a setup that times out with no start sent stops nothing`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 409, mapOf("error" to "journals in memory hold 300000"))
+        conductor.tick()
+
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
+        conductor.tick()
+
+        assertThat(column(runId, "failure")).isEqualTo("setup timed out")
+        assertThat(generator.callsTo("POST", GeneratorApi.STOP_PATH.forRun(runId))).isEmpty()
     }
 
     @Test
@@ -217,7 +261,7 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("CREATED")
 
-        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
         conductor.tick()
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
     }
@@ -233,7 +277,10 @@ class ConductorTest : IntegrationTest() {
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(fresh), 404)
         ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(fresh), 201, emptyList<Any>())
         generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 201, simulation(fresh, "RUNNING"))
-        backdate(fresh, "admitted_at", props.runs.setupTimeout.minusMillis(300))
+        jdbc.sql("UPDATE runs SET setup_started_at = clock_timestamp() - CAST(:millis AS bigint) * interval '1 millisecond' WHERE run_id = :id")
+            .param("millis", props.runs.setupTimeout.minusMillis(300).toMillis())
+            .param("id", fresh)
+            .update()
 
         conductor.tick()
 
@@ -459,11 +506,77 @@ class ConductorTest : IntegrationTest() {
     fun `a client reconciliation that cannot succeed ends incomplete with the generator's words`() {
         val runId = draining()
         bank(runId)
-        clientReconciles(runId, 409, mapOf("error" to "run still active"))
+        clientReconciles(runId, 404, mapOf("error" to "journal released"))
+
+        conductor.tick()
+
+        assertThat(reportOf(runId)["reasons"]).isEqualTo(listOf("client reconciliation failed: journal released"))
+    }
+
+    @Test
+    fun `clients still stopping when the bank has drained are asked again on the next tick`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, 409, mapOf("error" to GeneratorApi.RUN_STILL_ACTIVE))
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        clientReconciles(runId)
+        conductor.tick()
+        assertThat(column(runId, "result")).isEqualTo("BALANCED")
+    }
+
+    @Test
+    fun `clients still stopping at the drain deadline end incomplete with the generator's words`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, 409, mapOf("error" to GeneratorApi.RUN_STILL_ACTIVE))
+        backdate(runId, "drain_started_at", props.runs.drainTimeout)
 
         conductor.tick()
 
         assertThat(reportOf(runId)["reasons"]).isEqualTo(listOf("client reconciliation failed: run still active"))
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension::class)
+    fun `a reconciled run's journal is released once, and a generator that cannot release it is only logged`(output: CapturedOutput) {
+        val released = draining()
+        val failing = draining()
+        listOf(released, failing).forEach { bank(it); clientReconciles(it) }
+        generator.answer("DELETE", GeneratorApi.JOURNAL_PATH.forRun(failing), 500)
+
+        conductor.tick()
+        conductor.tick()
+
+        listOf(released, failing).forEach { runId ->
+            assertThat(stateOf(runId)).isEqualTo("RECONCILED")
+            assertThat(generator.callsTo("DELETE", GeneratorApi.JOURNAL_PATH.forRun(runId))).hasSize(1)
+        }
+        assertThat(output.out).contains("Run $failing: journal not released").doesNotContain("Run $released: journal not released")
+    }
+
+    @Test
+    fun `a report stored before the refusal count existed is still read, with none refused`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId)
+        conductor.tick()
+        jdbc.sql("UPDATE runs SET report = report #- '{client,refused}' WHERE run_id = :id").param("id", runId).update()
+
+        assertThat((reportOf(runId)["client"] as Map<*, *>)["refused"]).isEqualTo(0)
+    }
+
+    @Test
+    fun `the report carries the transfers the gateway refused as busy, from the client reconciliation`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, body = clientReport(runId, refused = 7))
+
+        conductor.tick()
+
+        assertThat((reportOf(runId)["client"] as Map<*, *>)["refused"]).isEqualTo(7)
     }
 
     @Test

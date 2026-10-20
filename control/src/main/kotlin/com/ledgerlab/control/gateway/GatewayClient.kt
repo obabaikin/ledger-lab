@@ -11,8 +11,10 @@ import java.util.UUID
 @Component
 class GatewayClient(props: ControlProperties, objectMapper: ObjectMapper) {
     private val http = ServiceHttp(props.gateway.baseUrl, props.services.requestTimeout, objectMapper)
+    private val summaryTimeout = props.gateway.summaryTimeout
 
-    fun summary(runId: UUID): Reply<RunSummary?> = http.call("GET", GatewayApi.SUMMARY_PATH.forRun(runId), RunSummary::class.java)
+    fun summary(runId: UUID): Reply<RunSummary?> =
+        http.call("GET", GatewayApi.SUMMARY_PATH.forRun(runId), RunSummary::class.java, timeout = summaryTimeout)
 
     fun close(runId: UUID): Reply<ClosedPeriod?> = http.call("POST", GatewayApi.CLOSE_PATH.forRun(runId), ClosedPeriod::class.java)
 

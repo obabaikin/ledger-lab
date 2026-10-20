@@ -28,8 +28,14 @@ class ClientReconciliationTest {
         toAccount: Int = entry.toAccount,
     ) = StatementLine(entry.transferId, fromAccount, toAccount, amountCents, status, reason)
 
+    private fun List<JournalEntryView>.asJournal() = object : ReconciledJournal {
+        override val size: Int get() = this@asJournal.size
+        override fun find(transferId: UUID): ReconciledEntry? = this@asJournal.find { it.transferId == transferId }
+        override fun forEach(action: (ReconciledEntry) -> Unit) = this@asJournal.forEach(action)
+    }
+
     private fun reconcile(journal: List<JournalEntryView>, statement: List<StatementLine>): ClientReconciliationReport =
-        ClientReconciliation(runId, journal).apply { statement.forEach(::add) }.report()
+        ClientReconciliation(runId, journal.asJournal(), refused = 0).apply { statement.forEach(::add) }.report()
 
     private fun ReconciliationBreaks.all() =
         listOf(notInJournal, acknowledgedNotInStatement, failedButInStatement, payloadMismatch, statusMismatch)
@@ -40,14 +46,14 @@ class ClientReconciliationTest {
 
         assertThat(report.balanced).isTrue()
         assertThat(report.statementFinal).isTrue()
-        assertThat(report.journal).isEqualTo(JournalTotals(0, 0, 0, 0, 0))
+        assertThat(report.journal).isEqualTo(JournalTotals(0, 0, 0, 0, 0, 0))
         assertThat(report.statement).isEqualTo(StatementTotals(0, 0, emptyMap()))
     }
 
     @Test
     fun `a line added again is refused and counted once`() {
         val posted = entry(JournalOutcome.ACKNOWLEDGED, TransferStatus.POSTED, amountCents = 300)
-        val reconciliation = ClientReconciliation(runId, listOf(posted))
+        val reconciliation = ClientReconciliation(runId, listOf(posted).asJournal(), refused = 0)
 
         val first = reconciliation.add(line(posted))
         val again = reconciliation.add(line(posted, amountCents = 999))
@@ -72,7 +78,7 @@ class ClientReconciliationTest {
 
         assertThat(report.balanced).isTrue()
         assertThat(report.breaks.all()).allSatisfy { assertThat(it.count).isZero() }
-        assertThat(report.journal).isEqualTo(JournalTotals(3, 3, 0, 0, 500))
+        assertThat(report.journal).isEqualTo(JournalTotals(3, 3, 0, 0, 500, 0))
         assertThat(report.statement).isEqualTo(
             StatementTotals(3, 500, mapOf(TransferStatus.POSTED to 2L, TransferStatus.REJECTED to 1L)),
         )

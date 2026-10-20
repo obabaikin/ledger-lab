@@ -1,5 +1,6 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.ApiError
 import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.Statement
 import com.ledgerlab.generator.bank.StatementLine
@@ -38,6 +39,8 @@ object GatewayApi {
     const val AFTER_PARAM = "after"
     const val LIMIT_PARAM = "limit"
     const val STATEMENT_MAX_PAGE = 1_000
+    /** The error of a 503 the gateway gives before it takes the transfer; any other 5xx leaves it unknown. */
+    const val BUSY_ERROR = "busy"
 
     const val STATEMENT_PATH = "/v1/runs/{runId}/statement"
     private const val RUN_ID_VARIABLE = "{runId}"
@@ -67,6 +70,8 @@ data class SubmissionResult(
     val attempts: Int,
     val outcome: SubmissionOutcome,
     val latency: Duration,
+    /** Attempts the gateway refused as busy: it did not take the transfer. */
+    val refusals: Int = 0,
 )
 
 /** Retries reuse the transfer id, the idempotency key, so a retry after a timeout cannot create a second transfer. */
@@ -101,6 +106,9 @@ class GatewayClient(
             http.send(request, HttpResponse.BodyHandlers.ofString())
         } catch (e: IOException) {
             throw GatewayUnavailableException("No answer from the gateway to the statement of run $runId", e)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw GatewayUnavailableException("Interrupted while reading the statement of run $runId", e)
         }
         val code = HttpStatusCode.valueOf(response.statusCode())
         return when {
@@ -145,6 +153,7 @@ class GatewayClient(
         val started = System.nanoTime()
         var attempt = 0
         var mayHaveArrived = false
+        var refusals = 0
         while (true) {
             attempt++
             val sendStarted = System.nanoTime()
@@ -177,18 +186,21 @@ class GatewayClient(
                     attempts = attempt,
                     outcome = if (code.is2xxSuccessful) SubmissionOutcome.ACKNOWLEDGED else SubmissionOutcome.FAILED,
                     latency = elapsed,
+                    refusals = refusals,
                 )
             }
-            if (response != null) mayHaveArrived = true
+            val busy = response != null && code == HttpStatus.SERVICE_UNAVAILABLE && isBusy(response.body())
+            if (busy) refusals++ else if (response != null) mayHaveArrived = true
             val givenUp = SubmissionResult(
                 null, null, attempt,
                 if (mayHaveArrived) SubmissionOutcome.UNKNOWN else SubmissionOutcome.FAILED,
                 elapsed,
+                refusals,
             )
             // Checked before the backoff so a stop does not wait for it, and after it because the
             // stop may come while this request is sleeping.
             if (attempt >= props.maxAttempts || !canRetry()) return givenUp
-            delay(backoff(attempt))
+            delay(maxOf(backoff(attempt), if (busy) retryAfterMillis(response) else 0))
             if (!canRetry()) return givenUp
         }
     }
@@ -203,6 +215,13 @@ class GatewayClient(
         }
         return response
     }
+
+    private fun isBusy(body: String): Boolean =
+        runCatching { objectMapper.readValue(body, ApiError::class.java).error == GatewayApi.BUSY_ERROR }.getOrDefault(false)
+
+    private fun retryAfterMillis(response: HttpResponse<String>?): Long =
+        response?.headers()?.firstValue(HttpHeaders.RETRY_AFTER)?.orElse(null)?.toLongOrNull()
+            ?.let { Duration.ofSeconds(it).toMillis() } ?: 0
 
     private fun JsonNode.hasValue(field: String): Boolean = get(field)?.isNull == false
 

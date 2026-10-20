@@ -48,6 +48,7 @@ a.node:hover rect.box { stroke: var(--flow); }
 .node .sub { font-size: 11px; fill: var(--muted); }
 .node .num { font-size: 14px; fill: var(--ink); font-variant-numeric: tabular-nums; }
 .node .repeats { font-size: 11px; fill: var(--warn); }
+.node .sub.busy { fill: var(--warn); }
 .wire { stroke: var(--line); stroke-width: 2; fill: none; }
 .wire.back { stroke-dasharray: 4 4; }
 .label { font-size: 10px; fill: var(--muted); }

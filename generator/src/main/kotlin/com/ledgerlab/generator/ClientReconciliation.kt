@@ -3,6 +3,8 @@ package com.ledgerlab.generator
 import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.StatementLine
 import com.ledgerlab.generator.bank.TransferStatus
+import io.swagger.v3.oas.annotations.media.Schema
+import java.util.BitSet
 import java.util.EnumMap
 import java.util.UUID
 
@@ -19,12 +21,16 @@ data class ReconciliationBreaks(
 
 data class UnknownResolved(val accepted: TransferIds, val notAccepted: TransferIds)
 
+const val REFUSED_DESCRIPTION = "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once."
+
 data class JournalTotals(
     val requested: Long,
     val acknowledged: Long,
     val failed: Long,
     val unknown: Long,
     val acknowledgedAmountCents: Long,
+    @field:Schema(description = REFUSED_DESCRIPTION)
+    val refused: Long,
 )
 
 /** [byStatus] leaves out lines whose status this client cannot read; [rows] counts them. */
@@ -54,14 +60,15 @@ private class IdCollector {
     fun result() = TransferIds(count, ids.toList())
 }
 
-private val JournalOutcome.settledByStatement: Boolean get() = this == JournalOutcome.UNKNOWN || this == JournalOutcome.PENDING
-
 private fun knownReasonsDiffer(client: RejectReason?, bank: RejectReason?): Boolean = client != null && bank != null && client != bank
 
-/** Statement lines are fed page by page: only the ids seen so far are held, not the statement. */
-class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryView>) {
-    private val entries = journal.associateBy { it.transferId }
-    private val inStatement = HashSet<UUID>()
+/**
+ * Statement lines are fed page by page and the journal is read in place, so neither is copied: a line
+ * found in the journal is marked by the entry's seq, only the ids of lines not in it are held.
+ */
+class ClientReconciliation(private val runId: UUID, private val journal: ReconciledJournal, private val refused: Long) {
+    private val inStatement = BitSet()
+    private val notInJournalSeen = HashSet<UUID>()
     private val notInJournal = IdCollector()
     private val failedButInStatement = IdCollector()
     private val payloadMismatch = IdCollector()
@@ -73,15 +80,17 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
     private var unreadableStatus = false
 
     fun add(line: StatementLine): Boolean {
-        if (!inStatement.add(line.transferId)) return false
+        val entry = journal.find(line.transferId)
+        val firstTime = if (entry == null) notInJournalSeen.add(line.transferId) else !inStatement.get(entry.seq.toInt())
+        if (!firstTime) return false
         rows++
         amountCents += line.amountCents
         if (line.status == null) unreadableStatus = true else byStatus.merge(line.status, 1L, Long::plus)
-        val entry = entries[line.transferId]
         if (entry == null) {
             notInJournal.add(line.transferId)
             return true
         }
+        inStatement.set(entry.seq.toInt())
         if (entry.amountCents != line.amountCents || entry.fromAccount != line.fromAccount || entry.toAccount != line.toAccount) {
             payloadMismatch.add(line.transferId)
         }
@@ -100,19 +109,29 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
     fun report(): ClientReconciliationReport {
         val acknowledgedNotInStatement = IdCollector()
         val unknownNotAccepted = IdCollector()
-        for (entry in entries.values) {
-            if (entry.transferId in inStatement) continue
+        var acknowledged = 0L
+        var acknowledgedAmountCents = 0L
+        var failed = 0L
+        var unknown = 0L
+        journal.forEach { entry ->
+            val found = inStatement.get(entry.seq.toInt())
             when (entry.outcome) {
-                JournalOutcome.ACKNOWLEDGED -> acknowledgedNotInStatement.add(entry.transferId)
-                JournalOutcome.UNKNOWN, JournalOutcome.PENDING -> unknownNotAccepted.add(entry.transferId)
-                JournalOutcome.FAILED -> {}
+                JournalOutcome.ACKNOWLEDGED -> {
+                    acknowledged++
+                    acknowledgedAmountCents += entry.amountCents
+                    if (!found) acknowledgedNotInStatement.add(entry.transferId)
+                }
+                JournalOutcome.UNKNOWN, JournalOutcome.PENDING -> {
+                    unknown++
+                    if (!found) unknownNotAccepted.add(entry.transferId)
+                }
+                JournalOutcome.FAILED -> failed++
             }
         }
         val breaks = ReconciliationBreaks(
             notInJournal.result(), acknowledgedNotInStatement.result(), failedButInStatement.result(),
             payloadMismatch.result(), statusMismatch.result(),
         )
-        val acknowledged = entries.values.filter { it.outcome == JournalOutcome.ACKNOWLEDGED }
         return ClientReconciliationReport(
             runId = runId,
             balanced = listOf(
@@ -121,11 +140,12 @@ class ClientReconciliation(private val runId: UUID, journal: List<JournalEntryVi
             ).all { it.count == 0L },
             statementFinal = !unreadableStatus && byStatus.keys.all { it.isFinal },
             journal = JournalTotals(
-                requested = entries.size.toLong(),
-                acknowledged = acknowledged.size.toLong(),
-                failed = entries.values.count { it.outcome == JournalOutcome.FAILED }.toLong(),
-                unknown = entries.values.count { it.outcome.settledByStatement }.toLong(),
-                acknowledgedAmountCents = acknowledged.sumOf { it.amountCents },
+                requested = journal.size.toLong(),
+                acknowledged = acknowledged,
+                failed = failed,
+                unknown = unknown,
+                acknowledgedAmountCents = acknowledgedAmountCents,
+                refused = refused,
             ),
             statement = StatementTotals(rows, amountCents, byStatus.toMap()),
             breaks = breaks,

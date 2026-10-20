@@ -75,7 +75,7 @@ does not retry pages itself.
 - Matching counts alone is not enough: one lost and one extra transfer would cancel out. The line
   count only proves the statement was read in full; the matching is by id.
 - A duplicate send uses the same transfer id, so it is one journal entry and one statement line.
-- The journal stays in memory for `generator.journal.retention` after the run, which bounds how
-  late the reconciliation can be called.
+- Control releases the journal once the verdict is written; otherwise it stays in memory for
+  `generator.journal.retention` after the run, which bounds how late the reconciliation can be called.
 - One client and one bank. With several banks, the client would record which bank got each
   transfer and match each bank's statement separately.

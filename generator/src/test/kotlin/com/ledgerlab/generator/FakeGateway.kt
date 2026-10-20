@@ -30,6 +30,9 @@ import java.util.concurrent.atomic.AtomicInteger
 class FakeGateway(
     private val failFirstAttempt: Boolean = false,
     private val refuseWith: Int? = null,
+    /** The first attempts of every transfer are refused as busy, as an overloaded gateway does. */
+    private val busyAttempts: Int = 0,
+    private val busyRetryAfterSeconds: Int = 0,
     private val responseDelay: Duration = Duration.ZERO,
     private val rejectReason: RejectReason? = null,
     private val repeatDelay: Duration = Duration.ZERO,
@@ -65,6 +68,10 @@ class FakeGateway(
             Thread.sleep(if (attempt > FIRST_ATTEMPT) repeatDelay else responseDelay)
             fun answer(status: TransferStatus, reason: RejectReason? = null) = bankAnswer(request, status, reason)
             val (code, response) = when {
+                attempt <= busyAttempts -> {
+                    exchange.responseHeaders.add(HttpHeaders.RETRY_AFTER, busyRetryAfterSeconds.toString())
+                    HttpStatus.SERVICE_UNAVAILABLE.value() to """{"error":"${GatewayApi.BUSY_ERROR}"}"""
+                }
                 failFirstAttempt && attempt == FIRST_ATTEMPT -> HttpStatus.SERVICE_UNAVAILABLE.value() to """{"error":"unavailable"}"""
                 refuseWith != null -> refuseWith to """{"error":"refused"}"""
                 rawAnswer != null -> HttpStatus.OK.value() to rawAnswer(request)
