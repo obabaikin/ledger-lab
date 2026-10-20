@@ -162,4 +162,4 @@ class TransferController(
     fun periodClosed() = ApiError(GatewayErrors.PERIOD_CLOSED)
 }
 
-private fun Transfer.toResponse() = TransferResponse(transferId, runId, status, rejectReason, acceptedAt, resultedAt)
+internal fun Transfer.toResponse() = TransferResponse(transferId, runId, status, rejectReason, acceptedAt, resultedAt)

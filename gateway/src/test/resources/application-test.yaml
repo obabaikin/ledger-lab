@@ -10,6 +10,8 @@ gateway:
   max-wait: 5s
   retry-after: 1s
   close-lock-timeout: 1s
+  warm-up:
+    rounds: 20
 logging:
   level:
     org.apache.kafka: WARN

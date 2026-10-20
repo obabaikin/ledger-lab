@@ -27,6 +27,9 @@ spec:
   serviceName: {{ $name }}
   # Instances start and stop together; each one's partitions wait for it under its name (static membership).
   podManagementPolicy: Parallel
+  {{- else }}
+  # The old pod goes before the new one starts: two at once would not fit in the bank's 8 GB.
+  strategy: {type: Recreate}
   {{- end }}
   replicas: {{ $service.replicas }}
   selector:

@@ -45,6 +45,10 @@ gateway:
     # About three times what 300 TPS keeps in flight (0.1 s each); measured against the server in a trial.
     max-concurrent: 100
     wait: 200ms
+  warm-up:
+    # After a deploy a cold gateway answered 300 TPS with a wave of 503 busy (measured on the server); a warm one did not.
+    rounds: 2000
+    duration: 5s
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every controller-local error handler is added to every operation.
