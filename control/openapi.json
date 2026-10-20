@@ -1102,6 +1102,25 @@
                 "style" : "simple"
               }
             }
+          },
+          "503" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Too many starts at once; nothing was started, start again after Retry-After",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "summary" : "Start a run: it joins the queue",

@@ -8,6 +8,7 @@ const SECONDS_PER_MINUTE = 60
 export const RUN_NOT_FINISHED = 'Your run is not finished yet'
 export const NO_RANDOM_ID = 'Not started: the browser gave no random id.'
 const CRASH_LABEL = '⚡ Crash the ledger (all)'
+const BUSY_ERROR = 'busy'
 
 function refusal(e: unknown): string {
   if (!(e instanceof ApiFailure)) return 'Control did not answer. Press Start again: the same run is not started twice.'
@@ -15,6 +16,7 @@ function refusal(e: unknown): string {
     return `The invite's runs for this hour are used up. Next run possible in ${Math.ceil(e.retryAfterSeconds / SECONDS_PER_MINUTE)} min.`
   }
   if (e.status === 429) return 'The queue is full. Try again in a few minutes.'
+  if (e.status === 503 && e.error === BUSY_ERROR) return 'Control is busy with other starts. Press Start again in a moment.'
   if (e.status === 409) return `${RUN_NOT_FINISHED}.`
   if (e.status === 403) return 'The invite has expired. Runs of this session can still be read.'
   return `Not started: ${e.error}.`

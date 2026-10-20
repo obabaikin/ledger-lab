@@ -29,6 +29,9 @@ control:
     max-queued: 10
     # From measurements in k3d (ADR 0012).
     max-total-tps: 1000
+    # A start holds a connection of the pool of 10 while it waits for the queue's lock; the rest stay for reads and the tick.
+    max-concurrent-starts: 4
+    start-wait: 200ms
     queue-timeout: 5m
     tps-options: 100, 500, 1000
     default-tps: 1000

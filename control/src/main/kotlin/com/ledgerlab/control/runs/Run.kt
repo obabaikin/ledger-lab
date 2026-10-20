@@ -60,6 +60,8 @@ class QuotaExceededException(val retryAfterSeconds: Long?) : RuntimeException()
 
 class QueueFullException : RuntimeException()
 
+class StartsBusyException : RuntimeException()
+
 class RunNotStartedException : RuntimeException()
 
 class ReportNotReadyException : RuntimeException()

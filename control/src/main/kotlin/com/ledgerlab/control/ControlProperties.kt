@@ -28,6 +28,9 @@ data class ControlProperties(
         val drainTimeout: Duration,
         val accounts: Accounts,
         val maxTotalTps: Int,
+        /** At most this many starts wait for the queue's lock at once; one more waits up to [startWait], then is refused. */
+        val maxConcurrentStarts: Int,
+        val startWait: Duration,
     ) {
         init {
             require(tpsOptions.all { it <= maxTotalTps }) { "a run of ${tpsOptions.max()} TPS would never fit max-total-tps $maxTotalTps" }

@@ -9,6 +9,7 @@ import com.ledgerlab.control.runs.RunRequest
 import com.ledgerlab.control.runs.RunResult
 import com.ledgerlab.control.runs.RunService
 import com.ledgerlab.control.runs.RunState
+import com.ledgerlab.control.runs.StartAdmission
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.headers.Header
 import io.swagger.v3.oas.annotations.media.Content
@@ -71,7 +72,12 @@ data class RunList(val items: List<RunView>)
 
 @RestController
 @RequestMapping(RunController.RUNS_PATH)
-class RunController(private val runs: RunService, private val liveRuns: LiveRuns, private val conductor: Conductor) {
+class RunController(
+    private val runs: RunService,
+    private val starts: StartAdmission,
+    private val liveRuns: LiveRuns,
+    private val conductor: Conductor,
+) {
 
     @Operation(summary = "Start a run: it joins the queue")
     @ApiResponse(responseCode = "200", description = "A repeat of a run that is final", headers = [Header(name = HttpHeaders.LOCATION, description = RUN_LOCATION, schema = Schema(type = "string"))])
@@ -86,9 +92,14 @@ class RunController(private val runs: RunService, private val liveRuns: LiveRuns
         headers = [Header(name = HttpHeaders.RETRY_AFTER, description = "Seconds until the quota allows a run; absent when the queue is full", schema = Schema(type = "integer"))],
         content = [Content(schema = Schema(implementation = ApiError::class))],
     )
+    @ApiResponse(
+        responseCode = "503", description = "Too many starts at once; nothing was started, start again after Retry-After",
+        headers = [Header(name = HttpHeaders.RETRY_AFTER, description = "Seconds to wait", schema = Schema(type = "integer"))],
+        content = [Content(schema = Schema(implementation = ApiError::class))],
+    )
     @PostMapping
     fun start(@PathVariable sessionId: UUID, @RequestBody request: StartRunRequest): ResponseEntity<RunView> {
-        val run = runs.start(sessionId, RunRequest(request.requestId, request.tps, request.durationSeconds))
+        val run = starts.admit { runs.start(sessionId, RunRequest(request.requestId, request.tps, request.durationSeconds)) }
         return ResponseEntity.status(if (run.state.isFinal) HttpStatus.OK else HttpStatus.ACCEPTED)
             .location(URI.create("${RUNS_PATH.replace("{sessionId}", sessionId.toString())}/${run.runId}"))
             .body(run.toView())

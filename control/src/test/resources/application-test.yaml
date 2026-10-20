@@ -2,6 +2,9 @@ control:
   queue:
     # Tests drive the queue and the conductor themselves.
     poll-interval: 1h
+  runs:
+    # The race tests start dozens of runs at once against the queue's lock; StartAdmissionTest holds the real bound.
+    max-concurrent-starts: 100
   services:
     request-timeout: 500ms
   ledger:

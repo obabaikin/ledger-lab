@@ -110,6 +110,23 @@ describe('session page', () => {
     expect(second).toBe(first)
   })
 
+  it('says control is busy when a start is refused as busy, and a new press sends again', async () => {
+    let tries = 0
+    control([], {
+      [`POST ${RUNS}`]: () => {
+        tries += 1
+        return tries === 1 ? { status: 503, body: { error: 'busy' }, headers: { 'Retry-After': '1' } } : { status: 202, body: run() }
+      },
+    })
+    renderAt(`/s/${SESSION_ID}`)
+
+    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Control is busy with other starts. Press Start again in a moment.')
+    screen.getByRole('button', { name: /Start the run/ }).click()
+
+    await waitFor(() => expect(tries).toBe(2))
+  })
+
   it('says the browser gave no random id when it cannot make one, and sends nothing', async () => {
     vi.stubGlobal('crypto', {
       getRandomValues: () => {

@@ -14,6 +14,7 @@ import com.ledgerlab.control.runs.RequestIdConflictException
 import com.ledgerlab.control.runs.RunNotFinalException
 import com.ledgerlab.control.runs.RunNotFoundException
 import com.ledgerlab.control.runs.RunNotStartedException
+import com.ledgerlab.control.runs.StartsBusyException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -68,6 +69,12 @@ class ApiExceptionHandler {
             .apply { e.retryAfterSeconds?.let { header(HttpHeaders.RETRY_AFTER, it.coerceAtLeast(1).toString()) } }
             .body(ApiError(ControlErrors.RUN_QUOTA_EXCEEDED))
 
+    @ExceptionHandler(StartsBusyException::class)
+    fun startsBusy(): ResponseEntity<ApiError> =
+        ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .header(HttpHeaders.RETRY_AFTER, BUSY_RETRY_AFTER_SECONDS.toString())
+            .body(ApiError(ControlErrors.BUSY))
+
     @ExceptionHandler(QueueFullException::class)
     @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
     fun queueFull() = ApiError(ControlErrors.RUN_QUEUE_FULL)
@@ -101,5 +108,6 @@ class ApiExceptionHandler {
     private companion object {
         const val SESSION_ID = "sessionId"
         const val RUN_ID = "runId"
+        const val BUSY_RETRY_AFTER_SECONDS = 1
     }
 }
