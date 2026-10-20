@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -50,7 +51,8 @@ class TransferWarmUp(
         val executor = Executors.newVirtualThreadPerTaskExecutor()
         val rounds = executor.submit<Int> { rounds(started + props.warmUp.duration.toNanos()) }
         try {
-            val done = rounds.get(props.warmUp.duration.toNanos(), TimeUnit.NANOSECONDS)
+            // The rounds stop at the limit themselves; the margin lets the last one return, so a timeout means a stuck round.
+            val done = rounds.get((props.warmUp.duration + RESULT_MARGIN).toNanos(), TimeUnit.NANOSECONDS)
             if (done < props.warmUp.rounds) {
                 log.warn("Warm-up reached its limit of {} after {} of {} rounds", props.warmUp.duration, done, props.warmUp.rounds)
             } else {
@@ -91,5 +93,9 @@ class TransferWarmUp(
             }
             objectMapper.writeValueAsString(transfer.toResponse())
         }
+    }
+
+    private companion object {
+        val RESULT_MARGIN: Duration = Duration.ofMillis(500)
     }
 }

@@ -171,12 +171,25 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("CREATED")
 
-        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("FAILED")
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
         val line = output.out.lines().single { "setup timed out" in it && runId.toString() in it }
         assertThat(line).contains("generator status: 404", "ledger accounts: answered 201", "generator start: 503 gateway unavailable")
+    }
+
+    @Test
+    fun `a run first tried long after it left the queue gets its whole setup time`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 201, simulation(runId, "RUNNING"))
+        backdate(runId, "admitted_at", props.runs.setupTimeout.plusSeconds(60))
+
+        conductor.tick()
+
+        assertThat(stateOf(runId)).isEqualTo("RUNNING")
     }
 
     @Test
@@ -188,7 +201,7 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 503)
 
-        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
         conductor.tick()
 
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
@@ -203,7 +216,7 @@ class ConductorTest : IntegrationTest() {
         generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 409, mapOf("error" to "journals in memory hold 300000"))
         conductor.tick()
 
-        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
         conductor.tick()
 
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
@@ -248,7 +261,7 @@ class ConductorTest : IntegrationTest() {
         conductor.tick()
         assertThat(stateOf(runId)).isEqualTo("CREATED")
 
-        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        backdate(runId, "setup_started_at", props.runs.setupTimeout)
         conductor.tick()
         assertThat(column(runId, "failure")).isEqualTo("setup timed out")
     }
@@ -264,7 +277,10 @@ class ConductorTest : IntegrationTest() {
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(fresh), 404)
         ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(fresh), 201, emptyList<Any>())
         generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 201, simulation(fresh, "RUNNING"))
-        backdate(fresh, "admitted_at", props.runs.setupTimeout.minusMillis(300))
+        jdbc.sql("UPDATE runs SET setup_started_at = clock_timestamp() - CAST(:millis AS bigint) * interval '1 millisecond' WHERE run_id = :id")
+            .param("millis", props.runs.setupTimeout.minusMillis(300).toMillis())
+            .param("id", fresh)
+            .update()
 
         conductor.tick()
 

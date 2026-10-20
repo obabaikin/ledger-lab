@@ -69,6 +69,19 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
             .param("running", RunState.RUNNING.name)
             .update()
 
+    fun markSetupStarted(runId: UUID): Instant =
+        jdbc.sql(
+            """
+            UPDATE runs SET setup_started_at = coalesce(setup_started_at, clock_timestamp())
+            WHERE run_id = :runId
+            RETURNING setup_started_at
+            """,
+        )
+            .param("runId", runId)
+            .query(Timestamp::class.java)
+            .single()
+            .toInstant()
+
     fun markStartSent(runId: UUID, sent: Boolean): Int =
         jdbc.sql(
             """
@@ -281,6 +294,7 @@ class RunRepository(private val jdbc: JdbcClient, private val objectMapper: Obje
         admittedAt = getObject("admitted_at", Timestamp::class.java)?.toInstant(),
         finishedAt = getObject("finished_at", Timestamp::class.java)?.toInstant(),
         position = getObject("position")?.let { getLong("position") },
+        setupStartedAt = getObject("setup_started_at", Timestamp::class.java)?.toInstant(),
         startSent = getObject("start_sent_at") != null,
         startedAt = getObject("started_at", Timestamp::class.java)?.toInstant(),
         stopRequested = getObject("stop_requested_at") != null,

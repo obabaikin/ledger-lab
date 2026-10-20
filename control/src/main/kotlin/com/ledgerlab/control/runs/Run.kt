@@ -32,6 +32,7 @@ data class Run(
     val admittedAt: Instant?,
     val finishedAt: Instant?,
     val position: Long?,
+    val setupStartedAt: Instant? = null,
     val startSent: Boolean = false,
     val startedAt: Instant? = null,
     val stopRequested: Boolean = false,

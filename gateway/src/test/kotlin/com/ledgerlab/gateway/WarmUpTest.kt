@@ -64,6 +64,16 @@ class WarmUpTest : IntegrationTest() {
     }
 
     @Test
+    fun `a round that ends just past the limit counts as the limit reached, not as a stuck round`(output: CapturedOutput) {
+        doAnswer { Thread.sleep(300); it.callRealMethod() }
+            .`when`(transfers).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
+
+        warmUp.warmUp()
+
+        assertThat(output.out).contains("Warm-up reached its limit of PT1S").doesNotContain("did not finish a round")
+    }
+
+    @Test
     fun `a round stuck on the database does not hold the gateway back past the limit`(output: CapturedOutput) {
         val stuck = CountDownLatch(1)
         doAnswer { stuck.await(); it.callRealMethod() }

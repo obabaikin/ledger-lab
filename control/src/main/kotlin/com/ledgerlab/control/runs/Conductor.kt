@@ -77,7 +77,9 @@ class Conductor(
         val status = generator.status(run.runId)
         // A start that reached the generator before a restart of control must not be sent again: it would replay the run.
         if (status is Reply.Answered) return started(run)
-        val timedOut = now >= checkNotNull(run.admittedAt) + props.runs.setupTimeout
+        // From the first attempt, not from the admission: a long tick of other runs must not use up this run's time.
+        val setupStartedAt = run.setupStartedAt ?: runs.markSetupStarted(run.runId)
+        val timedOut = now >= setupStartedAt + props.runs.setupTimeout
         if (timedOut) {
             // A start whose answer was lost may have reached the generator: its clients would send for a period nobody closes.
             if (run.startSent) stopClients(run)

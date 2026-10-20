@@ -28,7 +28,8 @@ mean "opened", then starts the generator with the run's rate, duration and accou
 records that it sent the start; if the generator later does not know a run whose start may have
 reached it, it restarted, and the run goes on with its client lost instead of starting again. A 400 from
 either fails the run with `setup rejected`; anything else is retried. A run that is not `RUNNING`
-30 seconds after leaving the queue fails with `setup timed out`; if its start may have reached the
+30 seconds after control first tried to set it up fails with `setup timed out` (counted from the first
+attempt, so a tick held up by another run's slow drain does not use up its time); if its start may have reached the
 generator, control also sends it a stop, so no clients send for a period nobody closes.
 
 **Running.** `POST /api/sessions/{sessionId}/runs/{runId}/stop` answers 202 while the run is
