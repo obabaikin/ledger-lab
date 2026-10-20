@@ -18,7 +18,7 @@ const live = (changes: Partial<LiveView> = {}): LiveView => ({
     totals: { accepted: 1000, posted: 990, rejected: 5, postedAmountCents: 99_000, commandsSeen: 1000, inFlight: 5, rejectedByReason: {} },
     series: [],
   },
-  clients: { requested: 1100, acknowledged: 990, failed: 0, unknown: 0, retries: 0, duplicatesSent: 0, requestedPerSecond: [] },
+  clients: { requested: 1100, acknowledged: 990, failed: 0, unknown: 0, retries: 0, refused: 0, duplicatesSent: 0, requestedPerSecond: [] },
   pods: null,
   ledgerDuplicatesAtLeast: 0,
   readAt: '2026-10-12T09:01:05Z',
@@ -218,6 +218,33 @@ describe('session page', () => {
 
     await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
     expect(screen.getByTestId('clients-number')).toHaveTextContent('— sent')
+  })
+
+  it('counts the busy refusals at the gateway as the run goes, quiet while there are none', async () => {
+    const clients = live().clients!
+    let refused = 0
+    const running = () => run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: { ...clients, refused } }) })
+    fakeControl({
+      [`GET ${SESSION}`]: { status: 200, body: session() },
+      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: [{ ...running(), live: null }] } }),
+      [`GET ${RUN}`]: () => ({ status: 200, body: running() }),
+    })
+    renderAt(`/s/${SESSION_ID}`)
+
+    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('0 refused (503)'))
+    expect(screen.getByTestId('gateway-note')).not.toHaveClass('busy')
+
+    refused = 1_250
+    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('1,250 refused (503)'), { timeout: 3000 })
+    expect(screen.getByTestId('gateway-note')).toHaveClass('busy')
+  })
+
+  it('shows no refusal count while the generator has not answered', async () => {
+    control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: null }) })])
+    renderAt(`/s/${SESSION_ID}`)
+
+    await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
+    expect(screen.getByTestId('gateway-note')).toHaveTextContent('')
   })
 
   it('keeps the last numbers and says so when control stops answering', async () => {

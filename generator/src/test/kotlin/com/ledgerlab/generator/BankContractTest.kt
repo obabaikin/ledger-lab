@@ -1,5 +1,6 @@
 package com.ledgerlab.generator
 
+import com.ledgerlab.generator.bank.ApiError
 import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.Statement
 import com.ledgerlab.generator.bank.StatementLine
@@ -35,6 +36,15 @@ class BankContractTest {
     }
 
     @Test
+    fun `the spec names the busy refusal of a submission, which the generator counts as not taken`() {
+        val busy = spec.get("paths").get(GatewayApi.TRANSFERS_PATH).get("post").get("responses")
+            .get(HttpStatus.SERVICE_UNAVAILABLE.value().toString())
+
+        assertThat(busy).`as`("503 of POST ${GatewayApi.TRANSFERS_PATH}").isNotNull()
+        assertThat(busy.get("description").asString()).contains("\"${GatewayApi.BUSY_ERROR}\"")
+    }
+
+    @Test
     fun `the statement path, its paging parameters and the not-closed answer are in the spec`() {
         val statement = checkNotNull(spec.get("paths").get(GatewayApi.STATEMENT_PATH)?.get("get")) { "no GET ${GatewayApi.STATEMENT_PATH} in the spec" }
 
@@ -45,7 +55,7 @@ class BankContractTest {
 
     @Test
     fun `every field the generator sends or reads is in the spec`() {
-        listOf(SubmitTransferRequest::class, TransferResponse::class, Statement::class, StatementLine::class).forEach { type ->
+        listOf(SubmitTransferRequest::class, TransferResponse::class, Statement::class, StatementLine::class, ApiError::class).forEach { type ->
             assertThat(schemaOf(type).get("properties").propertyNames()).`as`(type.simpleName).containsAll(fieldsOf(type))
         }
     }

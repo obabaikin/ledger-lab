@@ -196,6 +196,7 @@ export function SessionPage() {
         rejected: runReport.ledger.rejected,
         ledgerDuplicatesAtLeast: runReport.ledgerDuplicatesAtLeast,
         duplicatesSent: seenLive?.clients?.duplicatesSent ?? null,
+        refused: seenLive?.clients?.refused ?? null,
       }
     : counters && live
       ? {
@@ -205,6 +206,7 @@ export function SessionPage() {
           rejected: counters.rejected,
           ledgerDuplicatesAtLeast: live.ledgerDuplicatesAtLeast,
           duplicatesSent: live.clients?.duplicatesSent ?? null,
+          refused: live.clients?.refused ?? null,
         }
       : NO_NUMBERS
   const series = runReport?.stats?.series ?? live?.stats?.series ?? seenLive?.stats?.series ?? []

@@ -74,6 +74,16 @@
                 }
               }
             }
+          },
+          "503" : {
+            "description" : "With error \"busy\": too many transfers in progress, this one was not taken; retry with the same key after Retry-After. Any other 5xx leaves the transfer unknown.",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }

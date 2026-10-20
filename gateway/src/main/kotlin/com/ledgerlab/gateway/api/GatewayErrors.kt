@@ -9,6 +9,7 @@ object GatewayErrors {
     const val CLOSE_LOCK_TIMEOUT = "inserts in flight did not finish in time"
     const val BAD_REQUEST = "bad request"
     const val CONFLICT = "conflict"
+    const val BUSY = "busy"
 }
 
 @Schema(description = "Body of an error answer.")

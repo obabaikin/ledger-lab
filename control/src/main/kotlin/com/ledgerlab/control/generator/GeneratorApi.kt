@@ -33,6 +33,7 @@ data class SimulationStatus(
     val failed: Long,
     val unknown: Long,
     val retries: Long,
+    val refused: Long = 0,
     val duplicatesSent: Long,
     val waitedLatencyP50Ms: Double?,
     val waitedLatencyP99Ms: Double?,

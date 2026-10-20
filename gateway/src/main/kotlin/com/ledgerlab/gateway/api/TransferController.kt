@@ -6,10 +6,12 @@ import com.ledgerlab.gateway.GatewayProperties
 import com.ledgerlab.gateway.domain.REJECT_REASON_DESCRIPTION
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.domain.TransferStatus
+import com.ledgerlab.gateway.service.GatewayBusyException
 import com.ledgerlab.gateway.service.IdempotencyConflictException
 import com.ledgerlab.gateway.service.LedgerResult
 import com.ledgerlab.gateway.service.PeriodClosedException
 import com.ledgerlab.gateway.service.ResultWaiters
+import com.ledgerlab.gateway.service.TransferAdmission
 import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
 import io.micrometer.core.instrument.Counter
@@ -70,6 +72,7 @@ data class TransferResponse(
 class TransferController(
     private val service: TransferService,
     private val waiters: ResultWaiters,
+    private val admission: TransferAdmission,
     private val props: GatewayProperties,
     registry: MeterRegistry,
 ) {
@@ -77,6 +80,7 @@ class TransferController(
     private val waitFailures = Counter.builder("gateway.wait.failed")
         .description("accepted transfers whose result could not be read while the client waited")
         .register(registry)
+    private val retryAfterSeconds = props.retryAfter.toSeconds().coerceAtLeast(1).toString()
 
     @Operation(summary = "Submit a transfer")
     @ApiResponse(responseCode = "200", description = "Final status")
@@ -84,6 +88,11 @@ class TransferController(
     @ApiResponse(responseCode = "400", description = "Invalid body", content = [Content()])
     @ApiResponse(responseCode = "409", description = "The run's period is closed", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "422", description = "The key was used with a different body", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(
+        responseCode = "503",
+        description = "With error \"${GatewayErrors.BUSY}\": too many transfers in progress, this one was not taken; retry with the same key after Retry-After. Any other 5xx leaves the transfer unknown.",
+        content = [Content(schema = Schema(implementation = ApiError::class))],
+    )
     @PostMapping(version = ApiVersioning.PATH_VERSION)
     fun submit(
         @Valid @RequestBody request: SubmitTransferRequest,
@@ -94,9 +103,11 @@ class TransferController(
         MDC.put(MDC_RUN_ID, request.runId.toString())
         val future = wait?.let { waiters.register(transferId) }
         try {
-            val transfer = service.accept(
-                TransferRequest(transferId, request.runId!!, request.fromAccount, request.toAccount, request.amountCents),
-            )
+            val transfer = admission.admit {
+                service.accept(
+                    TransferRequest(transferId, request.runId!!, request.fromAccount, request.toAccount, request.amountCents),
+                )
+            }
             if (transfer.status.isFinal || future == null) return respond(transfer)
 
             return try {
@@ -133,13 +144,18 @@ class TransferController(
             ResponseEntity.ok(transfer.toResponse())
         } else {
             ResponseEntity.status(HttpStatus.ACCEPTED)
-                .header(HttpHeaders.RETRY_AFTER, props.retryAfter.toSeconds().coerceAtLeast(1).toString())
+                .header(HttpHeaders.RETRY_AFTER, retryAfterSeconds)
                 .body(transfer.toResponse())
         }
 
     @ExceptionHandler(IdempotencyConflictException::class)
     @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
     fun idempotencyConflict(e: IdempotencyConflictException) = ApiError(e.message ?: GatewayErrors.CONFLICT)
+
+    @ExceptionHandler(GatewayBusyException::class)
+    fun busy(): ResponseEntity<ApiError> = ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .header(HttpHeaders.RETRY_AFTER, retryAfterSeconds)
+        .body(ApiError(GatewayErrors.BUSY))
 
     @ExceptionHandler(PeriodClosedException::class)
     @ResponseStatus(HttpStatus.CONFLICT)

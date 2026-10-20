@@ -13,6 +13,7 @@ export type DiagramNumbers = {
   rejected: number | null
   ledgerDuplicatesAtLeast: number | null
   duplicatesSent: number | null
+  refused: number | null
 }
 
 export const NO_NUMBERS: DiagramNumbers = {
@@ -22,6 +23,7 @@ export const NO_NUMBERS: DiagramNumbers = {
   rejected: null,
   ledgerDuplicatesAtLeast: null,
   duplicatesSent: null,
+  refused: null,
 }
 
 type PodState = 'consuming' | 'starting' | 'down' | 'unknown'
@@ -114,7 +116,7 @@ export function Diagram(props: { numbers: DiagramNumbers | null; pods: PodView[]
     ledgerPods == null || ledgerPods.length === 0 ? '' : consuming === 0 ? 'dead' : consuming! < ledgerPods.length ? 'degraded' : ''
   const lines: Record<string, [string, string, string]> = bare ? {} : {
     clients: [`${shown(requested)} sent`, 'their own count', numbers.duplicatesSent ? `↺ ${count(numbers.duplicatesSent)} pressed twice` : ''],
-    gateway: [`${shown(accepted)} accepted`, '', ''],
+    gateway: [`${shown(accepted)} accepted`, numbers.refused === null ? '' : `${count(numbers.refused)} refused (503)`, ''],
     ledger: [
       `${shown(posted)} booked`,
       ledgerPods ? `${consuming} of ${ledgerPods.length} consuming` : '',
@@ -173,7 +175,7 @@ export function Diagram(props: { numbers: DiagramNumbers | null; pods: PodView[]
                 <text className="num" x={cx} y={y + 58} textAnchor="middle" data-testid={`${key}-number`}>
                   {num}
                 </text>
-                <text className="sub" x={cx} y={y + 73} textAnchor="middle">
+                <text className={key === 'gateway' && (numbers.refused ?? 0) > 0 ? 'sub busy' : 'sub'} x={cx} y={y + 73} textAnchor="middle" data-testid={`${key}-note`}>
                   {note}
                 </text>
                 <text className="repeats" x={cx} y={y + 89} textAnchor="middle">

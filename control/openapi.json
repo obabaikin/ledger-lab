@@ -81,6 +81,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "refused" : {
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "requested" : {
             "format" : "int64",
             "type" : "integer"
@@ -102,7 +107,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "acknowledged", "duplicatesSent", "failed", "requested", "requestedPerSecond", "retries", "unknown" ],
+        "required" : [ "acknowledged", "duplicatesSent", "failed", "refused", "requested", "requestedPerSecond", "retries", "unknown" ],
         "type" : "object"
       },
       "CreateSessionRequest" : {
