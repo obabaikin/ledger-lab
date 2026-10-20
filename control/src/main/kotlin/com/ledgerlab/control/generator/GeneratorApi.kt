@@ -63,8 +63,9 @@ data class JournalTotals(
     val failed: Long,
     val unknown: Long,
     val acknowledgedAmountCents: Long,
+    /** Reports stored before the count existed have none. */
     @field:Schema(description = REFUSED_DESCRIPTION)
-    val refused: Long,
+    val refused: Long = 0,
 )
 
 data class ClientReconciliationReport(

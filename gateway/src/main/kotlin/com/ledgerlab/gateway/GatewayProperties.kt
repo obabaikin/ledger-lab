@@ -18,7 +18,7 @@ data class GatewayProperties(
 ) {
     /** Up to [rounds] rounds of the submission path before the gateway takes traffic, for at most [duration]. */
     data class WarmUp(val rounds: Int, val duration: Duration)
-    /** At most [maxConcurrent] submissions work with the database; one more waits up to [wait], then is refused. */
+    /** At most [maxConcurrent] submissions insert at once; one more waits up to [wait], then is refused. */
     data class Admission(val maxConcurrent: Int, val wait: Duration)
     data class Outbox(val batchSize: Int, val sendTimeout: Duration)
     data class Consumer(val retryBackoff: Duration)

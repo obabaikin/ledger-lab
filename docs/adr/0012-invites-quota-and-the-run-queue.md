@@ -4,7 +4,7 @@ Status: accepted · Date: 2026-10-12
 
 ## Context
 
-Control is the only service reachable from the internet, and the cluster is a single 8 GB node.
+Control is the only service reachable from the internet, and the cluster is a single node with the bank in 8 GB.
 Anyone holding a link must be able to start a run, yet nobody may start enough runs to take the
 bank down. The author also wants to know which invite links were opened, without tracking people.
 

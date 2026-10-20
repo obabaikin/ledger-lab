@@ -573,7 +573,7 @@
                 }
               }
             },
-            "description" : "The run is still active, or the period is not closed"
+            "description" : "With error \"run still active\": the run's clients are still sending or stopping; else the period is not closed"
           },
           "502" : {
             "content" : {

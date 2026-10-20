@@ -22,13 +22,14 @@ counts like no answer: it is retried within the phase's deadline.
 
 **Setup (`CREATED`).** Control first asks the generator whether it already runs the clients of
 this run; if it does, the run is `RUNNING` and nothing is started again (a repeated start would
-replay the run). Otherwise it opens the run's accounts in the ledger (100 accounts of 10 000 €,
-2 of them blocked, a daily limit of 50 000 €; all four are configuration), where 201 and 409 both
+replay the run). Otherwise it opens the run's accounts in the ledger (100 accounts of 1 000 000 €,
+2 of them blocked, a daily limit of 200 000 €; all four are configuration), where 201 and 409 both
 mean "opened", then starts the generator with the run's rate, duration and accounts. Control
 records that it sent the start; if the generator later does not know a run whose start may have
 reached it, it restarted, and the run goes on with its client lost instead of starting again. A 400 from
 either fails the run with `setup rejected`; anything else is retried. A run that is not `RUNNING`
-30 seconds after leaving the queue fails with `setup timed out`.
+30 seconds after leaving the queue fails with `setup timed out`; if its start may have reached the
+generator, control also sends it a stop, so no clients send for a period nobody closes.
 
 **Running.** `POST /api/sessions/{sessionId}/runs/{runId}/stop` answers 202 while the run is
 `RUNNING` and passes the stop to the generator on the next tick; 409 `run not started` while the
@@ -47,7 +48,9 @@ kill to having its partitions back. If the bank does not answer until the 3 minu
 `bank unavailable`.
 
 **The verdict.** Once the drain is over or has given up, control asks the generator for the client
-reconciliation, once, and stores a report with the run:
+reconciliation and stores a report with the run. It asks once, except while the generator answers 409
+`run still active` (clients stopped after the grace may still be stopping): then again on the next
+tick, until the drain deadline. Once the report is stored, control releases the generator's journal:
 
 - `BREAKS` if the ledger's books do not balance, if gateway and ledger count different posted or
   rejected transfers or reasons (compared only after a finished drain: before it, a difference is
@@ -55,7 +58,7 @@ reconciliation, once, and stores a report with the run:
   ends at once), or if the clients' journal and the statement disagree;
 - otherwise `INCOMPLETE` with its reasons: `drain timed out: ledger applied X, gateway results Z,
   of Y`, `client lost`,
-  `client reconciliation failed: ...` (the generator's 404, 409 or 502), `client reconciliation
+  `client reconciliation failed: ...` (the generator's 404 or 502, or its 409 at the deadline), `client reconciliation
   unavailable` (no answer by the drain deadline), `statement not final`;
 - otherwise `BALANCED`. Only `BALANCED` is green.
 

@@ -10,8 +10,9 @@ import java.util.concurrent.TimeUnit
 class GatewayBusyException : RuntimeException("Too many transfers in progress")
 
 /**
- * Bounds the submissions that hold or wait for a database connection. Virtual threads put no limit on requests, so
- * without it a slow database fills the heap with requests waiting for the pool.
+ * Bounds the submissions that insert, holding or waiting for a database connection; reading the result for a
+ * waiting client is not bounded. Virtual threads put no limit on requests, so without it a slow database fills the
+ * heap with requests waiting for the pool.
  */
 @Component
 class TransferAdmission(props: GatewayProperties, registry: MeterRegistry) {

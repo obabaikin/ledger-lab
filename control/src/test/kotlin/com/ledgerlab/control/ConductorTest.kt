@@ -542,6 +542,17 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
+    fun `a report stored before the refusal count existed is still read, with none refused`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId)
+        conductor.tick()
+        jdbc.sql("UPDATE runs SET report = report #- '{client,refused}' WHERE run_id = :id").param("id", runId).update()
+
+        assertThat((reportOf(runId)["client"] as Map<*, *>)["refused"]).isEqualTo(0)
+    }
+
+    @Test
     fun `the report carries the transfers the gateway refused as busy, from the client reconciliation`() {
         val runId = draining()
         bank(runId)

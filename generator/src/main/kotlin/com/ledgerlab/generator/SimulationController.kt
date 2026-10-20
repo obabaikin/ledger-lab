@@ -166,7 +166,7 @@ class SimulationController(
 
     @ApiResponse(responseCode = "200", description = "The report")
     @ApiResponse(responseCode = "404", description = "Unknown run, or its journal released", content = [Content(schema = Schema(implementation = ApiError::class))])
-    @ApiResponse(responseCode = "409", description = "The run is still active, or the period is not closed", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "With error \"${GeneratorErrors.RUN_STILL_ACTIVE}\": the run's clients are still sending or stopping; else the period is not closed", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "502", description = "The gateway's statement is inconsistent or unreadable", content = [Content(schema = Schema(implementation = ApiError::class))])
     @ApiResponse(responseCode = "503", description = "The gateway did not answer", content = [Content(schema = Schema(implementation = ApiError::class))])
     @GetMapping("/{runId}/reconciliation")
