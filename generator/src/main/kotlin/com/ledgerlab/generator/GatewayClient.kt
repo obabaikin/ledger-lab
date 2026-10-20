@@ -106,6 +106,9 @@ class GatewayClient(
             http.send(request, HttpResponse.BodyHandlers.ofString())
         } catch (e: IOException) {
             throw GatewayUnavailableException("No answer from the gateway to the statement of run $runId", e)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw GatewayUnavailableException("Interrupted while reading the statement of run $runId", e)
         }
         val code = HttpStatusCode.valueOf(response.statusCode())
         return when {

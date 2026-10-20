@@ -180,6 +180,37 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
+    fun `a setup that times out after a start that may have arrived stops the clients`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 503)
+        conductor.tick()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 503)
+
+        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        conductor.tick()
+
+        assertThat(column(runId, "failure")).isEqualTo("setup timed out")
+        assertThat(generator.callsTo("POST", GeneratorApi.STOP_PATH.forRun(runId))).hasSize(1)
+    }
+
+    @Test
+    fun `a setup that times out with no start sent stops nothing`() {
+        val runId = admitted()
+        generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
+        ledger.answer("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), 201, emptyList<Any>())
+        generator.answer("POST", GeneratorApi.SIMULATIONS_PATH, 409, mapOf("error" to "journals in memory hold 300000"))
+        conductor.tick()
+
+        backdate(runId, "admitted_at", props.runs.setupTimeout)
+        conductor.tick()
+
+        assertThat(column(runId, "failure")).isEqualTo("setup timed out")
+        assertThat(generator.callsTo("POST", GeneratorApi.STOP_PATH.forRun(runId))).isEmpty()
+    }
+
+    @Test
     fun `a start whose answer was lost is not sent again when the generator forgot the run`() {
         val runId = admitted()
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 404)
@@ -459,7 +490,33 @@ class ConductorTest : IntegrationTest() {
     fun `a client reconciliation that cannot succeed ends incomplete with the generator's words`() {
         val runId = draining()
         bank(runId)
-        clientReconciles(runId, 409, mapOf("error" to "run still active"))
+        clientReconciles(runId, 404, mapOf("error" to "journal released"))
+
+        conductor.tick()
+
+        assertThat(reportOf(runId)["reasons"]).isEqualTo(listOf("client reconciliation failed: journal released"))
+    }
+
+    @Test
+    fun `clients still stopping when the bank has drained are asked again on the next tick`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, 409, mapOf("error" to GeneratorApi.RUN_STILL_ACTIVE))
+
+        conductor.tick()
+        assertThat(stateOf(runId)).isEqualTo("DRAINING")
+
+        clientReconciles(runId)
+        conductor.tick()
+        assertThat(column(runId, "result")).isEqualTo("BALANCED")
+    }
+
+    @Test
+    fun `clients still stopping at the drain deadline end incomplete with the generator's words`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, 409, mapOf("error" to GeneratorApi.RUN_STILL_ACTIVE))
+        backdate(runId, "drain_started_at", props.runs.drainTimeout)
 
         conductor.tick()
 

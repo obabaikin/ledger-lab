@@ -12,6 +12,7 @@ object GeneratorApi {
     const val STOP_PATH = "/internal/simulations/{runId}/stop"
     const val RECONCILIATION_PATH = "/internal/simulations/{runId}/reconciliation"
     const val JOURNAL_PATH = "/internal/simulations/{runId}/journal"
+    const val RUN_STILL_ACTIVE = "run still active"
 }
 
 data class StartSimulationRequest(

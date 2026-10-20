@@ -113,6 +113,21 @@ class SimulationControllerTest {
         }
     }
 
+    @Test
+    fun `an interrupted statement read is the gateway unavailable, and the interrupt is kept`() {
+        FakeGateway().use { gateway ->
+            val controller = controller(gateway)
+            val runId = controller.finished()
+
+            Thread.currentThread().interrupt()
+            try {
+                assertThatThrownBy { controller.reconciliation(runId) }.isInstanceOf(GatewayUnavailableException::class.java)
+            } finally {
+                assertThat(Thread.interrupted()).isTrue()
+            }
+        }
+    }
+
     private fun SimulationController.finished(tps: Int = 30): UUID {
         val run = start(request(tps = tps, seconds = 1))
         await().atMost(Duration.ofSeconds(15)).until { status(run.runId).state == SimulationState.FINISHED }
