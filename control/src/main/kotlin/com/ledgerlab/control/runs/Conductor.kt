@@ -164,7 +164,7 @@ class Conductor(
         val stalled = now >= progressAt + props.runs.drainStallTimeout
         if (!drained && !overcounted(bank, ledgerReport) && !stalled && !pastDeadline) return
 
-        val stats = (reporting.stats(run.runId) as? Reply.Answered)?.body
+        val stats = (reporting.finalStats(run.runId) as? Reply.Answered)?.body
         val catchingUp = drained && !pastDeadline && now < progressAt + props.reporting.catchUpWait
         if (catchingUp && (stats == null || !projectionMatchesBooks(stats, bank, ledgerReport))) return
 

@@ -4,8 +4,14 @@ control:
     poll-interval: 1h
   services:
     request-timeout: 500ms
+  ledger:
+    reconciliation-timeout: 500ms
+  gateway:
+    summary-timeout: 500ms
   generator:
     reconciliation-timeout: 500ms
+  reporting:
+    final-stats-timeout: 500ms
   prometheus:
     # Through a placeholder: a dynamic property of the base test class would win over a subclass's real Prometheus (E100).
     base-url: ${stub.prometheus-url}

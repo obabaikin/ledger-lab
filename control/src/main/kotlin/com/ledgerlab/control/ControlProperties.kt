@@ -39,9 +39,9 @@ data class ControlProperties(
 
     data class Accounts(val count: Int, val openingBalanceCents: Long, val blocked: Int, val dailyLimitCents: Long)
 
-    data class Ledger(val baseUrl: String, val transferPartitions: Int)
+    data class Ledger(val baseUrl: String, val transferPartitions: Int, val reconciliationTimeout: Duration)
 
-    data class Gateway(val baseUrl: String)
+    data class Gateway(val baseUrl: String, val summaryTimeout: Duration)
 
     data class Generator(val baseUrl: String, val reconciliationTimeout: Duration)
 
@@ -49,7 +49,7 @@ data class ControlProperties(
 
     data class Cleanup(val interval: Duration, val retention: Duration)
 
-    data class Reporting(val baseUrl: String, val catchUpWait: Duration)
+    data class Reporting(val baseUrl: String, val catchUpWait: Duration, val finalStatsTimeout: Duration)
 
     data class Prometheus(val baseUrl: String, val requestTimeout: Duration)
 

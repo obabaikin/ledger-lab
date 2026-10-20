@@ -48,8 +48,12 @@ control:
     base-url: http://localhost:8080
     # The transfers topic's partition count (infra/kafka/create-topics.sh); runs start once the ledger holds them all.
     transfer-partitions: 6
+    # It reads the whole run: longer than a plain request, and grows with the run's size.
+    reconciliation-timeout: 30s
   gateway:
     base-url: http://localhost:8081
+    # Like the ledger's reconciliation: it reads the whole run.
+    summary-timeout: 30s
   generator:
     base-url: http://localhost:8082
     reconciliation-timeout: 30s
@@ -62,6 +66,8 @@ control:
     base-url: http://localhost:8084
     # Past Kafka's session timeout (45 s): a killed reporting instance's partitions move to another by then (ADR 0015).
     catch-up-wait: 60s
+    # The live chart reads the stats every tick within the services' timeout; the report's read covers the whole run.
+    final-stats-timeout: 30s
   prometheus:
     base-url: http://localhost:9090
     # Shorter than the services': it is read every tick for every live run.

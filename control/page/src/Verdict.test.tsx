@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { report } from './test/fakeControl'
+import { RUN_ID, report } from './test/fakeControl'
 import { Verdict, verdictLine } from './Verdict'
 
 describe('verdict line', () => {
@@ -46,6 +46,45 @@ describe('verdict', () => {
     expect(screen.getByText('The records do not agree')).toBeInTheDocument()
     expect(screen.getByLabelText('Σ balances before = after: ✗')).toBeInTheDocument()
     expect(screen.getByLabelText('Σ debits = Σ credits: ✓')).toBeInTheDocument()
+  })
+
+  it('shows the projection of the bank\'s events as a check when it matches the books', () => {
+    const stats = {
+      runId: RUN_ID,
+      at: '2026-10-12T09:01:05Z',
+      bankLatency: { p50Ms: null, p99Ms: null },
+      totals: { accepted: 995, posted: 980, rejected: 15, postedAmountCents: 98_000, commandsSeen: 995, inFlight: 0, rejectedByReason: {} },
+      series: [],
+    }
+    render(<Verdict report={report({ stats, projectionMatchesBooks: true })} tps={1000} durationSeconds={30} />)
+
+    expect(screen.getByLabelText("bank's events = books: ✓")).toBeInTheDocument()
+    expect(screen.getByText('980 booked · 15 rejected')).toBeInTheDocument()
+  })
+
+  it('says the projection is behind the books without a ✗, since it may trail them without a break', () => {
+    const stats = {
+      runId: RUN_ID,
+      at: '2026-10-12T09:01:05Z',
+      bankLatency: { p50Ms: null, p99Ms: null },
+      totals: { accepted: 995, posted: 900, rejected: 15, postedAmountCents: 90_000, commandsSeen: 995, inFlight: 80, rejectedByReason: {} },
+      series: [],
+    }
+    render(<Verdict report={report({ stats, projectionMatchesBooks: false })} tps={1000} durationSeconds={30} />)
+
+    expect(screen.getByLabelText("bank's events = books: –")).toBeInTheDocument()
+    expect(screen.getByText('behind the books')).toBeInTheDocument()
+    expect(screen.queryByText('✗')).not.toBeInTheDocument()
+  })
+
+  it('says the projection was not checked when the reporting service did not answer, without a ✗', () => {
+    const note = 'reporting unavailable: no numbers from the bank\'s events'
+    render(<Verdict report={report({ notes: [note] })} tps={1000} durationSeconds={30} />)
+
+    expect(screen.getByLabelText("bank's events = books: –")).toBeInTheDocument()
+    expect(screen.getByText('not checked')).toBeInTheDocument()
+    expect(screen.getByText(note)).toBeInTheDocument()
+    expect(screen.queryByText('✗')).not.toBeInTheDocument()
   })
 
   it('shows INCOMPLETE with the reasons word for word', () => {

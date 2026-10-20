@@ -11,12 +11,13 @@ import java.util.UUID
 @Component
 class LedgerClient(props: ControlProperties, objectMapper: ObjectMapper) {
     private val http = ServiceHttp(props.ledger.baseUrl, props.services.requestTimeout, objectMapper)
+    private val reconciliationTimeout = props.ledger.reconciliationTimeout
 
     fun openAccounts(runId: UUID, request: OpenAccountsRequest): Reply<Any?> =
         http.send("POST", LedgerApi.ACCOUNTS_PATH.forRun(runId), request)
 
     fun reconciliation(runId: UUID): Reply<ReconciliationReport?> =
-        http.call("GET", LedgerApi.RECONCILIATION_PATH.forRun(runId), ReconciliationReport::class.java)
+        http.call("GET", LedgerApi.RECONCILIATION_PATH.forRun(runId), ReconciliationReport::class.java, timeout = reconciliationTimeout)
 
     fun delete(runId: UUID): Reply<Any?> = http.send("DELETE", LedgerApi.RUN_PATH.forRun(runId))
 }
