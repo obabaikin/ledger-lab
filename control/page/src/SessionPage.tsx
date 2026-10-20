@@ -196,7 +196,7 @@ export function SessionPage() {
         rejected: runReport.ledger.rejected,
         ledgerDuplicatesAtLeast: runReport.ledgerDuplicatesAtLeast,
         duplicatesSent: seenLive?.clients?.duplicatesSent ?? null,
-        refused: seenLive?.clients?.refused ?? null,
+        refused: runReport.client?.refused ?? seenLive?.clients?.refused ?? null,
       }
     : counters && live
       ? {

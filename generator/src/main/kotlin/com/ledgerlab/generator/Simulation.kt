@@ -59,7 +59,7 @@ data class SimulationStatus(
     /** Sent, but no answer settled it: the gateway may have the transfer. */
     val unknown: Long,
     val retries: Long,
-    @field:Schema(description = "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.")
+    @field:Schema(description = REFUSED_DESCRIPTION)
     val refused: Long,
     /** Second sends of the same transfer, as a user pressing twice; not new transfers. */
     val duplicatesSent: Long,

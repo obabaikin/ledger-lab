@@ -1,6 +1,7 @@
 package com.ledgerlab.control.metrics
 
 import com.ledgerlab.control.generator.GeneratorClient
+import com.ledgerlab.control.generator.REFUSED_DESCRIPTION
 import com.ledgerlab.control.http.Reply
 import com.ledgerlab.control.reporting.ReportingClient
 import com.ledgerlab.control.reporting.RunStats
@@ -20,7 +21,7 @@ data class ClientCounts(
     val failed: Long,
     val unknown: Long,
     val retries: Long,
-    @field:Schema(description = "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.")
+    @field:Schema(description = REFUSED_DESCRIPTION)
     val refused: Long,
     @field:Schema(description = "Second presses of the same transfer; the gateway answers them without a new transfer.")
     val duplicatesSent: Long,

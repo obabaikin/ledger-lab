@@ -47,9 +47,9 @@ object RunFixtures {
 
     private fun ids(vararg ids: UUID) = mapOf("count" to ids.size, "transferIds" to ids.toList())
 
-    fun clientReport(runId: UUID, balanced: Boolean = true, statementFinal: Boolean = true) = mapOf(
+    fun clientReport(runId: UUID, balanced: Boolean = true, statementFinal: Boolean = true, refused: Long = 0) = mapOf(
         "runId" to runId, "balanced" to balanced, "statementFinal" to statementFinal,
-        "journal" to mapOf("requested" to 1000, "acknowledged" to 990, "failed" to 5, "unknown" to 5, "acknowledgedAmountCents" to 99000),
+        "journal" to mapOf("requested" to 1000, "acknowledged" to 990, "failed" to 5, "unknown" to 5, "acknowledgedAmountCents" to 99000, "refused" to refused),
         "statement" to mapOf("rows" to 995, "amountCents" to 99500, "byStatus" to mapOf("POSTED" to 980, "REJECTED" to 15)),
         "breaks" to mapOf(
             "notInJournal" to ids(), "acknowledgedNotInStatement" to if (balanced) ids() else ids(UUID.randomUUID()),

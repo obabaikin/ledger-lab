@@ -467,6 +467,35 @@ class ConductorTest : IntegrationTest() {
     }
 
     @Test
+    @ExtendWith(OutputCaptureExtension::class)
+    fun `a reconciled run's journal is released once, and a generator that cannot release it is only logged`(output: CapturedOutput) {
+        val released = draining()
+        val failing = draining()
+        listOf(released, failing).forEach { bank(it); clientReconciles(it) }
+        generator.answer("DELETE", GeneratorApi.JOURNAL_PATH.forRun(failing), 500)
+
+        conductor.tick()
+        conductor.tick()
+
+        listOf(released, failing).forEach { runId ->
+            assertThat(stateOf(runId)).isEqualTo("RECONCILED")
+            assertThat(generator.callsTo("DELETE", GeneratorApi.JOURNAL_PATH.forRun(runId))).hasSize(1)
+        }
+        assertThat(output.out).contains("Run $failing: journal not released").doesNotContain("Run $released: journal not released")
+    }
+
+    @Test
+    fun `the report carries the transfers the gateway refused as busy, from the client reconciliation`() {
+        val runId = draining()
+        bank(runId)
+        clientReconciles(runId, body = clientReport(runId, refused = 7))
+
+        conductor.tick()
+
+        assertThat((reportOf(runId)["client"] as Map<*, *>)["refused"]).isEqualTo(7)
+    }
+
+    @Test
     fun `an inconsistent statement ends incomplete at once`() {
         val runId = draining()
         bank(runId)

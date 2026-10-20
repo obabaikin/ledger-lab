@@ -22,4 +22,6 @@ class GeneratorClient(props: ControlProperties, objectMapper: ObjectMapper) {
 
     fun reconciliation(runId: UUID): Reply<ClientReconciliationReport?> =
         http.call("GET", GeneratorApi.RECONCILIATION_PATH.forRun(runId), ClientReconciliationReport::class.java, timeout = reconciliationTimeout)
+
+    fun releaseJournal(runId: UUID): Reply<Any?> = http.send("DELETE", GeneratorApi.JOURNAL_PATH.forRun(runId))
 }

@@ -66,7 +66,7 @@ export const report = (changes: Partial<RunReport> = {}): RunReport => ({
   bankViewsAgree: true,
   clientBalanced: true,
   statementFinal: true,
-  client: { requested: 1000, acknowledged: 990, failed: 5, unknown: 5, acknowledgedAmountCents: 99000 },
+  client: { requested: 1000, acknowledged: 990, failed: 5, unknown: 5, acknowledgedAmountCents: 99000, refused: 0 },
   gateway: { accepted: 995, published: 995, posted: 980, rejected: 15 },
   ledger: { posted: 980, rejected: 15, openingTotalCents: 10_000_000, balanceTotalCents: 10_000_000, debitsCents: 98_000, creditsCents: 98_000 },
   bankLatencyP50Ms: 12.4,

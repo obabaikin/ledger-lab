@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotNull
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -172,7 +173,7 @@ class SimulationController(
     fun reconciliation(@PathVariable runId: UUID): ClientReconciliationReport {
         val simulation = simulationOf(runId)
         if (simulation.state.active) throw RunStillActiveException()
-        val reconciliation = ClientReconciliation(runId, journalOf(simulation))
+        val reconciliation = ClientReconciliation(runId, journalOf(simulation), simulation.status().refused)
         val cursors = HashSet<UUID>()
         var entryCount: Long? = null
         var after: UUID? = null
@@ -193,6 +194,20 @@ class SimulationController(
             throw BadGatewayAnswerException("The statement of run $runId is incomplete: ${report.statement.rows} lines, entryCount $entryCount")
         }
         return report
+    }
+
+    @ApiResponse(responseCode = "204", description = "Released; the status stays")
+    @ApiResponse(responseCode = "404", description = "Unknown run, or its journal already released", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @ApiResponse(responseCode = "409", description = "The run is still active", content = [Content(schema = Schema(implementation = ApiError::class))])
+    @DeleteMapping("/{runId}/journal")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun releaseJournal(@PathVariable runId: UUID) {
+        synchronized(simulations) {
+            val simulation = simulationOf(runId)
+            if (simulation.state.active) throw RunStillActiveException()
+            journalOf(simulation)
+            simulation.releaseJournal()
+        }
     }
 
     private fun simulationOf(runId: UUID): Simulation =

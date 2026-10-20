@@ -117,6 +117,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "refused" : {
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "requested" : {
             "format" : "int64",
             "type" : "integer"
@@ -482,6 +487,46 @@
               }
             },
             "description" : "Unknown run, or evicted after the retention"
+          }
+        },
+        "tags" : [ "simulation-controller" ]
+      }
+    },
+    "/internal/simulations/{runId}/journal" : {
+      "delete" : {
+        "operationId" : "releaseJournal",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "Released; the status stays"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown run, or its journal already released"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The run is still active"
           }
         },
         "tags" : [ "simulation-controller" ]

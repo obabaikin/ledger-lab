@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { LiveView, RunView } from './api/client'
 import { NO_RANDOM_ID, RUN_NOT_FINISHED } from './Controls'
 import { RUNS_LISTED } from './SessionPage'
-import { fakeControl, run, RUN_ID, session, SESSION_ID, type Answer } from './test/fakeControl'
+import { fakeControl, report, run, RUN_ID, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
 
 const SESSION = `/api/sessions/${SESSION_ID}`
@@ -237,6 +237,14 @@ describe('session page', () => {
     refused = 1_250
     await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('1,250 refused (503)'), { timeout: 3000 })
     expect(screen.getByTestId('gateway-note')).toHaveClass('busy')
+  })
+
+  it('takes the refusal count of a reconciled run from its report', async () => {
+    const reconciled = report({ client: { ...report().client!, refused: 42 } })
+    control([run({ state: 'RECONCILED', result: 'BALANCED' })], { [`GET ${RUN}/report`]: { status: 200, body: reconciled } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('42 refused (503)'))
   })
 
   it('shows no refusal count while the generator has not answered', async () => {

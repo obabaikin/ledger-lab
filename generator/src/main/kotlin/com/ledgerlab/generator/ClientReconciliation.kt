@@ -3,6 +3,7 @@ package com.ledgerlab.generator
 import com.ledgerlab.generator.bank.RejectReason
 import com.ledgerlab.generator.bank.StatementLine
 import com.ledgerlab.generator.bank.TransferStatus
+import io.swagger.v3.oas.annotations.media.Schema
 import java.util.BitSet
 import java.util.EnumMap
 import java.util.UUID
@@ -20,12 +21,16 @@ data class ReconciliationBreaks(
 
 data class UnknownResolved(val accepted: TransferIds, val notAccepted: TransferIds)
 
+const val REFUSED_DESCRIPTION = "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once."
+
 data class JournalTotals(
     val requested: Long,
     val acknowledged: Long,
     val failed: Long,
     val unknown: Long,
     val acknowledgedAmountCents: Long,
+    @field:Schema(description = REFUSED_DESCRIPTION)
+    val refused: Long,
 )
 
 /** [byStatus] leaves out lines whose status this client cannot read; [rows] counts them. */
@@ -61,7 +66,7 @@ private fun knownReasonsDiffer(client: RejectReason?, bank: RejectReason?): Bool
  * Statement lines are fed page by page and the journal is read in place, so neither is copied: a line
  * found in the journal is marked by the entry's seq, only the ids of lines not in it are held.
  */
-class ClientReconciliation(private val runId: UUID, private val journal: ReconciledJournal) {
+class ClientReconciliation(private val runId: UUID, private val journal: ReconciledJournal, private val refused: Long) {
     private val inStatement = BitSet()
     private val notInJournalSeen = HashSet<UUID>()
     private val notInJournal = IdCollector()
@@ -140,6 +145,7 @@ class ClientReconciliation(private val runId: UUID, private val journal: Reconci
                 failed = failed,
                 unknown = unknown,
                 acknowledgedAmountCents = acknowledgedAmountCents,
+                refused = refused,
             ),
             statement = StatementTotals(rows, amountCents, byStatus.toMap()),
             breaks = breaks,

@@ -197,7 +197,15 @@ class Conductor(
         val report = verdictOf(bank, ledgerReport, client, measurements)
         if (runs.markReconciled(run.runId, report) == 1) {
             log.info("Run {}: reconciled, {} {}", run.runId, report.result, report.reasons)
+            releaseJournal(run)
         }
+    }
+
+    /** The report holds what the verdict read, so the journal is not needed any more; the generator's retention frees it otherwise. */
+    private fun releaseJournal(run: Run) {
+        val reply = generator.releaseJournal(run.runId)
+        val released = reply is Reply.Answered || (reply is Reply.Refused && reply.status == HttpStatus.NOT_FOUND.value())
+        if (!released) log.warn("Run {}: journal not released ({}), the generator's retention frees it", run.runId, reply.summary())
     }
 
     /** From the admission: a crash while the run is set up also hits it. */

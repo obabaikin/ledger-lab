@@ -158,6 +158,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "refused" : {
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "requested" : {
             "format" : "int64",
             "type" : "integer"
@@ -167,7 +172,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "acknowledged", "acknowledgedAmountCents", "failed", "requested", "unknown" ],
+        "required" : [ "acknowledged", "acknowledgedAmountCents", "failed", "refused", "requested", "unknown" ],
         "type" : "object"
       },
       "LedgerCounts" : {
