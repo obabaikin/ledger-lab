@@ -39,9 +39,11 @@ control:
     drain-timeout: 3m
     accounts:
       count: 100
-      opening-balance-cents: 1000000
+      # 10 000 EUR ran out after about 17 minutes at 300 TPS (measured): most payments go to five merchants.
+      # 1 000 000 EUR lasts many such runs; an account sends about 110 000 EUR an hour, the daily limit is twice that.
+      opening-balance-cents: 100000000
       blocked: 2
-      daily-limit-cents: 5000000
+      daily-limit-cents: 20000000
   queue:
     poll-interval: 1s
   ledger:

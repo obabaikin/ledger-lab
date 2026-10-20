@@ -27,7 +27,9 @@ kafka:
 postgres:
   image: postgres:17-alpine
   storage: 2Gi
-  memory: 512Mi
+  memory: 768Mi
+  # Half the memory: the indexes of a run are written in random order, so they must stay cached.
+  sharedBuffers: 384MB
 
 prometheus:
   image: prom/prometheus:v3.5.0
@@ -68,7 +70,11 @@ services:
     module: generator
     port: 8082
     replicas: 1
-    memory: 576Mi
+    # The bank's clients, outside the bank's 8 GB. Most of it is the journals on the heap; about 200 MiB stays for
+    # the JVM itself (measured). 768Mi was OOMKilled at minute 56 of a one-hour run (measured on the server).
+    memory: 1280Mi
+    env:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=65
   control:
     module: control
     port: 8083

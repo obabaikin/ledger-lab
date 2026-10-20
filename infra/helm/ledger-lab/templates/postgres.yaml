@@ -43,6 +43,7 @@ spec:
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
+          args: ["-c", "shared_buffers={{ .Values.postgres.sharedBuffers }}"]
           env:
             - name: POSTGRES_DB
               value: ledgerlab

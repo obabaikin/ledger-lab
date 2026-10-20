@@ -6,7 +6,7 @@ For the services on the host with Docker Compose, see the [README](../../README.
 ## Running in local Kubernetes
 
 The same system on k3s in Docker ([k3d](https://k3d.io)), on one node the size of the target server
-(8 GB). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
+(12 GB: the bank in 8 GB, the generator beside it). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
 
 ```bash
 infra/k3d/up.sh     # cluster, the five images, the chart (infra/helm/ledger-lab); safe to run again
@@ -19,14 +19,15 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
   its name gets its own partitions back without a rebalance of the others.
 - **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether a run may
   start is control's question, answered by the partitions the live instances hold.
-- **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap.
+- **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap, the generator about two thirds:
+  most of its memory is the journals.
 - **A crashed pod restarts within a second**: the cluster caps the kubelet's crash-loop backoff at 1 s
   (`infra/k3d/kubelet-crash-loop-backoff.yaml`), otherwise a second crash in a row waits 10 s, then twice as long.
   A cluster created before needs `down.sh` and `up.sh`.
 
 ## Running on a server
 
-One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the pods' memory limits still fit in 8 GB.
+One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the bank fits in 8 GB, the generator beside it.
 The server is ordered by hand, and Terraform does not manage it: there is one server, and a
 configuration that can buy one should not exist. Terraform (`infra/terraform`) only reads it and
 manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS record.

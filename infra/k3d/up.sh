@@ -6,7 +6,7 @@ set -eu
 CLUSTER="${CLUSTER:-ledger-lab}"
 NAMESPACE="${NAMESPACE:-ledger-lab}"
 K3S_IMAGE="${K3S_IMAGE:-rancher/k3s:v1.36.4-k3s1}"
-NODE_MEMORY="${NODE_MEMORY:-8g}"
+NODE_MEMORY="${NODE_MEMORY:-12g}"
 NODE_CPUS="${NODE_CPUS:-6}"
 CONTROL_PORT="${CONTROL_PORT:-8083}"
 TAG="dev-$(date +%Y%m%d%H%M%S)"

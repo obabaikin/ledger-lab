@@ -101,7 +101,8 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 
 - **Kubernetes:** one Helm chart (`infra/helm/ledger-lab`) runs in k3d on a laptop, on one node the
   size of the server, and on the server's single-node k3s. The ledger runs three instances; a crashed
-  pod restarts within a second. Every pod has a memory limit, and together they fit in 8 GB.
+  pod restarts within a second. Every pod has a memory limit; the bank fits in 8 GB together with k3s and
+  the OS, and the load generator runs beside it.
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
 - **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR;

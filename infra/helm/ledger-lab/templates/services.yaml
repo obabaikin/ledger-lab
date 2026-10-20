@@ -113,6 +113,9 @@ spec:
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_URL, value: "http://ledger-{{ $i }}.ledger:{{ $root.Values.managementPort }}"}
             {{- end }}
             {{- end }}
+            {{- range $key, $value := $service.env }}
+            - {name: {{ $key }}, value: {{ $value | quote }}}
+            {{- end }}
           ports:
             - {name: http, containerPort: {{ $service.port }}}
             - {name: management, containerPort: {{ $root.Values.managementPort }}}

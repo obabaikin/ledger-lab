@@ -25,8 +25,11 @@ data class LoadProfile(
     val hotAccounts: Int,
     val hotShare: Double = 0.3,
     val amountRangeCents: LongRange = 1L..2_000L,
-    /** Amount that no account can cover, to provoke INSUFFICIENT_FUNDS. */
-    val oversizedAmountCents: Long = 10_000_000L,
+    /**
+     * Amount that no account can cover, to provoke INSUFFICIENT_FUNDS: 10 000 000 EUR, above a 1 000 000 EUR opening
+     * balance plus what a merchant collects in an hour at 300 TPS (about 615 000 EUR), so it is never posted.
+     */
+    val oversizedAmountCents: Long = 1_000_000_000L,
     val oversizedShare: Double = 0.005,
     val blockedShare: Double = 0.005,
     val seed: Long = System.nanoTime(),
