@@ -82,8 +82,8 @@ jobs:
           tf fmt -check -recursive -diff
           tf init -backend=false -input=false
           tf validate
-      - name: Shellcheck the server scripts
-        run: docker run --rm -v "$PWD:/w" -w /w "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR infra/server/*.sh
+      - name: Shellcheck the server and k3d scripts
+        run: docker run --rm -v "$PWD:/w" -w /w "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR infra/server/*.sh infra/k3d/*.sh
 
   images:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

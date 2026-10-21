@@ -15,6 +15,7 @@ CERT_MANAGER_CHART="oci://quay.io/jetstack/charts/cert-manager:v1.21.2@sha256:63
 MANIFEST_TYPES="application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json"
 CHART="$ROOT/infra/helm/ledger-lab"
 PASSWORDS="$CONFIG_DIR/values-server.yaml"
+PLACEHOLDER_PASSWORD=change-me
 USAGE="usage: $0 <40-character commit sha> [--force] [helm args]"
 
 SHA="${1:-}"
@@ -44,21 +45,7 @@ if [ "$force" = false ] && helm status ledger-lab --namespace "$NAMESPACE" >/dev
   fi
 fi
 
-if [ ! -f "$PASSWORDS" ]; then
-  roles=$(sed -n '/^passwords:/,/^[^ ]/s/^  \([a-z]*\): .*/\1/p' "$CHART/values.yaml")
-  mkdir -p "$CONFIG_DIR"
-  (
-    umask 077
-    {
-      echo "passwords:"
-      for role in $roles; do
-        password=$(openssl rand -hex 24) || exit 1
-        echo "  $role: $password"
-      done
-    } >"$PASSWORDS"
-  ) || { rm -f "$PASSWORDS"; exit 1; }
-  echo "generated $PASSWORDS: keep a copy, the database roles are created with these passwords"
-fi
+ensure_passwords "$CHART/values.yaml" "$PASSWORDS"
 
 # Anonymously, as the server's kubelet pulls them.
 for module in $MODULES; do
@@ -74,6 +61,12 @@ done
 if [ -n "$(helm list --namespace "$NAMESPACE" --pending --short)" ]; then
   echo "the release is mid-operation: another deploy is running, or one was killed;" \
     "if none is running: helm --namespace $NAMESPACE rollback ledger-lab" >&2
+  exit 1
+fi
+
+manifest=$(helm template ledger-lab "$CHART" -f "$HERE/values.yaml" -f "$PASSWORDS" --set ingress.host="$DOMAIN" "$@")
+if echo "$manifest" | grep -q "$PLACEHOLDER_PASSWORD"; then
+  echo "a placeholder password would reach the server: every role in $CHART/values.yaml needs one in $PASSWORDS" >&2
   exit 1
 fi
 

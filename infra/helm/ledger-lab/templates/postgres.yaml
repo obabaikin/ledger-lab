@@ -79,3 +79,44 @@ spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests: {storage: {{ .Values.postgres.storage }}}
+---
+# A new name per release revision, as create-topics: the init script above runs only on an empty volume, so a role
+# added later is created here, on the database that already exists.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: monitor-role-{{ .Release.Revision }}
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: monitor-role
+          image: {{ .Values.postgres.image }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              psql -v ON_ERROR_STOP=1 -h postgres -U admin -d ledgerlab -v password="$(cat /run/db-passwords/monitor)" <<'SQL'
+              SELECT 'CREATE ROLE monitor' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'monitor') \gexec
+              ALTER ROLE monitor WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'password';
+              GRANT pg_monitor TO monitor;
+              SQL
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: db-passwords, key: postgres}
+          securityContext: {{- include "ledger-lab.restricted" . | nindent 12 }}
+          resources:
+            limits: {memory: {{ .Values.initMemory }}}
+          volumeMounts:
+            - {name: passwords, mountPath: /run/db-passwords, readOnly: true}
+      volumes:
+        - name: passwords
+          secret: {secretName: db-passwords, items: [{key: monitor, path: monitor}]}

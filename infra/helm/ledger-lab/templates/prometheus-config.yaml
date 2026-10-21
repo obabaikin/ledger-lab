@@ -30,6 +30,27 @@ data:
             target_label: job
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: instance
+          # Control lists the bank's pods by this label; the exporters and cert-manager are not the bank.
+          - target_label: bank_service
+            replacement: "true"
+      - job_name: exporters
+        scrape_interval: {{ .Values.exporters.scrapeInterval }}
+        scrape_timeout: {{ .Values.exporters.scrapeTimeout }}
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [{{ .Release.Namespace }}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            regex: "true"
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            target_label: job
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
       {{- if .Values.certManager.enabled }}
       - job_name: cert-manager
         scrape_interval: 1m

@@ -1,0 +1,90 @@
+{{- $exporters := .Values.exporters }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  labels: {{- include "ledger-lab.labels" (dict "name" "node-exporter") | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {{- include "ledger-lab.labels" (dict "name" "node-exporter") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" "node-exporter") | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: node-exporter
+          image: {{ $exporters.node.image }}
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/host/root
+            - --web.listen-address=:{{ $exporters.node.port }}
+          ports:
+            - {name: metrics, containerPort: {{ $exporters.node.port }}}
+          securityContext:
+            readOnlyRootFilesystem: true
+            {{- include "ledger-lab.restricted" . | nindent 12 }}
+          resources:
+            requests: {memory: {{ $exporters.node.memory }}}
+            limits: {memory: {{ $exporters.node.memory }}}
+          volumeMounts:
+            - {name: proc, mountPath: /host/proc, readOnly: true}
+            - {name: sys, mountPath: /host/sys, readOnly: true}
+            - {name: root, mountPath: /host/root, readOnly: true, mountPropagation: HostToContainer}
+      volumes:
+        - name: proc
+          hostPath: {path: /proc}
+        - name: sys
+          hostPath: {path: /sys}
+        - name: root
+          hostPath: {path: /}
+---
+# Its own pod, not a sidecar of Postgres: when the database is down, it still answers with pg_up 0.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  labels: {{- include "ledger-lab.labels" (dict "name" "postgres-exporter") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "ledger-lab.labels" (dict "name" "postgres-exporter") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" "postgres-exporter") | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgres-exporter
+          image: {{ $exporters.postgres.image }}
+          args:
+            - --web.listen-address=:{{ $exporters.postgres.port }}
+            - --collector.stat_checkpointer
+          env:
+            - {name: DATA_SOURCE_URI, value: "postgres:5432/ledgerlab?sslmode=disable"}
+            - {name: DATA_SOURCE_USER, value: monitor}
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef: {name: db-passwords, key: monitor}
+          ports:
+            - {name: metrics, containerPort: {{ $exporters.postgres.port }}}
+          securityContext:
+            readOnlyRootFilesystem: true
+            {{- include "ledger-lab.restricted" . | nindent 12 }}
+          resources:
+            requests: {memory: {{ $exporters.postgres.memory }}}
+            limits: {memory: {{ $exporters.postgres.memory }}}

@@ -57,6 +57,20 @@ class RealPrometheusTest : IntegrationTest() {
     }
 
     @Test
+    fun `the pods are the bank's services only, not the exporters Prometheus scrapes beside them`() {
+        val (sessionId, runId) = running()
+        exporter.serve(LEDGER, "")
+        exporter.serve(SECOND_LEDGER, "")
+        exporter.serve(NODE_EXPORTER, "node_load1 0.5")
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE)
+
+        conductor.tick()
+
+        assertThat((live(sessionId, runId)["pods"] as List<*>).map { (it as Map<*, *>)["job"] })
+            .contains(LEDGER, SECOND_LEDGER).doesNotContain(NODE_EXPORTER)
+    }
+
+    @Test
     fun `the ledger's duplicates of a run are summed over its instances, apart from a run beside it`() {
         val (sessionId, runId) = running()
         val other = UUID.randomUUID()
@@ -126,7 +140,9 @@ class RealPrometheusTest : IntegrationTest() {
     companion object {
         private const val LEDGER = "ledger"
         private const val SECOND_LEDGER = "ledger-b"
-        private val JOBS = listOf(LEDGER, SECOND_LEDGER)
+        /** Scraped without the bank's label, as the chart's exporters are. */
+        private const val NODE_EXPORTER = "node-exporter"
+        private val JOBS = listOf(LEDGER, SECOND_LEDGER, NODE_EXPORTER)
         /** A ledger instance the test kills by closing its exporter. */
         private const val KILLED_LEDGER = "ledger-killed"
         private const val PROMETHEUS_PORT = 9090
@@ -149,6 +165,7 @@ class RealPrometheusTest : IntegrationTest() {
                 |    metrics_path: /$job
                 |    static_configs:
                 |      - targets: ["host.testcontainers.internal:$port"]
+                |        ${if (job == NODE_EXPORTER) "labels: {}" else "labels: {bank_service: \"true\"}"}
                 """.trimMargin()
             }
             val config = "global:\n  scrape_interval: ${SCRAPE_INTERVAL.toSeconds()}s\n  scrape_timeout: 800ms\nscrape_configs:\n$jobs\n"
