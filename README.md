@@ -15,7 +15,7 @@ next is in the [Roadmap](#roadmap).
 **Contents:** [What it does](#what-it-does) · [How it fits together](#how-it-fits-together) ·
 [A run and its verdict](#a-run-and-its-verdict) · [One hour on the server](#one-hour-on-the-server) ·
 [Stack](#stack) · [Modules](#modules) · [Running locally](#running-locally) · [How it is tested](#how-it-is-tested) ·
-[Deployment](#deployment) · [Scope and non-goals](#scope-and-non-goals) · [Roadmap](#roadmap) · [Design notes](#design-notes)
+[Deployment](#deployment) · [Failure model](#failure-model) · [Scope and non-goals](#scope-and-non-goals) · [Roadmap](#roadmap) · [Design notes](#design-notes)
 
 ## What it does
 
@@ -176,6 +176,21 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
   500 for all runs together.
 
 Details: [docs/guides/operations.md](docs/guides/operations.md#running-on-a-server).
+
+## Failure model
+
+What happens when something fails half-way through a transfer:
+
+| Failure | What happens | Why nothing is lost or doubled |
+|---|---|---|
+| The ledger crashes in the middle of a posting | The posting is one database transaction: it rolls back, and Kafka delivers the transfer again to the instance that takes over the partition | Offsets are committed only after the transaction ([ADR 0003](docs/adr/0003-idempotent-consumer-never-skips.md)) |
+| The commit to the database succeeded, the publish to Kafka did not | The transfer row is its own outbox, in the gateway and in the ledger: the row stays marked unpublished, and a publisher sends it after the restart | The row and the outbox are one write, so there is no state with one and not the other ([ADR 0006](docs/adr/0006-gateway-idempotency-outbox-and-waiting.md)) |
+| Kafka delivers the same transfer twice | The second insert of `(run_id, transfer_id)` finds the row and changes nothing | Delivery is at-least-once, the effect exactly-once: the key is the guard, not the broker |
+| The client sends the same transfer twice | The gateway answers with the current state of the transfer it already has; the same key with another payload is refused with 422 | The client's idempotency key, `ON CONFLICT DO NOTHING` |
+
+The trade-off: **accepted is not posted.** The gateway accepts a transfer without waiting for the ledger,
+so taking payments does not depend on the ledger being up; the client learns the outcome later, by
+asking for the status or retrying with the same key. A crashed ledger delays postings and never loses them.
 
 ## Scope and non-goals
 
