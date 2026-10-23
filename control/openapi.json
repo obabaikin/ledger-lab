@@ -547,7 +547,7 @@
             "type" : "integer"
           },
           "waitingFor" : {
-            "description" : "WARM_UP while queued because the bank is warming up after a start; null otherwise.",
+            "description" : "WARM_UP while queued because the bank is warming up after a start: the ledger takes its partitions or the gateway warms up; null otherwise.",
             "enum" : [ "WARM_UP" ],
             "type" : [ "string", "null" ]
           }

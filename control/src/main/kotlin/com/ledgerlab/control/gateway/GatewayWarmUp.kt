@@ -15,9 +15,6 @@ class GatewayWarmUp(private val prometheus: PrometheusClient) {
 
     @Volatile private var lastAnswer = false
 
-    /** The last answer, for the runs' views between the queue's ticks; not warm until the first one. */
-    val warm: Boolean get() = lastAnswer
-
     fun check(): Boolean {
         val now = prometheus.query(ALL_WARM)?.singleOrNull()?.number == WARM
         if (now != lastAnswer) log.info("Gateway warmed up: {}; runs start only once it has", now)

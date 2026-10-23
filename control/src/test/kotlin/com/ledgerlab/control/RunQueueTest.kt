@@ -169,6 +169,22 @@ class RunQueueTest : IntegrationTest() {
     }
 
     @Test
+    fun `a run waits while the ledger takes its partitions, with the gateway warm, and says so in its view`() {
+        val token = invite()
+        val sessionId = sessionOf(token)
+        val run = start(sessionId).body!!["runId"]
+        heldPartitions(props.ledger.transferPartitions - 1)
+        gatewayWarm(1)
+
+        assertThat(scheduler.tick().admitted).isZero()
+        assertThat(getRun(sessionId, run).body!!["waitingFor"]).isEqualTo("WARM_UP")
+
+        heldPartitions(props.ledger.transferPartitions)
+        assertThat(scheduler.tick().admitted).isEqualTo(1)
+        assertThat(getRun(sessionId, run).body!!.let { it["state"] to it["waitingFor"] }).isEqualTo("CREATED" to null)
+    }
+
+    @Test
     fun `a queued run waiting only for its place does not say the bank is warming up`() {
         val token = invite()
         val runs = (1..props.runs.maxActive + 1).map { sessionOf(token).let { sessionId -> sessionId to start(sessionId).body!!["runId"] } }

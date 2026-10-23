@@ -30,11 +30,17 @@ class RunQueue(private val runs: RunRepository, private val props: ControlProper
 @Component
 class QueueScheduler(private val ledger: LedgerReadiness, private val gateway: GatewayWarmUp, private val queue: RunQueue) {
 
+    @Volatile private var lastReady = false
+
+    /** The last tick's answer, for the runs' views between ticks; not ready until the first one. */
+    val bankReady: Boolean get() = lastReady
+
     // The readiness calls stay outside the queue's transaction, so a slow Prometheus never holds the lock.
     @Scheduled(fixedDelayString = "\${control.queue.poll-interval}", initialDelayString = "\${control.queue.poll-interval}")
     fun tick(): QueueStep {
         // Asked every tick, not only when the ledger is ready: the runs' views show what the queue waits for.
         val gatewayWarm = gateway.check()
-        return queue.advance(ledger.isReady() && gatewayWarm)
+        lastReady = ledger.isReady() && gatewayWarm
+        return queue.advance(lastReady)
     }
 }

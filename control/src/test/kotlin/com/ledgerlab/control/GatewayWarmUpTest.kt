@@ -18,7 +18,6 @@ class GatewayWarmUpTest : IntegrationTest() {
         lowest(1)
 
         assertThat(warmUp.check()).isTrue()
-        assertThat(warmUp.warm).isTrue()
     }
 
     @Test
@@ -44,7 +43,6 @@ class GatewayWarmUpTest : IntegrationTest() {
         prometheus.status = 503
 
         assertThat(warmUp.check()).isFalse()
-        assertThat(warmUp.warm).isFalse()
     }
 
     private companion object {

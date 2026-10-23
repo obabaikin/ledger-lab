@@ -102,10 +102,12 @@ The same node, measured rate by rate ([full results](docs/results/2026-10-23-ser
 - **The limit is the node's CPU**, PostgreSQL its largest consumer; not the disk and not the hypervisor.
   At 500 TPS the pods use 4.2 of 6 cores, and the node at most 6.4 of its 12 GB.
 - **A crash of every ledger instance at 150 TPS** is absorbed within 47 s, with nothing refused.
-- **Right after a deploy** the cold services refuse most of the load, even at 200 TPS; the fix is next.
+- **Right after a restart of the gateway** a run waits until it has warmed up, then nothing is refused.
+  Right after a full deploy every service starts cold on the same node, and a run still meets refusals;
+  the fix is next.
 
 At most three runs hold a place at once, together at most 300 transactions per second, and only
-once the ledger instances hold all partitions; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
+once the ledger instances hold all partitions and the gateway has warmed up; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
 
 ## Stack
 
@@ -181,12 +183,13 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
   DNS record, so no configuration can buy a server.
 - **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR;
   `deploy.sh <sha>` deploys a commit by hand and refuses while runs are in progress. Each service stops
-  before its new version starts, and the gateway warms up before it takes traffic.
+  before its new version starts; the gateway warms up while it already takes traffic, and no run starts
+  until it is done.
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
   a host firewall under the provider's, SSH with a key only, services without root or capabilities.
   Only the page is published.
-- **Load:** the server offers 50 / 100 / 300 transactions per second, 100 by default, and at most
-  500 for all runs together.
+- **Load:** the server offers 50 / 100 / 200 transactions per second, 100 by default, and at most
+  300 for all runs together.
 
 Details: [docs/guides/operations.md](docs/guides/operations.md#running-on-a-server).
 

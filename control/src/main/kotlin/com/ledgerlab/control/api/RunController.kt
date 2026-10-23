@@ -1,9 +1,9 @@
 package com.ledgerlab.control.api
 
-import com.ledgerlab.control.gateway.GatewayWarmUp
 import com.ledgerlab.control.metrics.LiveRuns
 import com.ledgerlab.control.metrics.LiveView
 import com.ledgerlab.control.runs.Conductor
+import com.ledgerlab.control.runs.QueueScheduler
 import com.ledgerlab.control.runs.Run
 import com.ledgerlab.control.runs.RunReport
 import com.ledgerlab.control.runs.RunRequest
@@ -52,7 +52,7 @@ data class RunView(
     val finishedAt: Instant?,
     @field:Schema(description = "Place in the queue, from 1; only while queued.")
     val position: Long?,
-    @field:Schema(description = "WARM_UP while queued because the bank is warming up after a start; null otherwise.")
+    @field:Schema(description = "WARM_UP while queued because the bank is warming up after a start: the ledger takes its partitions or the gateway warms up; null otherwise.")
     val waitingFor: WaitingFor?,
     @field:Schema(description = "When the clients started sending; null before.")
     val startedAt: Instant?,
@@ -82,7 +82,7 @@ class RunController(
     private val starts: StartAdmission,
     private val liveRuns: LiveRuns,
     private val conductor: Conductor,
-    private val gatewayWarmUp: GatewayWarmUp,
+    private val queue: QueueScheduler,
 ) {
 
     @Operation(summary = "Start a run: it joins the queue")
@@ -146,7 +146,7 @@ class RunController(
     fun report(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunReport = runs.report(sessionId, runId)
 
     private fun Run.view(live: LiveView? = null) =
-        toView(live, if (state == RunState.QUEUED && !gatewayWarmUp.warm) WaitingFor.WARM_UP else null)
+        toView(live, if (state == RunState.QUEUED && !queue.bankReady) WaitingFor.WARM_UP else null)
 
     companion object {
         const val RUNS_PATH = "/api/sessions/{sessionId}/runs"

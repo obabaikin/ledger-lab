@@ -44,8 +44,8 @@ partitions until it returns or its session times out, while the others still ans
 drops the series of an instance it cannot scrape. Nor does it admit any until every gateway instance
 reports its warm-up done (`gateway_warm_up_complete`): right after a deploy every service starts cold on
 the same cores, and a run admitted then met a wave of 503 busy. The gateway takes traffic after 5 s, so a
-deploy does not wait for it, and goes on warming up behind that for up to 90 s; meanwhile a queued run's
-view says `waitingFor: WARM_UP`. Prometheus not answering counts as not ready. A run
+deploy does not wait for it, and goes on warming up behind that for up to 90 s. While either condition
+holds a queued run back, its view says `waitingFor: WARM_UP`. Prometheus not answering counts as not ready. A run
 that waits longer than `queue-timeout` becomes `EXPIRED`. The queue lives in the `runs` table, so it survives a
 restart of control, and waiting time is measured by the database clock from `created_at`.
 

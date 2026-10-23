@@ -94,6 +94,9 @@ spec:
       restartPolicy: OnFailure
       automountServiceAccountToken: false
       securityContext:
+        runAsNonRoot: true
+        # The postgres user of the Alpine image.
+        runAsUser: 70
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: monitor-role

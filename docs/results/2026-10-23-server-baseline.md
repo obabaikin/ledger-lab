@@ -1,7 +1,8 @@
 # Server baseline: how much load one node takes (2026-10-23)
 
-Measured on the live server at night, with no other runs. Every number below comes from a run through the
-public API, the bank's own report and Prometheus (node-exporter, postgres-exporter, the services' metrics).
+Measured on the live server at night, the warm-up in the daytime, each run with no other runs. Every number
+below comes from a run through the public API, the bank's own report and Prometheus (node-exporter,
+postgres-exporter, the services' metrics).
 
 ## The machine
 
@@ -99,8 +100,8 @@ start of the gateway, end with nothing refused, given up or unknown.
 | only the gateway restarted | 10,000 | 13 s / 24 s | 24.2 / 25.5 s | 0 / 0 | `BALANCED` |
 
 - **A cold gateway is fixed by waiting.** From 5,000 rounds on, both runs after a restart refused nothing; the
-  visitor waits up to 25 s in the queue, and the page says the bank is warming up. 4,000 passed once and refused
-  257 times in the second run, 2,000 is not enough at all.
+  visitor waits in the queue for up to 13 s at 5,000 rounds and up to 24 s at 10,000, and the page says the
+  bank is warming up. 4,000 passed once and refused 257 times in the second run, 2,000 is not enough at all.
 - **"Warm" has to be measured.** With 2,000 rounds the gateway reported itself warm and still refused 692
   transfers: all rounds done is not the same as compiled. The number of rounds is set by measurement on the
   server, not by the time they take.
@@ -156,8 +157,8 @@ The rest of the CPU the node reports busy (up to 4.8 cores at 500 TPS) is k3s it
   already is. k3s's own pods stay without one.
 - **Right after a deploy** control admits no run until every gateway instance has finished its warm-up,
   which goes on behind the gateway's readiness for up to 90 s; the queued run says so. On the server the
-  warm-up needs at least 5,000 rounds: with them a restarted gateway refuses nothing. The server runs with
-  6,000, one step above.
+  warm-up needs at least 5,000 rounds: with them a restarted gateway refuses nothing. The server is set to
+  6,000, one step above the measured 5,000.
 - **Right after a full deploy** a run still meets refusals: every JVM starts cold on the same node, and the
   gateway's inserts wait for a database that shares the CPU with them. A restart of the ledger alone, as by the
   chaos button, needs nothing: Kafka holds the transfers until it is back.
