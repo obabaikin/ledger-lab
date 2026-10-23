@@ -14,6 +14,7 @@ next is in the [Roadmap](#roadmap).
 
 **Contents:** [What it does](#what-it-does) · [How it fits together](#how-it-fits-together) ·
 [A run and its verdict](#a-run-and-its-verdict) · [One hour on the server](#one-hour-on-the-server) ·
+[Limits measured on the server](#limits-measured-on-the-server) ·
 [Stack](#stack) · [Modules](#modules) · [Running locally](#running-locally) · [How it is tested](#how-it-is-tested) ·
 [Deployment](#deployment) · [Failure model](#failure-model) · [Scope and non-goals](#scope-and-non-goals) · [Roadmap](#roadmap) · [Design notes](#design-notes)
 
@@ -24,7 +25,7 @@ next is in the [Roadmap](#roadmap).
   many are in progress, it refuses one with `503 busy` before writing anything, and the client retries later.
 - The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
   at-least-once; processing is idempotent, so crashes and rebalances cannot double-post.
-- A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 300
+- A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 200
   transactions per second and counts what was acknowledged.
 - Transfers can be **rejected** for domain reasons: insufficient funds, blocked account,
   daily limit. Rejections are recorded and reconciled too.
@@ -91,7 +92,19 @@ accounts did not change.
 
 ![The verdict of the hour: every accounting invariant checked after the run](docs/images/soak-1h-verdict.png)
 
-At most three runs hold a place at once, together at most 500 transactions per second, and only
+## Limits measured on the server
+
+The same node, measured rate by rate ([full results](docs/results/2026-10-23-server-baseline.md)):
+
+- **200 transfers per second sustained**: two runs of 120 s with no refusal, client p99 under 1 s, every
+  transfer booked within 10 s of the end. At 250–300 one run of two refuses; at 500 the gateway refuses
+  thousands, and every run still ends `BALANCED`.
+- **The limit is the node's CPU**, PostgreSQL its largest consumer; not the disk and not the hypervisor.
+  At 500 TPS the pods use 4.2 of 6 cores, and the node at most 6.4 of its 12 GB.
+- **A crash of every ledger instance at 150 TPS** is absorbed within 47 s, with nothing refused.
+- **Right after a deploy** the cold services refuse most of the load, even at 200 TPS; the fix is next.
+
+At most three runs hold a place at once, together at most 300 transactions per second, and only
 once the ledger instances hold all partitions; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
 
 ## Stack
