@@ -547,7 +547,7 @@
             "type" : "integer"
           },
           "waitingFor" : {
-            "description" : "WARM_UP while queued because the bank is warming up after a start: the ledger takes its partitions or the gateway warms up; null otherwise.",
+            "description" : "WARM_UP while queued because the bank is not ready: the ledger takes its partitions (after a start or a crash), the gateway warms up, or Prometheus cannot tell; null otherwise.",
             "enum" : [ "WARM_UP" ],
             "type" : [ "string", "null" ]
           }

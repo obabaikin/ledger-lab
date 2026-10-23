@@ -1,6 +1,7 @@
 package com.ledgerlab.control
 
 import com.ledgerlab.control.RunFixtures.simulation
+import com.ledgerlab.control.gateway.GatewayWarmUp
 import com.ledgerlab.control.generator.GeneratorApi
 import com.ledgerlab.control.http.forRun
 import com.ledgerlab.control.ledger.LedgerReadiness
@@ -30,6 +31,7 @@ class RealPrometheusTest : IntegrationTest() {
     @Autowired lateinit var conductor: Conductor
     @Autowired lateinit var queue: RunQueue
     @Autowired lateinit var readiness: LedgerReadiness
+    @Autowired lateinit var warmUp: GatewayWarmUp
 
     private fun running(): Pair<UUID, UUID> {
         val sessionId = sessionOf(invite())
@@ -57,7 +59,7 @@ class RealPrometheusTest : IntegrationTest() {
     }
 
     @Test
-    fun `the pods are the bank's services only, not the exporters Prometheus scrapes beside them`() {
+    fun `the pods are the project's services only, not the exporters Prometheus scrapes beside them`() {
         val (sessionId, runId) = running()
         exporter.serve(LEDGER, "")
         exporter.serve(SECOND_LEDGER, "")
@@ -101,6 +103,19 @@ class RealPrometheusTest : IntegrationTest() {
         assertThat(readiness.isReady()).isTrue()
     }
 
+    @Test
+    fun `a gateway instance Prometheus cannot scrape holds the runs back, though the other one is warm`() {
+        gateway.serve(GATEWAY, "gateway_warm_up_complete 1")
+        unscrapedGateway.serve(GATEWAY, "gateway_warm_up_complete 1")
+        unscrapedGateway.awaitScrapes(SCRAPES_TO_SETTLE)
+        gateway.awaitScrapes(SCRAPES_TO_SETTLE)
+        assertThat(warmUp.check()).isTrue()
+
+        unscrapedGateway.close()
+        gateway.awaitScrapes(SCRAPES_TO_SETTLE)
+        assertThat(warmUp.check()).isFalse()
+    }
+
     /** Serves each job's metrics as text and counts the scrapes, so a test knows Prometheus has seen what it serves. */
     class FakeExporter(private val jobs: List<String>) : AutoCloseable {
         private val bodies = ConcurrentHashMap<String, String>()
@@ -140,11 +155,13 @@ class RealPrometheusTest : IntegrationTest() {
     companion object {
         private const val LEDGER = "ledger"
         private const val SECOND_LEDGER = "ledger-b"
-        /** Scraped without the bank's label, as the chart's exporters are. */
+        /** Scraped without the project's label, as the chart's exporters are. */
         private const val NODE_EXPORTER = "node-exporter"
         private val JOBS = listOf(LEDGER, SECOND_LEDGER, NODE_EXPORTER)
         /** A ledger instance the test kills by closing its exporter. */
         private const val KILLED_LEDGER = "ledger-killed"
+        /** Two instances under one job, as the chart's replicas are. */
+        private const val GATEWAY = "gateway"
         private const val PROMETHEUS_PORT = 9090
         private val SCRAPE_INTERVAL: Duration = Duration.ofSeconds(1)
         private val POLL: Duration = Duration.ofMillis(20)
@@ -155,17 +172,21 @@ class RealPrometheusTest : IntegrationTest() {
 
         val exporter = FakeExporter(JOBS)
         val killedExporter = FakeExporter(listOf(KILLED_LEDGER))
+        val gateway = FakeExporter(listOf(GATEWAY))
+        /** A gateway instance the test makes unreachable by closing its exporter. */
+        val unscrapedGateway = FakeExporter(listOf(GATEWAY))
 
         private val prometheus: GenericContainer<*> by lazy {
-            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port)
-            val targets = JOBS.map { it to exporter.port } + (KILLED_LEDGER to killedExporter.port)
-            val jobs = targets.joinToString("\n") { (job, port) ->
+            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port, gateway.port, unscrapedGateway.port)
+            val targets = JOBS.map { it to listOf(exporter.port) } + (KILLED_LEDGER to listOf(killedExporter.port)) +
+                (GATEWAY to listOf(gateway.port, unscrapedGateway.port))
+            val jobs = targets.joinToString("\n") { (job, ports) ->
                 """
                 |  - job_name: $job
                 |    metrics_path: /$job
                 |    static_configs:
-                |      - targets: ["host.testcontainers.internal:$port"]
-                |        ${if (job == NODE_EXPORTER) "labels: {}" else "labels: {bank_service: \"true\"}"}
+                |      - targets: [${ports.joinToString { "\"host.testcontainers.internal:$it\"" }}]
+                |        ${if (job == NODE_EXPORTER) "labels: {}" else "labels: {lab_service: \"true\"}"}
                 """.trimMargin()
             }
             val config = "global:\n  scrape_interval: ${SCRAPE_INTERVAL.toSeconds()}s\n  scrape_timeout: 800ms\nscrape_configs:\n$jobs\n"

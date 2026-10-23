@@ -192,7 +192,7 @@ describe('session page', () => {
     renderAt(`/s/${SESSION_ID}`)
 
     const phases = await screen.findByLabelText('Phases')
-    await waitFor(() => expect(within(phases).getByText(/Queued/)).toHaveTextContent('Queued · #1 in line · the bank is warming up'))
+    await waitFor(() => expect(within(phases).getByText(/Queued/)).toHaveTextContent('Queued · #1 in line · the bank is getting ready'))
   })
 
   it('shows an expired run with its state and reason above the diagram', async () => {

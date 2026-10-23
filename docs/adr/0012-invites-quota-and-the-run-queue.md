@@ -42,10 +42,12 @@ a large run never waits forever behind smaller ones. It admits nothing until the
 every partition of the transfers topic, as Prometheus sees them: a killed instance keeps its
 partitions until it returns or its session times out, while the others still answer, and Prometheus
 drops the series of an instance it cannot scrape. Nor does it admit any until every gateway instance
-reports its warm-up done (`gateway_warm_up_complete`): right after a deploy every service starts cold on
+reports its warm-up over (`gateway_warm_up_complete`: all rounds done, or cut off at 90 s with a warning),
+and an instance Prometheus fails to scrape counts as not warm: right after a deploy every service starts cold on
 the same cores, and a run admitted then met a wave of 503 busy. The gateway takes traffic after 5 s, so a
 deploy does not wait for it, and goes on warming up behind that for up to 90 s. While either condition
-holds a queued run back, its view says `waitingFor: WARM_UP`. Prometheus not answering counts as not ready. A run
+holds a queued run back, its view says `waitingFor: WARM_UP`: after a start, while the ledger rebalances
+after a crash, and while Prometheus does not answer, which counts as not ready. A run
 that waits longer than `queue-timeout` becomes `EXPIRED`. The queue lives in the `runs` table, so it survives a
 restart of control, and waiting time is measured by the database clock from `created_at`.
 

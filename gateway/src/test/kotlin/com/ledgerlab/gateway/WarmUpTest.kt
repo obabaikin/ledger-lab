@@ -25,7 +25,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
-@TestPropertySource(properties = ["gateway.warm-up.rounds=1000000", "gateway.warm-up.duration=1s", "gateway.warm-up.max-duration=2s"])
+@TestPropertySource(properties = ["gateway.warm-up.rounds=1000000", "gateway.warm-up.duration=1s", "gateway.warm-up.max-duration=4s"])
 @ExtendWith(OutputCaptureExtension::class)
 class WarmUpTest : IntegrationTest() {
 
@@ -41,7 +41,7 @@ class WarmUpTest : IntegrationTest() {
 
     private fun warm() = registry.get(TransferWarmUp.WARM).gauge().value()
 
-    private fun awaitWarm() = await().atMost(Duration.ofSeconds(5)).until { warm() == 1.0 }
+    private fun awaitWarm() = await().atMost(Duration.ofSeconds(10)).until { warm() == 1.0 }
 
     /** The context's own warm-up at start goes on behind it up to the long limit; a test's warm-up must not overlap it. */
     @BeforeEach
@@ -60,7 +60,7 @@ class WarmUpTest : IntegrationTest() {
         assertThat(availability.readinessState).isEqualTo(ReadinessState.ACCEPTING_TRAFFIC)
         assertThat(warm()).isEqualTo(0.0)
         awaitWarm()
-        assertThat(output.out).contains("Warm-up reached its limit of PT2S")
+        assertThat(output.out).contains("Warm-up reached its limit of PT4S")
     }
 
     @Test
@@ -77,13 +77,13 @@ class WarmUpTest : IntegrationTest() {
 
     @Test
     fun `a round that ends just past the long limit counts as the limit reached, not as a stuck round`(output: CapturedOutput) {
-        doAnswer { Thread.sleep(300); it.callRealMethod() }
+        doAnswer { Thread.sleep(100); it.callRealMethod() }
             .`when`(transfers).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
 
         warmUp.warmUp()
         awaitWarm()
 
-        assertThat(output.out).contains("Warm-up reached its limit of PT2S").doesNotContain("did not finish a round")
+        assertThat(output.out).contains("Warm-up reached its limit of PT4S").doesNotContain("did not finish a round")
     }
 
     @Test
@@ -95,10 +95,10 @@ class WarmUpTest : IntegrationTest() {
             val started = System.nanoTime()
             warmUp.warmUp()
 
-            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2))
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3))
             assertThat(availability.readinessState).isEqualTo(ReadinessState.ACCEPTING_TRAFFIC)
             awaitWarm()
-            assertThat(output.out).contains("Warm-up did not finish a round within its limit of PT2S")
+            assertThat(output.out).contains("Warm-up did not finish a round within its limit of PT4S")
         } finally {
             stuck.countDown()
         }

@@ -4,6 +4,9 @@ import java.util.UUID
 
 /** Answers of the services in the shape control reads; each test changes only what it is about. */
 object RunFixtures {
+    /** Spelled out rather than taken from control, so a changed query fails the tests. */
+    const val GATEWAY_ALL_WARM = "min(gateway_warm_up_complete) * (count(gateway_warm_up_complete) == bool count(up{job=\"gateway\"}))"
+
     fun simulation(runId: UUID, state: String) = mapOf(
         "runId" to runId, "state" to state, "finishedAt" to null, "requested" to 1000, "acknowledged" to 990,
         "failed" to 5, "unknown" to 5, "retries" to 3, "duplicatesSent" to 2,

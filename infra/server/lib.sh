@@ -47,6 +47,8 @@ ensure_passwords() {
       echo "passwords:" >"$passwords_file"
       echo "generated $passwords_file: keep a copy, the database roles are created with these passwords" >&2
     fi
+    # A file edited by hand may end without a newline, and the next role would join its last line.
+    [ -z "$(tail -c1 "$passwords_file")" ] || echo >>"$passwords_file"
     for role in $roles; do
       if ! grep -q "^  $role: " "$passwords_file"; then
         password=$(openssl rand -hex 24) || exit 1

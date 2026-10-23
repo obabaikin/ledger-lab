@@ -7,7 +7,8 @@ import org.springframework.stereotype.Component
 
 /**
  * Whether every gateway instance finished its warm-up: right after a deploy all services start cold together, and a
- * run admitted then met a wave of 503 busy (measured on the server). A killed instance's series goes stale and drops out.
+ * run admitted then met a wave of 503 busy (measured on the server). An instance Prometheus failed to scrape has no
+ * warm-up series, so the counts differ and the gateway is not warm; a killed instance drops out of both.
  */
 @Component
 class GatewayWarmUp(private val prometheus: PrometheusClient) {
@@ -23,7 +24,8 @@ class GatewayWarmUp(private val prometheus: PrometheusClient) {
     }
 
     private companion object {
-        const val ALL_WARM = "min(${GatewayMetrics.WARM_UP_COMPLETE})"
+        const val ALL_WARM = "min(${GatewayMetrics.WARM_UP_COMPLETE}) * " +
+            "(count(${GatewayMetrics.WARM_UP_COMPLETE}) == bool count(up{job=\"${GatewayMetrics.JOB}\"}))"
         const val WARM = 1.0
     }
 }

@@ -1,5 +1,6 @@
 package com.ledgerlab.control
 
+import com.ledgerlab.control.RunFixtures.GATEWAY_ALL_WARM
 import com.ledgerlab.control.RunFixtures.prometheus
 import com.ledgerlab.control.runs.QueueScheduler
 import com.ledgerlab.control.runs.RunQueue
@@ -185,7 +186,7 @@ class RunQueueTest : IntegrationTest() {
     }
 
     @Test
-    fun `a queued run waiting only for its place does not say the bank is warming up`() {
+    fun `a queued run waiting only for its place does not say the bank is getting ready`() {
         val token = invite()
         val runs = (1..props.runs.maxActive + 1).map { sessionOf(token).let { sessionId -> sessionId to start(sessionId).body!!["runId"] } }
         runs.take(props.runs.maxActive).forEach { setRun(it.second, state = "CREATED") }
@@ -199,7 +200,7 @@ class RunQueueTest : IntegrationTest() {
     }
 
     private fun gatewayWarm(value: Int) = prometheus.answerQuery(
-        "GET", "/api/v1/query", "query=min(gateway_warm_up_complete)", 200, prometheus(listOf(emptyMap<String, String>() to value)),
+        "GET", "/api/v1/query", "query=$GATEWAY_ALL_WARM", 200, prometheus(listOf(emptyMap<String, String>() to value)),
     )
 
     private fun heldPartitions(count: Int) = prometheus.answerQuery(

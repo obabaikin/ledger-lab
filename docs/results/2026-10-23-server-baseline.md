@@ -128,7 +128,8 @@ The highest working set during the whole series, against the pod's limit.
 | reporting | 332 / 448 (74 %) | |
 | Prometheus | 81 / 512 (16 %) | |
 | node-exporter, postgres-exporter | 10 / 64 each | |
-| Traefik, metrics server, CoreDNS (k3s) | 112, 71, 63 | no limit |
+| Traefik (k3s) | 112 / 256 (44 %) | |
+| metrics server, CoreDNS (k3s) | 71, 63 | no limit |
 
 The node as a whole used 5.2–6.4 GB of its 11.96 GB, with no swap: memory is not the limit.
 

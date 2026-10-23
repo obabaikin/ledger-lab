@@ -30,8 +30,9 @@ data:
             target_label: job
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: instance
-          # Control lists the bank's pods by this label; the exporters and cert-manager are not the bank.
-          - target_label: bank_service
+          # Control lists the project's own services by this label (the bank, the generator, control); the exporters and
+          # cert-manager are not among them.
+          - target_label: lab_service
             replacement: "true"
       - job_name: exporters
         scrape_interval: {{ .Values.exporters.scrapeInterval }}

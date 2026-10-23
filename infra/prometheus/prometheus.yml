@@ -1,5 +1,5 @@
 # Services run on the host (bootRun); control reads the pods and the ledger's duplicates from here (ADR 0015),
-# the pods by the label bank_service, as in the chart.
+# the pods by the label lab_service, as in the chart.
 global:
   scrape_interval: 1s
   scrape_timeout: 800ms
@@ -9,24 +9,24 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8080"]
-        labels: {bank_service: "true"}
+        labels: {lab_service: "true"}
   - job_name: gateway
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8081"]
-        labels: {bank_service: "true"}
+        labels: {lab_service: "true"}
   - job_name: generator
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8082"]
-        labels: {bank_service: "true"}
+        labels: {lab_service: "true"}
   - job_name: control
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8083"]
-        labels: {bank_service: "true"}
+        labels: {lab_service: "true"}
   - job_name: reporting
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8084"]
-        labels: {bank_service: "true"}
+        labels: {lab_service: "true"}

@@ -52,7 +52,7 @@ data class RunView(
     val finishedAt: Instant?,
     @field:Schema(description = "Place in the queue, from 1; only while queued.")
     val position: Long?,
-    @field:Schema(description = "WARM_UP while queued because the bank is warming up after a start: the ledger takes its partitions or the gateway warms up; null otherwise.")
+    @field:Schema(description = "WARM_UP while queued because the bank is not ready: the ledger takes its partitions (after a start or a crash), the gateway warms up, or Prometheus cannot tell; null otherwise.")
     val waitingFor: WaitingFor?,
     @field:Schema(description = "When the clients started sending; null before.")
     val startedAt: Instant?,
