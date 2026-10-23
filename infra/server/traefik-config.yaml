@@ -10,9 +10,6 @@ spec:
     service:
       spec:
         externalTrafficPolicy: Local
-    logs:
-      access:
-        enabled: true
     resources:
       requests: {memory: 256Mi}
       limits: {memory: 256Mi}
