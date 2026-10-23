@@ -81,7 +81,36 @@ A run of 20 s, started the moment the services were ready:
 All three ended `BALANCED`. A warm bank sustains 200 TPS with no refusal, so the rate alone is not the
 cause: the JVMs start together on the same six cores, and while they compile and collect garbage (70–125 ms
 per second in the gateway and the generator) the gateway's warm-up gets through 519–1,312 of its 2,000
-rounds in its 5 s. A lower cap does not fix it; the fix and its measurement: pending.
+rounds in its 5 s. A lower cap does not fix it.
+
+## Right after a deploy, with the warm-up
+
+The fix: the gateway takes traffic after 5 s and goes on with its warm-up rounds behind that, and control admits no
+run until every gateway instance has finished them. Measured the same day, 200 TPS for 20 s, the run started the
+moment the deploy or the restart was ready. A rounds value counts as enough when two runs in a row, each after a fresh
+start of the gateway, end with nothing refused, given up or unknown.
+
+| Start | Warm-up rounds | Queued | Warm-up took | Refused of 4,000 | Verdict |
+|---|---|---|---|---|---|
+| the whole bank just deployed | 2,000 | 0 s | 11.5 s | 2,917 (of 3,973 sent) | `BALANCED` |
+| only the gateway restarted | 2,000 | 3 s | 10.5 s | 692 | `BALANCED` |
+| only the gateway restarted | 4,000 | 1 s / 3 s | 10.5 / 9.3 s | 0 / 257 | `BALANCED` |
+| only the gateway restarted | 5,000 | 13 s / 6 s | 17.1 / 11.2 s | 0 / 0 | `BALANCED` |
+| only the gateway restarted | 10,000 | 13 s / 24 s | 24.2 / 25.5 s | 0 / 0 | `BALANCED` |
+
+- **A cold gateway is fixed by waiting.** From 5,000 rounds on, both runs after a restart refused nothing; the
+  visitor waits up to 25 s in the queue, and the page says the bank is warming up. 4,000 passed once and refused
+  257 times in the second run, 2,000 is not enough at all.
+- **"Warm" has to be measured.** With 2,000 rounds the gateway reported itself warm and still refused 692
+  transfers: all rounds done is not the same as compiled. The number of rounds is set by measurement on the
+  server, not by the time they take.
+- **After a full deploy the node's CPU is the limit, not the ledger itself.** The gateway was warm 30 s before
+  the run; the ledger instances restart one by one, the last was ready 3 s before control admitted the run.
+  Their cold JVMs compiled on the same six cores as PostgreSQL: the node ran at 92–97 %, up to 106 of the
+  gateway's inserts waited for a database connection (0–4 with a warm ledger), and the gateway refused 2,917
+  transfers. The ledger refuses nothing on its own: it reads from Kafka, and a crash of every instance at
+  150 TPS was absorbed with no refusal. What is missing is a warm bank before the first run after a full
+  deploy (pending).
 
 ## Memory by pod
 
@@ -126,5 +155,9 @@ The rest of the CPU the node reports busy (up to 4.8 cores at 500 TPS) is k3s it
 - **Memory:** PostgreSQL's limit goes from 768 to 912 MiB, a quarter above its peak; every other limit
   already is. k3s's own pods stay without one.
 - **Right after a deploy** control admits no run until every gateway instance has finished its warm-up,
-  which goes on behind the gateway's readiness for up to 90 s; the queued run says so. Its measurement:
-  pending.
+  which goes on behind the gateway's readiness for up to 90 s; the queued run says so. On the server the
+  warm-up needs at least 5,000 rounds: with them a restarted gateway refuses nothing. The server runs with
+  6,000, one step above.
+- **Right after a full deploy** a run still meets refusals: every JVM starts cold on the same node, and the
+  gateway's inserts wait for a database that shares the CPU with them. A restart of the ledger alone, as by the
+  chaos button, needs nothing: Kafka holds the transfers until it is back.
