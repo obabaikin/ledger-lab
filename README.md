@@ -234,7 +234,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Every run reconciles: the books, the bank's events and the client's journal agree | verdict `BALANCED` on each run | done |
 | Survives crashes mid-run | one hour at 300 TPS on the server, the ledger crashed twice, `BALANCED` | done |
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
-| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics | next |
+| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS, the node's CPU the limit ([results](docs/results/2026-10-23-server-baseline.md)) | done |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | next |
 | Access on request | a visitor enters an email and receives an invite link; sign-in with Google later | planned |
 | A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |

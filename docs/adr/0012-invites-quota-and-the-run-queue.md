@@ -34,13 +34,18 @@ the same session returns the same run and costs no quota; a different body is 42
 exists. A start holds a database connection while it waits for the queue's lock, so at most
 `max-concurrent-starts` wait at once; one more is answered 503 with error `busy` and `Retry-After` after
 `start-wait`, and nothing is started. At most `max-active` runs hold a place, and together they run at most `max-total-tps`
-transactions per second (1000: one 1000 TPS run took up to 5 cores in our measurements, and three at
-once ran the gateway and the generator out of memory). A scheduler hands free places to the oldest
+transactions per second (1000 locally: one 1000 TPS run took up to 5 cores in our measurements, and three at
+once ran the gateway and the generator out of memory; on the server 300, with no run above 200, the rate its
+node sustains, [results](../results/2026-10-23-server-baseline.md)). A scheduler hands free places to the oldest
 queued runs in order, while their rates fit; a run that does not fit holds back the ones behind it, so
 a large run never waits forever behind smaller ones. It admits nothing until the ledger instances hold
 every partition of the transfers topic, as Prometheus sees them: a killed instance keeps its
 partitions until it returns or its session times out, while the others still answer, and Prometheus
-drops the series of an instance it cannot scrape. Prometheus not answering counts as not ready. A run
+drops the series of an instance it cannot scrape. Nor does it admit any until every gateway instance
+reports its warm-up done (`gateway_warm_up_complete`): right after a deploy every service starts cold on
+the same cores, and a run admitted then met a wave of 503 busy. The gateway takes traffic after 5 s, so a
+deploy does not wait for it, and goes on warming up behind that for up to 90 s; meanwhile a queued run's
+view says `waitingFor: WARM_UP`. Prometheus not answering counts as not ready. A run
 that waits longer than `queue-timeout` becomes `EXPIRED`. The queue lives in the `runs` table, so it survives a
 restart of control, and waiting time is measured by the database clock from `created_at`.
 
@@ -56,6 +61,10 @@ interleave: concurrent starts get exactly the free places of the queue and of th
   a run started next to a killed instance's stalled partitions; and as the Kubernetes readiness probe
   it took every instance out of the Service during a rebalance, though reconciliation reads need no
   Kafka.
+- **A lower cap right after a deploy instead of waiting.** 200 TPS, a rate the warm bank sustains, still
+  met 2,807 refusals in 3,391 transfers when every service had just restarted.
+- **Waiting a fixed time after a start.** The JIT compiles what runs, not what waits: an idle gateway stays
+  cold however long it waits, so the signal is its warm-up done, not its age.
 - **Letting a smaller queued run overtake a larger one.** Fills the rate better, but a 1000 TPS run
   could wait forever behind a stream of small ones.
 - **Only disabling the button against double clicks.** A retried request from the network would

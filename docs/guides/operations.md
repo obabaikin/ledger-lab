@@ -53,6 +53,11 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
   in as `monitor`, a member of `pg_monitor`: it sees the statistics, not the data. The role is created or
   updated on every deploy, as the init script runs only on an empty volume. No port of either is
   published; read them through `kubectl port-forward svc/prometheus 9090`.
+- **Memory limits:** every pod of the chart has one, at least a quarter above its peak on the server
+  ([results](../results/2026-10-23-server-baseline.md)). k3s's own pods (Traefik, CoreDNS, the metrics
+  server) are left as k3s ships them, the one exception: together they peaked under 250 MiB.
+- **Right after a deploy** runs wait in the queue until the gateway has warmed up, up to 90 s; the page
+  says so on the queued run.
 - **Operator access** is SSH with a key only: `kubectl` and `psql` (via `kubectl exec`) through the
   tunnel. Nothing but the page is published.
 - **Hardening:** a host firewall (nftables) under the provider's lets only SSH reach the host itself;

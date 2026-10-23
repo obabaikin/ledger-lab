@@ -545,9 +545,14 @@
           "tps" : {
             "format" : "int32",
             "type" : "integer"
+          },
+          "waitingFor" : {
+            "description" : "WARM_UP while queued because the bank is warming up after a start; null otherwise.",
+            "enum" : [ "WARM_UP" ],
+            "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "admittedAt", "booksFinalAt", "closedAt", "createdAt", "durationSeconds", "failure", "finishedAt", "live", "position", "result", "runId", "startedAt", "state", "stopRequested", "tps" ],
+        "required" : [ "admittedAt", "booksFinalAt", "closedAt", "createdAt", "durationSeconds", "failure", "finishedAt", "live", "position", "result", "runId", "startedAt", "state", "stopRequested", "tps", "waitingFor" ],
         "type" : "object"
       },
       "SecondStats" : {

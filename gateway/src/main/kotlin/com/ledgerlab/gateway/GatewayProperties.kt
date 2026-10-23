@@ -16,8 +16,11 @@ data class GatewayProperties(
     val admission: Admission,
     val warmUp: WarmUp,
 ) {
-    /** Up to [rounds] rounds of the submission path before the gateway takes traffic, for at most [duration]. */
-    data class WarmUp(val rounds: Int, val duration: Duration)
+    /**
+     * Up to [rounds] rounds of the submission path. The gateway takes traffic after at most [duration]; the rounds go
+     * on behind it for at most [maxDuration], and only then does it report itself warm (control admits runs after that).
+     */
+    data class WarmUp(val rounds: Int, val duration: Duration, val maxDuration: Duration)
     /** At most [maxConcurrent] submissions insert at once; one more waits up to [wait], then is refused. */
     data class Admission(val maxConcurrent: Int, val wait: Duration)
     data class Outbox(val batchSize: Int, val sendTimeout: Duration)

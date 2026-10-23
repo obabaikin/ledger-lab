@@ -6,6 +6,7 @@ import com.ledgerlab.gateway.persistence.TransferRepository
 import com.ledgerlab.gateway.service.TransferAdmission
 import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
+import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import jakarta.validation.Validator
 import org.slf4j.LoggerFactory
@@ -21,13 +22,17 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Runs the submission path before the gateway takes traffic: a cold JIT answered the first seconds of a run after a
- * deploy with 503 busy. Every round is rolled back, so nothing reaches the transfers, the outbox or Kafka.
+ * Runs the submission path before the gateway takes runs: a cold JIT answered the first seconds of a run after a
+ * deploy with 503 busy. Every round is rolled back, so nothing reaches the transfers, the outbox or Kafka. The gateway
+ * takes traffic after the short limit, so a deploy does not wait; control admits runs only once [WARM] reads 1.
  */
 @Component
 class TransferWarmUp(
@@ -38,34 +43,60 @@ class TransferWarmUp(
     private val validator: Validator,
     private val events: ApplicationEventPublisher,
     private val props: GatewayProperties,
+    registry: MeterRegistry,
 ) : ApplicationRunner {
     private val log = LoggerFactory.getLogger(javaClass)
+    private val warm = AtomicInteger(NOT_WARM).also { registry.gauge(WARM, it) }
 
     override fun run(args: ApplicationArguments) = warmUp()
 
-    /** Takes traffic afterwards in any case: a gateway that cannot warm up still serves, only slower at first. */
+    /** Takes traffic after the short limit in any case: a gateway that cannot warm up still serves, only slower at first. */
     fun warmUp() {
+        warm.set(NOT_WARM)
         AvailabilityChangeEvent.publish(events, this, ReadinessState.REFUSING_TRAFFIC)
         val started = System.nanoTime()
         // Not closed with use: closing waits for the round, and a round stuck on the database must not hold the start.
         val executor = Executors.newVirtualThreadPerTaskExecutor()
-        val rounds = executor.submit<Int> { rounds(started + props.warmUp.duration.toNanos()) }
+        val rounds = executor.submit<Int> { rounds(started + props.warmUp.maxDuration.toNanos()) }
+        try {
+            report(rounds.get(props.warmUp.duration.toNanos(), TimeUnit.NANOSECONDS), started)
+            finish(executor)
+        } catch (_: TimeoutException) {
+            log.info("Warm-up takes traffic after {}; the rounds go on for up to {}", props.warmUp.duration, props.warmUp.maxDuration)
+            executor.submit { awaitBehind(rounds, started, executor) }
+        } catch (e: ExecutionException) {
+            log.warn("Warm-up failed", e.cause)
+            finish(executor)
+        }
+        AvailabilityChangeEvent.publish(events, this, ReadinessState.ACCEPTING_TRAFFIC)
+    }
+
+    private fun awaitBehind(rounds: Future<Int>, started: Long, executor: ExecutorService) {
         try {
             // The rounds stop at the limit themselves; the margin lets the last one return, so a timeout means a stuck round.
-            val done = rounds.get((props.warmUp.duration + RESULT_MARGIN).toNanos(), TimeUnit.NANOSECONDS)
-            if (done < props.warmUp.rounds) {
-                log.warn("Warm-up reached its limit of {} after {} of {} rounds", props.warmUp.duration, done, props.warmUp.rounds)
-            } else {
-                log.info("Warm-up: {} rounds in {} ms", done, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
-            }
+            val left = started + (props.warmUp.maxDuration + RESULT_MARGIN).toNanos() - System.nanoTime()
+            report(rounds.get(left, TimeUnit.NANOSECONDS), started)
         } catch (_: TimeoutException) {
-            log.warn("Warm-up did not finish a round within its limit of {}", props.warmUp.duration)
+            log.warn("Warm-up did not finish a round within its limit of {}", props.warmUp.maxDuration)
         } catch (e: ExecutionException) {
             log.warn("Warm-up failed", e.cause)
         } finally {
-            executor.shutdownNow()
+            finish(executor)
         }
-        AvailabilityChangeEvent.publish(events, this, ReadinessState.ACCEPTING_TRAFFIC)
+    }
+
+    private fun report(done: Int, started: Long) {
+        if (done < props.warmUp.rounds) {
+            log.warn("Warm-up reached its limit of {} after {} of {} rounds", props.warmUp.maxDuration, done, props.warmUp.rounds)
+        } else {
+            log.info("Warm-up: {} rounds in {} ms", done, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
+        }
+    }
+
+    /** Warm also when the rounds failed or got stuck: runs must not wait for a gateway that will never get warmer. */
+    private fun finish(executor: ExecutorService) {
+        warm.set(WARM_VALUE)
+        executor.shutdownNow()
     }
 
     private fun rounds(deadline: Long): Int {
@@ -95,7 +126,11 @@ class TransferWarmUp(
         }
     }
 
-    private companion object {
-        val RESULT_MARGIN: Duration = Duration.ofMillis(500)
+    companion object {
+        /** 1 once the rounds are done or their limit passed; control reads it from Prometheus. */
+        const val WARM = "gateway.warm_up.complete"
+        private const val NOT_WARM = 0
+        private const val WARM_VALUE = 1
+        private val RESULT_MARGIN: Duration = Duration.ofMillis(500)
     }
 }

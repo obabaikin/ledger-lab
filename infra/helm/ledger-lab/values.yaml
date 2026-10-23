@@ -29,8 +29,9 @@ kafka:
 postgres:
   image: postgres:17-alpine
   storage: 2Gi
-  memory: 768Mi
-  # Half the memory: the indexes of a run are written in random order, so they must stay cached.
+  # The peak of the server's series was 729Mi of 768Mi; a quarter above it (docs/results/2026-10-23-server-baseline.md).
+  memory: 912Mi
+  # The indexes of a run are written in random order, so they must stay cached.
   sharedBuffers: 384MB
 
 prometheus:

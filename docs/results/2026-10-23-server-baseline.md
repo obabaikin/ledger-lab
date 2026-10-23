@@ -123,4 +123,8 @@ The rest of the CPU the node reports busy (up to 4.8 cores at 500 TPS) is k3s it
 
 - **Rates on the page:** 50, 100 and 200 TPS for one run, at most 300 for all runs together; above 200 runs
   together may meet a refusal now and then, which the bank answers with `503 busy` and still balances.
-- Pending: the fix for the first seconds after a deploy, and the memory limits.
+- **Memory:** PostgreSQL's limit goes from 768 to 912 MiB, a quarter above its peak; every other limit
+  already is. k3s's own pods stay without one.
+- **Right after a deploy** control admits no run until every gateway instance has finished its warm-up,
+  which goes on behind the gateway's readiness for up to 90 s; the queued run says so. Its measurement:
+  pending.

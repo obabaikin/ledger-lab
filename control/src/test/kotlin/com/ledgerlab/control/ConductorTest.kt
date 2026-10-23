@@ -35,7 +35,7 @@ class ConductorTest : IntegrationTest() {
 
     private fun admitted(): UUID {
         val runId = UUID.fromString(start(sessionOf(invite())).body!!["runId"] as String)
-        queue.advance(ledgerReady = true)
+        queue.advance(bankReady = true)
         return runId
     }
 

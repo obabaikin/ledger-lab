@@ -46,6 +46,7 @@ export const run = (changes: Partial<RunView> = {}): RunView => ({
   admittedAt: null,
   finishedAt: null,
   position: 1,
+  waitingFor: null,
   startedAt: null,
   stopRequested: false,
   closedAt: null,

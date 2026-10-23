@@ -1,5 +1,6 @@
 package com.ledgerlab.control.api
 
+import com.ledgerlab.control.gateway.GatewayWarmUp
 import com.ledgerlab.control.metrics.LiveRuns
 import com.ledgerlab.control.metrics.LiveView
 import com.ledgerlab.control.runs.Conductor
@@ -51,6 +52,8 @@ data class RunView(
     val finishedAt: Instant?,
     @field:Schema(description = "Place in the queue, from 1; only while queued.")
     val position: Long?,
+    @field:Schema(description = "WARM_UP while queued because the bank is warming up after a start; null otherwise.")
+    val waitingFor: WaitingFor?,
     @field:Schema(description = "When the clients started sending; null before.")
     val startedAt: Instant?,
     @field:Schema(description = "A stop was asked for while the run was running.")
@@ -67,6 +70,8 @@ data class RunView(
     val live: LiveView?,
 )
 
+enum class WaitingFor { WARM_UP }
+
 @Schema(description = "A session's runs, newest first.")
 data class RunList(val items: List<RunView>)
 
@@ -77,6 +82,7 @@ class RunController(
     private val starts: StartAdmission,
     private val liveRuns: LiveRuns,
     private val conductor: Conductor,
+    private val gatewayWarmUp: GatewayWarmUp,
 ) {
 
     @Operation(summary = "Start a run: it joins the queue")
@@ -102,14 +108,14 @@ class RunController(
         val run = starts.admit { runs.start(sessionId, RunRequest(request.requestId, request.tps, request.durationSeconds)) }
         return ResponseEntity.status(if (run.state.isFinal) HttpStatus.OK else HttpStatus.ACCEPTED)
             .location(URI.create("${RUNS_PATH.replace("{sessionId}", sessionId.toString())}/${run.runId}"))
-            .body(run.toView())
+            .body(run.view())
     }
 
     @Operation(summary = "A session's runs")
     @ApiResponse(responseCode = "200", description = "The runs, newest first")
     @ApiResponse(responseCode = "404", description = "Unknown session", content = [Content(schema = Schema(implementation = ApiError::class))])
     @GetMapping
-    fun list(@PathVariable sessionId: UUID): RunList = RunList(runs.listOf(sessionId).map { it.toView() })
+    fun list(@PathVariable sessionId: UUID): RunList = RunList(runs.listOf(sessionId).map { it.view() })
 
     @Operation(summary = "A run of the session")
     @ApiResponse(responseCode = "200", description = "The run")
@@ -118,7 +124,7 @@ class RunController(
     fun get(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunView {
         val run = runs.find(sessionId, runId)
         val live = liveRuns.of(runId)?.takeIf { run.state == RunState.RUNNING || run.state == RunState.DRAINING }
-        return run.toView(live?.copy(chaos = conductor.chaosSince(run)))
+        return run.view(live?.copy(chaos = conductor.chaosSince(run)))
     }
 
     @Operation(summary = "Stop a running run early; the bank still finishes and reconciles it")
@@ -129,7 +135,7 @@ class RunController(
     @PostMapping("/{runId}/stop")
     fun stop(@PathVariable sessionId: UUID, @PathVariable runId: UUID): ResponseEntity<RunView> {
         val run = runs.stop(sessionId, runId)
-        return ResponseEntity.status(if (run.state == RunState.RUNNING) HttpStatus.ACCEPTED else HttpStatus.OK).body(run.toView())
+        return ResponseEntity.status(if (run.state == RunState.RUNNING) HttpStatus.ACCEPTED else HttpStatus.OK).body(run.view())
     }
 
     @Operation(summary = "The verdict of a reconciled run")
@@ -139,13 +145,16 @@ class RunController(
     @GetMapping("/{runId}/report")
     fun report(@PathVariable sessionId: UUID, @PathVariable runId: UUID): RunReport = runs.report(sessionId, runId)
 
+    private fun Run.view(live: LiveView? = null) =
+        toView(live, if (state == RunState.QUEUED && !gatewayWarmUp.warm) WaitingFor.WARM_UP else null)
+
     companion object {
         const val RUNS_PATH = "/api/sessions/{sessionId}/runs"
         private const val RUN_LOCATION = "The run's address"
     }
 }
 
-private fun Run.toView(live: LiveView? = null) = RunView(
-    runId, state, tps, durationSeconds, createdAt, admittedAt, finishedAt, position, startedAt, stopRequested, closedAt, booksFinalAt,
+private fun Run.toView(live: LiveView?, waitingFor: WaitingFor?) = RunView(
+    runId, state, tps, durationSeconds, createdAt, admittedAt, finishedAt, position, waitingFor, startedAt, stopRequested, closedAt, booksFinalAt,
     result, failure, live,
 )

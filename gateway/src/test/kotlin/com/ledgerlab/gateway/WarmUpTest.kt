@@ -5,6 +5,7 @@ import com.ledgerlab.gateway.persistence.TransferRepository
 import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.ArgumentMatchers.anyInt
@@ -24,7 +25,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
-@TestPropertySource(properties = ["gateway.warm-up.rounds=1000000", "gateway.warm-up.duration=1s"])
+@TestPropertySource(properties = ["gateway.warm-up.rounds=1000000", "gateway.warm-up.duration=1s", "gateway.warm-up.max-duration=2s"])
 @ExtendWith(OutputCaptureExtension::class)
 class WarmUpTest : IntegrationTest() {
 
@@ -38,8 +39,16 @@ class WarmUpTest : IntegrationTest() {
 
     private fun accepted() = registry.counter("gateway.transfers", "outcome", "accepted").count()
 
+    private fun warm() = registry.get(TransferWarmUp.WARM).gauge().value()
+
+    private fun awaitWarm() = await().atMost(Duration.ofSeconds(5)).until { warm() == 1.0 }
+
+    /** The context's own warm-up at start goes on behind it up to the long limit; a test's warm-up must not overlap it. */
+    @BeforeEach
+    fun earlierWarmUpDone() = awaitWarm()
+
     @Test
-    fun `the gateway refuses traffic while it warms up and takes it at the limit, with a warning`(output: CapturedOutput) {
+    fun `the gateway refuses traffic while it warms up, takes it at the short limit and reports itself warm at the long one`(output: CapturedOutput) {
         Executors.newSingleThreadExecutor().use { pool ->
             val warming = pool.submit { warmUp.warmUp() }
             await().atMost(Duration.ofSeconds(5)).until { availability.readinessState == ReadinessState.REFUSING_TRAFFIC }
@@ -49,7 +58,9 @@ class WarmUpTest : IntegrationTest() {
         }
 
         assertThat(availability.readinessState).isEqualTo(ReadinessState.ACCEPTING_TRAFFIC)
-        assertThat(output.out).contains("Warm-up reached its limit of PT1S")
+        assertThat(warm()).isEqualTo(0.0)
+        awaitWarm()
+        assertThat(output.out).contains("Warm-up reached its limit of PT2S")
     }
 
     @Test
@@ -58,23 +69,25 @@ class WarmUpTest : IntegrationTest() {
         val counted = accepted()
 
         warmUp.warmUp()
+        awaitWarm()
 
         assertThat(transferRows()).isEqualTo(rows)
         assertThat(accepted()).isEqualTo(counted)
     }
 
     @Test
-    fun `a round that ends just past the limit counts as the limit reached, not as a stuck round`(output: CapturedOutput) {
+    fun `a round that ends just past the long limit counts as the limit reached, not as a stuck round`(output: CapturedOutput) {
         doAnswer { Thread.sleep(300); it.callRealMethod() }
             .`when`(transfers).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
 
         warmUp.warmUp()
+        awaitWarm()
 
-        assertThat(output.out).contains("Warm-up reached its limit of PT1S").doesNotContain("did not finish a round")
+        assertThat(output.out).contains("Warm-up reached its limit of PT2S").doesNotContain("did not finish a round")
     }
 
     @Test
-    fun `a round stuck on the database does not hold the gateway back past the limit`(output: CapturedOutput) {
+    fun `a round stuck on the database holds back neither the traffic nor, past the long limit, the runs`(output: CapturedOutput) {
         val stuck = CountDownLatch(1)
         doAnswer { stuck.await(); it.callRealMethod() }
             .`when`(transfers).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
@@ -82,9 +95,10 @@ class WarmUpTest : IntegrationTest() {
             val started = System.nanoTime()
             warmUp.warmUp()
 
-            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3))
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2))
             assertThat(availability.readinessState).isEqualTo(ReadinessState.ACCEPTING_TRAFFIC)
-            assertThat(output.out).contains("Warm-up did not finish a round within its limit")
+            awaitWarm()
+            assertThat(output.out).contains("Warm-up did not finish a round within its limit of PT2S")
         } finally {
             stuck.countDown()
         }

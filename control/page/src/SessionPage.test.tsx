@@ -187,6 +187,14 @@ describe('session page', () => {
     expect(screen.getByText('Transfers per second')).toBeInTheDocument()
   })
 
+  it('says on the queued phase when the run waits for the bank to warm up after a start', async () => {
+    control([run({ state: 'QUEUED', position: 1, waitingFor: 'WARM_UP' })])
+    renderAt(`/s/${SESSION_ID}`)
+
+    const phases = await screen.findByLabelText('Phases')
+    await waitFor(() => expect(within(phases).getByText(/Queued/)).toHaveTextContent('Queued · #1 in line · the bank is warming up'))
+  })
+
   it('shows an expired run with its state and reason above the diagram', async () => {
     control([run({ state: 'EXPIRED', failure: 'waited in the queue longer than 5 min' })])
     renderAt(`/s/${SESSION_ID}`)

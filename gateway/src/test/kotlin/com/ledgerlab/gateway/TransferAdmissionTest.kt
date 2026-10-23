@@ -14,7 +14,7 @@ class TransferAdmissionTest {
         "transfers", "results", GatewayProperties.Outbox(100, Duration.ofSeconds(1)),
         GatewayProperties.Consumer(Duration.ofSeconds(1)), Duration.ofSeconds(10), Duration.ofSeconds(1),
         Duration.ofSeconds(5), GatewayProperties.Admission(1, Duration.ofMillis(10)),
-        GatewayProperties.WarmUp(0, Duration.ZERO),
+        GatewayProperties.WarmUp(0, Duration.ZERO, Duration.ZERO),
     )
 
     @Test
