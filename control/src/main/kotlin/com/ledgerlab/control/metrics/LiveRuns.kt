@@ -122,7 +122,8 @@ class LiveRuns(
         }?.toMap()
 
     private companion object {
-        const val UP = "up"
+        /** Set by the chart's Prometheus config on the project's own services, not on the exporters beside them. */
+        const val UP = "up{lab_service=\"true\"}"
         const val PARTITIONS = LedgerMetrics.ASSIGNED_PARTITIONS
         const val DUPLICATES = "sum by (run) (${LedgerMetrics.DUPLICATES})"
         const val INSTANCE = "instance"

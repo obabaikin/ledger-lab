@@ -10,6 +10,20 @@ spec:
     service:
       spec:
         externalTrafficPolicy: Local
+    # Tells browsers from bots by client address and User-Agent. The path, query and Referer stay out: they carry
+    # invite tokens and session ids.
+    logs:
+      access:
+        enabled: true
+        format: json
+        fields:
+          general:
+            names:
+              RequestPath: drop
+          headers:
+            defaultmode: drop
+            names:
+              User-Agent: keep
     resources:
       requests: {memory: 256Mi}
       limits: {memory: 256Mi}

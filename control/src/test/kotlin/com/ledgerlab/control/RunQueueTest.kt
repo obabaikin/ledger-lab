@@ -1,5 +1,6 @@
 package com.ledgerlab.control
 
+import com.ledgerlab.control.RunFixtures.GATEWAY_ALL_WARM
 import com.ledgerlab.control.RunFixtures.prometheus
 import com.ledgerlab.control.runs.QueueScheduler
 import com.ledgerlab.control.runs.RunQueue
@@ -24,7 +25,7 @@ class RunQueueTest : IntegrationTest() {
         setRun(stale, createdAgo = props.runs.queueTimeout.plusSeconds(1))
         setRun(fresh, createdAgo = props.runs.queueTimeout.minusSeconds(5))
 
-        val step = queue.advance(ledgerReady = false)
+        val step = queue.advance(bankReady = false)
 
         assertThat(step.expired).isEqualTo(1)
         assertThat(stateOf(stale)).isEqualTo("EXPIRED")
@@ -37,7 +38,7 @@ class RunQueueTest : IntegrationTest() {
         val (stale) = queued(1)
         setRun(stale, createdAgo = props.runs.queueTimeout.plusSeconds(1))
 
-        assertThat(queue.advance(ledgerReady = true).admitted).isZero()
+        assertThat(queue.advance(bankReady = true).admitted).isZero()
         assertThat(stateOf(stale)).isEqualTo("EXPIRED")
     }
 
@@ -47,7 +48,7 @@ class RunQueueTest : IntegrationTest() {
         setRun(runs[0], state = "RUNNING")
         setRun(runs[1], state = "DRAINING")
 
-        val step = queue.advance(ledgerReady = true)
+        val step = queue.advance(bankReady = true)
 
         assertThat(step.admitted).isEqualTo(props.runs.maxActive - 2)
         assertThat(runs.drop(2).map { stateOf(it) })
@@ -63,7 +64,7 @@ class RunQueueTest : IntegrationTest() {
     fun `runs whose rates fit the total together start together`() {
         val runs = queuedAt(500, 100, 100)
 
-        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(3)
+        assertThat(queue.advance(bankReady = true).admitted).isEqualTo(3)
         assertThat(runs.map { stateOf(it) }).containsOnly("CREATED")
     }
 
@@ -71,22 +72,22 @@ class RunQueueTest : IntegrationTest() {
     fun `a run that would take the total past the limit waits until a running one ends`() {
         val (first, second) = queuedAt(props.runs.maxTotalTps, 100)
 
-        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(1)
+        assertThat(queue.advance(bankReady = true).admitted).isEqualTo(1)
         assertThat(stateOf(first)).isEqualTo("CREATED")
         assertThat(stateOf(second)).isEqualTo("QUEUED")
 
         setRun(first, state = "RECONCILED")
 
-        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(1)
+        assertThat(queue.advance(bankReady = true).admitted).isEqualTo(1)
         assertThat(stateOf(second)).isEqualTo("CREATED")
     }
 
     @Test
     fun `a smaller run behind a waiting one does not overtake it`() {
         val (running, big, small) = queuedAt(500, props.runs.maxTotalTps, 100)
-        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(1)
+        assertThat(queue.advance(bankReady = true).admitted).isEqualTo(1)
 
-        assertThat(queue.advance(ledgerReady = true).admitted).isZero()
+        assertThat(queue.advance(bankReady = true).admitted).isZero()
         assertThat(listOf(running, big, small).map { stateOf(it) }).containsExactly("CREATED", "QUEUED", "QUEUED")
     }
 
@@ -102,7 +103,7 @@ class RunQueueTest : IntegrationTest() {
     fun `runs that fill the total exactly start`() {
         val runs = queuedAt(props.runs.maxTotalTps / 2, props.runs.maxTotalTps / 2)
 
-        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(2)
+        assertThat(queue.advance(bankReady = true).admitted).isEqualTo(2)
         assertThat(runs.map { stateOf(it) }).containsOnly("CREATED")
     }
 
@@ -110,19 +111,19 @@ class RunQueueTest : IntegrationTest() {
     fun `final runs free their places`() {
         val runs = queued(props.runs.maxActive + 1)
         runs.take(props.runs.maxActive).forEach { setRun(it, state = "CREATED") }
-        assertThat(queue.advance(ledgerReady = true).admitted).isZero()
+        assertThat(queue.advance(bankReady = true).admitted).isZero()
 
         setRun(runs[0], state = "RECONCILED")
 
-        assertThat(queue.advance(ledgerReady = true).admitted).isEqualTo(1)
+        assertThat(queue.advance(bankReady = true).admitted).isEqualTo(1)
         assertThat(stateOf(runs.last())).isEqualTo("CREATED")
     }
 
     @Test
-    fun `no run leaves the queue while the ledger is not ready`() {
+    fun `no run leaves the queue while the bank is not ready`() {
         val runs = queued(2)
 
-        assertThat(queue.advance(ledgerReady = false).admitted).isZero()
+        assertThat(queue.advance(bankReady = false).admitted).isZero()
         assertThat(runs.map { stateOf(it) }).containsOnly("QUEUED")
     }
 
@@ -138,6 +139,7 @@ class RunQueueTest : IntegrationTest() {
     @Test
     fun `a tick admits runs only once the ledger holds every partition`() {
         val (run) = queued(1)
+        gatewayWarm(1)
 
         prometheus.status = 503
         assertThat(scheduler.tick().admitted).isZero()
@@ -150,6 +152,56 @@ class RunQueueTest : IntegrationTest() {
         assertThat(scheduler.tick().admitted).isEqualTo(1)
         assertThat(stateOf(run)).isEqualTo("CREATED")
     }
+
+    @Test
+    fun `a run waits while the gateway warms up, with the ledger ready, and says so in its view`() {
+        val token = invite()
+        val sessionId = sessionOf(token)
+        val run = start(sessionId).body!!["runId"]
+        heldPartitions(props.ledger.transferPartitions)
+        gatewayWarm(0)
+
+        assertThat(scheduler.tick().admitted).isZero()
+        assertThat(getRun(sessionId, run).body!!["waitingFor"]).isEqualTo("WARM_UP")
+
+        gatewayWarm(1)
+        assertThat(scheduler.tick().admitted).isEqualTo(1)
+        assertThat(getRun(sessionId, run).body!!.let { it["state"] to it["waitingFor"] }).isEqualTo("CREATED" to null)
+    }
+
+    @Test
+    fun `a run waits while the ledger takes its partitions, with the gateway warm, and says so in its view`() {
+        val token = invite()
+        val sessionId = sessionOf(token)
+        val run = start(sessionId).body!!["runId"]
+        heldPartitions(props.ledger.transferPartitions - 1)
+        gatewayWarm(1)
+
+        assertThat(scheduler.tick().admitted).isZero()
+        assertThat(getRun(sessionId, run).body!!["waitingFor"]).isEqualTo("WARM_UP")
+
+        heldPartitions(props.ledger.transferPartitions)
+        assertThat(scheduler.tick().admitted).isEqualTo(1)
+        assertThat(getRun(sessionId, run).body!!.let { it["state"] to it["waitingFor"] }).isEqualTo("CREATED" to null)
+    }
+
+    @Test
+    fun `a queued run waiting only for its place does not say the bank is getting ready`() {
+        val token = invite()
+        val runs = (1..props.runs.maxActive + 1).map { sessionOf(token).let { sessionId -> sessionId to start(sessionId).body!!["runId"] } }
+        runs.take(props.runs.maxActive).forEach { setRun(it.second, state = "CREATED") }
+        heldPartitions(props.ledger.transferPartitions)
+        gatewayWarm(1)
+
+        assertThat(scheduler.tick().admitted).isZero()
+
+        val (sessionId, waiting) = runs.last()
+        assertThat(getRun(sessionId, waiting).body!!.let { it["state"] to it["waitingFor"] }).isEqualTo("QUEUED" to null)
+    }
+
+    private fun gatewayWarm(value: Int) = prometheus.answerQuery(
+        "GET", "/api/v1/query", "query=$GATEWAY_ALL_WARM", 200, prometheus(listOf(emptyMap<String, String>() to value)),
+    )
 
     private fun heldPartitions(count: Int) = prometheus.answerQuery(
         "GET", "/api/v1/query", "query=sum(ledger_kafka_assigned_partitions)", 200, prometheus(listOf(emptyMap<String, String>() to count)),

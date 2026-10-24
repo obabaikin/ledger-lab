@@ -1,6 +1,7 @@
 package com.ledgerlab.control
 
 import com.ledgerlab.control.RunFixtures.simulation
+import com.ledgerlab.control.gateway.GatewayWarmUp
 import com.ledgerlab.control.generator.GeneratorApi
 import com.ledgerlab.control.http.forRun
 import com.ledgerlab.control.ledger.LedgerReadiness
@@ -30,11 +31,12 @@ class RealPrometheusTest : IntegrationTest() {
     @Autowired lateinit var conductor: Conductor
     @Autowired lateinit var queue: RunQueue
     @Autowired lateinit var readiness: LedgerReadiness
+    @Autowired lateinit var warmUp: GatewayWarmUp
 
     private fun running(): Pair<UUID, UUID> {
         val sessionId = sessionOf(invite())
         val runId = UUID.fromString(start(sessionId).body!!["runId"] as String)
-        queue.advance(ledgerReady = true)
+        queue.advance(bankReady = true)
         jdbc.sql("UPDATE runs SET state = 'RUNNING', started_at = clock_timestamp() WHERE run_id = :id").param("id", runId).update()
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200, simulation(runId, "RUNNING"))
         return sessionId to runId
@@ -54,6 +56,20 @@ class RealPrometheusTest : IntegrationTest() {
         val pods = (live(sessionId, runId)["pods"] as List<*>).map { it as Map<*, *> }.associateBy { it["job"] }
         assertThat(pods.getValue(LEDGER).let { it["up"] to it["partitions"] }).isEqualTo(true to 3)
         assertThat(pods.getValue(SECOND_LEDGER).let { it["up"] to it["partitions"] }).isEqualTo(true to null)
+    }
+
+    @Test
+    fun `the pods are the project's services only, not the exporters Prometheus scrapes beside them`() {
+        val (sessionId, runId) = running()
+        exporter.serve(LEDGER, "")
+        exporter.serve(SECOND_LEDGER, "")
+        exporter.serve(NODE_EXPORTER, "node_load1 0.5")
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE)
+
+        conductor.tick()
+
+        assertThat((live(sessionId, runId)["pods"] as List<*>).map { (it as Map<*, *>)["job"] })
+            .contains(LEDGER, SECOND_LEDGER).doesNotContain(NODE_EXPORTER)
     }
 
     @Test
@@ -85,6 +101,19 @@ class RealPrometheusTest : IntegrationTest() {
         exporter.serve(SECOND_LEDGER, "ledger_kafka_assigned_partitions ${props.ledger.transferPartitions - 2}")
         exporter.awaitScrapes(SCRAPES_TO_SETTLE)
         assertThat(readiness.isReady()).isTrue()
+    }
+
+    @Test
+    fun `a gateway instance Prometheus cannot scrape holds the runs back, though the other one is warm`() {
+        gateway.serve(GATEWAY, "gateway_warm_up_complete 1")
+        unscrapedGateway.serve(GATEWAY, "gateway_warm_up_complete 1")
+        unscrapedGateway.awaitScrapes(SCRAPES_TO_SETTLE)
+        gateway.awaitScrapes(SCRAPES_TO_SETTLE)
+        assertThat(warmUp.check()).isTrue()
+
+        unscrapedGateway.close()
+        gateway.awaitScrapes(SCRAPES_TO_SETTLE)
+        assertThat(warmUp.check()).isFalse()
     }
 
     /** Serves each job's metrics as text and counts the scrapes, so a test knows Prometheus has seen what it serves. */
@@ -126,9 +155,13 @@ class RealPrometheusTest : IntegrationTest() {
     companion object {
         private const val LEDGER = "ledger"
         private const val SECOND_LEDGER = "ledger-b"
-        private val JOBS = listOf(LEDGER, SECOND_LEDGER)
+        /** Scraped without the project's label, as the chart's exporters are. */
+        private const val NODE_EXPORTER = "node-exporter"
+        private val JOBS = listOf(LEDGER, SECOND_LEDGER, NODE_EXPORTER)
         /** A ledger instance the test kills by closing its exporter. */
         private const val KILLED_LEDGER = "ledger-killed"
+        /** Two instances under one job, as the chart's replicas are. */
+        private const val GATEWAY = "gateway"
         private const val PROMETHEUS_PORT = 9090
         private val SCRAPE_INTERVAL: Duration = Duration.ofSeconds(1)
         private val POLL: Duration = Duration.ofMillis(20)
@@ -139,16 +172,21 @@ class RealPrometheusTest : IntegrationTest() {
 
         val exporter = FakeExporter(JOBS)
         val killedExporter = FakeExporter(listOf(KILLED_LEDGER))
+        val gateway = FakeExporter(listOf(GATEWAY))
+        /** A gateway instance the test makes unreachable by closing its exporter. */
+        val unscrapedGateway = FakeExporter(listOf(GATEWAY))
 
         private val prometheus: GenericContainer<*> by lazy {
-            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port)
-            val targets = JOBS.map { it to exporter.port } + (KILLED_LEDGER to killedExporter.port)
-            val jobs = targets.joinToString("\n") { (job, port) ->
+            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port, gateway.port, unscrapedGateway.port)
+            val targets = JOBS.map { it to listOf(exporter.port) } + (KILLED_LEDGER to listOf(killedExporter.port)) +
+                (GATEWAY to listOf(gateway.port, unscrapedGateway.port))
+            val jobs = targets.joinToString("\n") { (job, ports) ->
                 """
                 |  - job_name: $job
                 |    metrics_path: /$job
                 |    static_configs:
-                |      - targets: ["host.testcontainers.internal:$port"]
+                |      - targets: [${ports.joinToString { "\"host.testcontainers.internal:$it\"" }}]
+                |        ${if (job == NODE_EXPORTER) "labels: {}" else "labels: {lab_service: \"true\"}"}
                 """.trimMargin()
             }
             val config = "global:\n  scrape_interval: ${SCRAPE_INTERVAL.toSeconds()}s\n  scrape_timeout: 800ms\nscrape_configs:\n$jobs\n"

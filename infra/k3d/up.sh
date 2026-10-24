@@ -36,7 +36,7 @@ rm -f "$ROOT"/*/build/libs/*.jar
 for module in $MODULES; do
   docker build -q -f "$ROOT/infra/docker/Dockerfile" -t "ledger-lab/$module:$TAG" "$ROOT/$module/build/libs"
 done
-# shellcheck disable=SC2086
+# shellcheck disable=SC2046
 k3d image import --cluster "$CLUSTER" $(for module in $MODULES; do echo "ledger-lab/$module:$TAG"; done)
 
 helm upgrade --install ledger-lab "$ROOT/infra/helm/ledger-lab" --namespace "$NAMESPACE" --create-namespace \

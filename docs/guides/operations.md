@@ -42,11 +42,26 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
   with the commit. Merging deploys nothing.
 - **Deploying** is by hand, `deploy.sh <sha>`. It refuses while runs are in progress (`--force`
   overrides), and before Helm when an image is missing. The first deploy generates the database
-  passwords into a local file outside the repository.
+  passwords into a local file outside the repository; a role added to the chart later gets one on the
+  next deploy, and a deploy that would still carry a `change-me` placeholder is refused.
 - **Load:** the server's rates are in `infra/server/values.yaml`.
 - **HTTPS:** cert-manager gets a Let's Encrypt certificate (HTTP-01 through Traefik); plain HTTP
   redirects to HTTPS, and Traefik limits requests per client address. Prometheus raises an alert
-  14 days before the certificate expires.
+  14 days before the certificate expires. Traefik's access log (`kubectl -n kube-system logs deploy/traefik`)
+  keeps the client address, `User-Agent`, status and router, to tell browsers from bots; the path, query
+  and `Referer` stay out, since they carry invite tokens and session ids. It lives as long as the pod.
+- **Node and database metrics:** node-exporter (CPU with steal and iowait, pressure, disks; not the
+  node's network, as it runs in its own pod's network) and
+  postgres-exporter (commits, checkpoints, locks, connections) are scraped every 5 s. The exporter logs
+  in as `monitor`, a member of `pg_monitor`: it sees the statistics, not the data. The role is created or
+  updated on every deploy, as the init script runs only on an empty volume. No port of either is
+  published; read them through `kubectl port-forward svc/prometheus 9090`.
+- **Memory limits:** every pod of the chart has one, at least a quarter above its peak on the server
+  ([results](../results/2026-10-23-server-baseline.md)). Traefik gets 256 MiB in
+  `infra/server/traefik-config.yaml`; k3s's other pods (CoreDNS, the metrics server, the local-path
+  provisioner) are left as k3s ships them, the one exception: together they peaked under 200 MiB.
+- **Right after a deploy** runs wait in the queue until the gateway has warmed up, up to 90 s; the page
+  says the bank is getting ready on the queued run.
 - **Operator access** is SSH with a key only: `kubectl` and `psql` (via `kubectl exec`) through the
   tunnel. Nothing but the page is published.
 - **Hardening:** a host firewall (nftables) under the provider's lets only SSH reach the host itself;

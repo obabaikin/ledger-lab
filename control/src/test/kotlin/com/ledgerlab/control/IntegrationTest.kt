@@ -1,5 +1,6 @@
 package com.ledgerlab.control
 
+import com.ledgerlab.control.runs.QueueScheduler
 import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.TestRestTemplate
@@ -36,6 +37,7 @@ abstract class IntegrationTest {
     @Autowired lateinit var jdbc: JdbcClient
     @Autowired lateinit var objectMapper: ObjectMapper
     @Autowired lateinit var props: ControlProperties
+    @Autowired lateinit var queueScheduler: QueueScheduler
 
     @BeforeEach
     fun cleanDatabase() {
@@ -46,6 +48,8 @@ abstract class IntegrationTest {
         reporting.reset()
         prometheus.reset()
         ledgerInstances.forEach { it.reset() }
+        // The scheduler keeps its last answer for the runs' views; a tick with nothing to read clears what an earlier test left.
+        queueScheduler.tick()
     }
 
     protected fun invite(quota: Int = 100, expiresIn: Duration = Duration.ofDays(1), active: Boolean = true): String {

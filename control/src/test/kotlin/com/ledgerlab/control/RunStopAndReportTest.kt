@@ -25,7 +25,7 @@ class RunStopAndReportTest : IntegrationTest() {
         assertThat(stop(sessionId, queued).statusCode.value()).isEqualTo(409)
         assertThat(stop(sessionId, queued).body!!["error"]).isEqualTo("run not started")
 
-        queue.advance(ledgerReady = true)
+        queue.advance(bankReady = true)
         assertThat(stateOf(queued)).isEqualTo("CREATED")
         assertThat(stop(sessionId, queued).statusCode.value()).isEqualTo(409)
     }

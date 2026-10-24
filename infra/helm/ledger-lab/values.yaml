@@ -8,13 +8,15 @@ managementPort: 9000
 chaos: true
 initMemory: 64Mi
 
-# Roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand in Postgres.
+# The services' roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand
+# in Postgres. The monitor role is created or updated on every install and upgrade.
 passwords:
   postgres: change-me-postgres
   ledger: change-me-ledger
   gateway: change-me-gateway
   control: change-me-control
   reporting: change-me-reporting
+  monitor: change-me-monitor
 
 kafka:
   image: apache/kafka:4.2.1
@@ -27,13 +29,27 @@ kafka:
 postgres:
   image: postgres:17-alpine
   storage: 2Gi
-  memory: 768Mi
-  # Half the memory: the indexes of a run are written in random order, so they must stay cached.
+  # The peak of the server's series was 729Mi of 768Mi; a quarter above it (docs/results/2026-10-23-server-baseline.md).
+  memory: 912Mi
+  # The indexes of a run are written in random order, so they must stay cached.
   sharedBuffers: 384MB
 
 prometheus:
   image: prom/prometheus:v3.5.0
   memory: 512Mi
+
+# Outside the bank's work path: they only feed Prometheus, and nothing waits for them.
+exporters:
+  scrapeInterval: 5s
+  scrapeTimeout: 4s
+  node:
+    image: quay.io/prometheus/node-exporter:v1.12.1
+    port: 9100
+    memory: 64Mi
+  postgres:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    port: 9187
+    memory: 64Mi
 
 # Off in k3d: the server sets a host, a Let's Encrypt issuer, security headers and the rate limit (infra/server/values.yaml).
 ingress:

@@ -13,8 +13,16 @@ ingress:
 certManager:
   enabled: true
 
-# The server keeps up with 100 TPS; at 500 the ledger falls behind by seconds (measured on the server, LL012).
+# One run at up to 200 TPS is sustained; runs together may reach 300, where one run of two met refusals
+# (docs/results/2026-10-23-server-baseline.md).
 runs:
-  maxTotalTps: 500
-  tpsOptions: [50, 100, 300]
+  maxTotalTps: 300
+  tpsOptions: [50, 100, 200]
   defaultTps: 100
+
+# A restarted gateway refused nothing from 5,000 warm-up rounds on and refused at 4,000 (measured on the server,
+# docs/results/2026-10-23-server-baseline.md); one step of 1,000 above that.
+services:
+  gateway:
+    env:
+      GATEWAY_WARMUP_ROUNDS: "6000"

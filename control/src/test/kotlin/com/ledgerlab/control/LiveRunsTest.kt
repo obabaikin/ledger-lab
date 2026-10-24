@@ -25,7 +25,7 @@ class LiveRunsTest : IntegrationTest() {
     private fun running(): Pair<UUID, UUID> {
         val sessionId = sessionOf(invite())
         val runId = UUID.fromString(start(sessionId).body!!["runId"] as String)
-        queue.advance(ledgerReady = true)
+        queue.advance(bankReady = true)
         jdbc.sql("UPDATE runs SET state = 'RUNNING', started_at = clock_timestamp() WHERE run_id = :id").param("id", runId).update()
         generator.answer("GET", GeneratorApi.SIMULATION_PATH.forRun(runId), 200, simulation(runId, "RUNNING"))
         return sessionId to runId
@@ -129,7 +129,7 @@ class LiveRunsTest : IntegrationTest() {
 
     private companion object {
         const val QUERY_PATH = "/api/v1/query"
-        const val UP = "up"
+        const val UP = "up{lab_service=\"true\"}"
         const val PARTITIONS = "ledger_kafka_assigned_partitions"
         const val DUPLICATES = "sum by (run) (ledger_duplicates_total)"
     }

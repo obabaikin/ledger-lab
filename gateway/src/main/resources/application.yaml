@@ -49,6 +49,8 @@ gateway:
     # After a deploy a cold gateway answered 300 TPS with a wave of 503 busy (measured on the server); a warm one did not.
     rounds: 2000
     duration: 5s
+    # All services start cold together after a deploy: 5 s got 519 to 1312 of the 2000 rounds (measured on the server).
+    max-duration: 90s
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every controller-local error handler is added to every operation.
