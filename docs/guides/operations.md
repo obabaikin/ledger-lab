@@ -31,7 +31,9 @@ One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the bank fits in 8 GB, th
 The server is ordered by hand, and Terraform does not manage it: there is one server, and a
 configuration that can buy one should not exist. Terraform (`infra/terraform`) only reads it and
 manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS: the A record and the mail
-records (SPF, DKIM, DMARC and Mailjet's ownership record).
+records (SPF, DKIM, DMARC and Mailjet's ownership record). It runs through `infra/terraform/tf.sh`
+(`tf.sh plan`, `tf.sh apply`): the image CI uses, with the Cloudflare and Contabo keys from
+`~/.config/ledger-lab/cloudflare.env` and `contabo.env`.
 
 ```bash
 SERVER=<ip> infra/server/bootstrap.sh       # over SSH: key-only login, a host firewall, security updates, k3s, a kubeconfig; safe to run again
@@ -95,8 +97,9 @@ OPERATOR_EMAIL=<contact address>
 ```
 
 - **Mailjet:** add the domain under Senders & Domains, then put its DKIM value and ownership record into
-  `infra/terraform/terraform.tfvars` (see `terraform.tfvars.example`) and apply. Each mail switches link and
-  open tracking off, so the link goes to the site, not through a tracker. Mail goes from `no-reply@<domain>`.
+  `infra/terraform/terraform.tfvars` (see `terraform.tfvars.example`) and run `tf.sh apply`. Each mail
+  switches link and open tracking off, so the link goes to the site, not through a tracker. Mail goes from
+  `no-reply@<domain>`.
 - **Without the keys**, as in k3d: no Turnstile check, and each mail is logged as not sent; the link is
   read from `control.invite_mails`.
 - **Limits:** 3 links an address in 24 hours, then one notice, then nothing; 50 mails a day in all.
