@@ -1,8 +1,11 @@
 package com.ledgerlab.gateway
 
 import com.ledgerlab.gateway.api.TransferWarmUp
+import com.ledgerlab.gateway.persistence.RunPeriodRepository
 import com.ledgerlab.gateway.persistence.TransferRepository
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import jakarta.validation.Validator
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
@@ -11,15 +14,18 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.ArgumentMatchers.anyInt
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.any
+import org.mockito.AdditionalAnswers
 import org.mockito.Mockito.doAnswer
+import org.mockito.Mockito.mock
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.availability.ApplicationAvailability
 import org.springframework.boot.availability.ReadinessState
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.test.context.TestPropertySource
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+import org.springframework.transaction.PlatformTransactionManager
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -33,7 +39,11 @@ class WarmUpTest : IntegrationTest() {
     @Autowired lateinit var availability: ApplicationAvailability
     @Autowired lateinit var jdbc: JdbcClient
     @Autowired lateinit var registry: MeterRegistry
-    @MockitoSpyBean lateinit var transfers: TransferRepository
+    @Autowired lateinit var transfers: TransferRepository
+    @Autowired lateinit var periods: RunPeriodRepository
+    @Autowired lateinit var transactions: PlatformTransactionManager
+    @Autowired lateinit var validator: Validator
+    @Autowired lateinit var events: ApplicationEventPublisher
 
     private fun transferRows() = jdbc.sql("SELECT count(*) FROM transfers").query(Long::class.java).single()
 
@@ -75,13 +85,24 @@ class WarmUpTest : IntegrationTest() {
         assertThat(accepted()).isEqualTo(counted)
     }
 
+    // The stub goes on a mock of the test's own: Mockito stubbing is not thread-safe, and the outbox publisher calls the shared bean meanwhile.
+    private fun warmUpWithInsertAfter(pause: () -> Unit): Pair<TransferWarmUp, MeterRegistry> {
+        val real = AdditionalAnswers.delegatesTo<Any>(transfers)
+        val stubbed = mock(TransferRepository::class.java, real)
+        doAnswer { pause(); real.answer(it) }.`when`(stubbed).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
+        val ownRegistry = SimpleMeterRegistry()
+        return TransferWarmUp(stubbed, periods, transactions, objectMapper, validator, events, props, ownRegistry) to ownRegistry
+    }
+
+    private fun awaitWarm(registry: MeterRegistry) =
+        await().atMost(Duration.ofSeconds(10)).until { registry.get(TransferWarmUp.WARM).gauge().value() == 1.0 }
+
     @Test
     fun `a round that ends just past the long limit counts as the limit reached, not as a stuck round`(output: CapturedOutput) {
-        doAnswer { Thread.sleep(100); it.callRealMethod() }
-            .`when`(transfers).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
+        val (slowWarmUp, ownRegistry) = warmUpWithInsertAfter { Thread.sleep(100) }
 
-        warmUp.warmUp()
-        awaitWarm()
+        slowWarmUp.warmUp()
+        awaitWarm(ownRegistry)
 
         assertThat(output.out).contains("Warm-up reached its limit of PT4S").doesNotContain("did not finish a round")
     }
@@ -89,15 +110,14 @@ class WarmUpTest : IntegrationTest() {
     @Test
     fun `a round stuck on the database holds back neither the traffic nor, past the long limit, the runs`(output: CapturedOutput) {
         val stuck = CountDownLatch(1)
-        doAnswer { stuck.await(); it.callRealMethod() }
-            .`when`(transfers).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
+        val (stuckWarmUp, ownRegistry) = warmUpWithInsertAfter { stuck.await() }
         try {
             val started = System.nanoTime()
-            warmUp.warmUp()
+            stuckWarmUp.warmUp()
 
             assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3))
             assertThat(availability.readinessState).isEqualTo(ReadinessState.ACCEPTING_TRAFFIC)
-            awaitWarm()
+            awaitWarm(ownRegistry)
             assertThat(output.out).contains("Warm-up did not finish a round within its limit of PT4S")
         } finally {
             stuck.countDown()
