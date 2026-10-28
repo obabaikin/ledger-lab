@@ -5,7 +5,7 @@ export const en = {
     submit: 'Get a link',
     sent: 'Please check your email.',
     mailLinks: 'The mail has a link to enter and a link to delete your address.',
-    linksPerDay: (times: number) => `You can ask up to ${times} times a day.`,
+    linksPerDay: (times: number) => `You can ask up to ${times} times in 24 hours.`,
     terms: (linkDays: number, retentionDays: number) =>
       `The link works for ${linkDays} days. Your address is deleted after ${retentionDays} days without use.`,
     privacyLink: 'Privacy',
