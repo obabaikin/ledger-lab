@@ -27,7 +27,12 @@ sealed interface Reply<out T> {
     data object Unreadable : Reply<Nothing>
 }
 
-class ServiceHttp(private val baseUrl: String, private val timeout: Duration, private val objectMapper: ObjectMapper) {
+class ServiceHttp(
+    private val baseUrl: String,
+    private val timeout: Duration,
+    private val objectMapper: ObjectMapper,
+    private val headers: Map<String, String> = emptyMap(),
+) {
 
     private val http: HttpClient = HttpClient.newBuilder().connectTimeout(timeout).build()
 
@@ -43,6 +48,7 @@ class ServiceHttp(private val baseUrl: String, private val timeout: Duration, pr
         val request = HttpRequest.newBuilder(URI.create(baseUrl + path))
             .timeout(timeout)
             .header(CONTENT_TYPE, JSON)
+            .apply { headers.forEach { (name, value) -> header(name, value) } }
             .method(method, publisher)
             .build()
         val response = try {

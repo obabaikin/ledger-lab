@@ -41,12 +41,14 @@ abstract class IntegrationTest {
 
     @BeforeEach
     fun cleanDatabase() {
-        jdbc.sql("TRUNCATE runs, sessions, invite_visits, invite_tokens, chaos_events").update()
+        jdbc.sql("TRUNCATE runs, sessions, invite_visits, invite_mails, invite_requests, invite_emails, invite_tokens, chaos_events").update()
         ledger.reset()
         gateway.reset()
         generator.reset()
         reporting.reset()
         prometheus.reset()
+        turnstile.reset()
+        mailjet.reset()
         ledgerInstances.forEach { it.reset() }
         // The scheduler keeps its last answer for the runs' views; a tick with nothing to read clears what an earlier test left.
         queueScheduler.tick()
@@ -109,6 +111,8 @@ abstract class IntegrationTest {
         val generator = StubService()
         val reporting = StubService()
         val prometheus = StubService()
+        val turnstile = StubService()
+        val mailjet = StubService()
         val ledgerInstances = List(3) { StubService() }
 
         @JvmStatic
@@ -119,6 +123,8 @@ abstract class IntegrationTest {
             registry.add("control.generator.base-url") { generator.baseUrl }
             registry.add("control.reporting.base-url") { reporting.baseUrl }
             registry.add("stub.prometheus-url") { prometheus.baseUrl }
+            registry.add("control.turnstile.base-url") { turnstile.baseUrl }
+            registry.add("control.mail.base-url") { mailjet.baseUrl }
             ledgerInstances.forEachIndexed { i, stub ->
                 registry.add("control.chaos.ledger-instances[$i].name") { "ledger-$i" }
                 registry.add("control.chaos.ledger-instances[$i].url") { stub.baseUrl }

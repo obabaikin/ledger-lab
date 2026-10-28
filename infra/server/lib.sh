@@ -10,6 +10,7 @@ KUBECONFIG="${SERVER_KUBECONFIG:-$HOME/.kube/ledger-lab-server.yaml}"
 export KUBECONFIG
 NAMESPACE="${NAMESPACE:-ledger-lab}"
 TUNNEL_PORT="${TUNNEL_PORT:-16443}"
+TUNNEL_SOCKET="${TUNNEL_SOCKET:-$CONFIG_DIR/tunnel.sock}"
 ACTIVE_RUN_STATES="'QUEUED', 'CREATED', 'RUNNING', 'DRAINING'"
 
 require_cluster() {
@@ -18,7 +19,14 @@ require_cluster() {
     exit 1
   fi
   if ! kubectl get --raw /readyz --request-timeout=5s </dev/null >/dev/null 2>&1; then
-    echo "the cluster does not answer; open the tunnel: ssh -fNL $TUNNEL_PORT:127.0.0.1:6443 root@${SERVER:-<server ip>}" >&2
+    echo "the cluster does not answer; open the tunnel: infra/server/tunnel-open.sh" >&2
+    exit 1
+  fi
+}
+
+require_server() {
+  if [ -z "${SERVER:-}" ]; then
+    echo "SERVER is not set: add SERVER=<server ip> to $SERVER_ENV" >&2
     exit 1
   fi
 }

@@ -14,6 +14,10 @@ data class ControlProperties(
     val reporting: Reporting,
     val prometheus: Prometheus,
     val chaos: Chaos,
+    val invites: Invites,
+    val turnstile: Turnstile,
+    val mail: Mail,
+    val site: Site,
 ) {
     data class Runs(
         val maxActive: Int,
@@ -64,4 +68,34 @@ data class ControlProperties(
     )
 
     data class LedgerInstance(val name: String, val url: String)
+
+    data class Invites(val email: InviteEmail)
+
+    data class InviteEmail(
+        val linksPerAddress: Int,
+        val dailyMails: Int,
+        val window: Duration,
+        val lifetime: Duration,
+        val runsPerHour: Int,
+        val retention: Duration,
+    )
+
+    /** An empty [secret] switches the check off, as locally and in tests. */
+    data class Turnstile(val siteKey: String, val secret: String, val baseUrl: String, val requestTimeout: Duration)
+
+    /** An empty [apiKey] logs each mail as not sent instead of sending it. */
+    data class Mail(
+        val baseUrl: String,
+        val apiKey: String,
+        val apiSecret: String,
+        val from: String,
+        val sendInterval: Duration,
+        val batchSize: Int,
+        val maxAttempts: Int,
+        val firstRetry: Duration,
+        val requestTimeout: Duration,
+    )
+
+    /** [baseUrl] is the page's address in the mailed links; the operator's details fill the imprint and privacy pages. */
+    data class Site(val baseUrl: String, val operatorName: String, val operatorAddress: String, val contactEmail: String)
 }

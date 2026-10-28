@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { api } from './api/client'
-import { Diagram } from './Diagram'
 import { BuildInfo } from './BuildInfo'
+import { CrashIllustration } from './CrashIllustration'
 import { Hero } from './Hero'
-import { InviteHint } from './InviteHint'
+import { InviteForm } from './InviteForm'
+import { t } from './texts'
 
 export function Landing() {
   const [params] = useSearchParams()
@@ -32,13 +33,15 @@ export function Landing() {
     <main>
       <Hero />
       <section className="card">
-        <div className="controls">
-          {inviteRefused && <span role="alert">This invite link is not valid or has expired. </span>}
-          <InviteHint />
-        </div>
+        {inviteRefused && (
+          <p role="alert" className="hint">
+            {t.landing.inviteRefused}
+          </p>
+        )}
+        <InviteForm />
       </section>
       <section className="card">
-        <Diagram numbers={null} pods={undefined} />
+        <CrashIllustration />
       </section>
       <BuildInfo />
     </main>

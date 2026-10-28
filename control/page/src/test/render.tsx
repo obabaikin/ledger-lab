@@ -1,6 +1,7 @@
 import { render } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
+import { Impressum, Privacy } from '../Legal'
 import { Landing } from '../Landing'
 import { SessionPage } from '../SessionPage'
 
@@ -9,6 +10,8 @@ export function renderAt(url: string) {
     [
       { path: '/', element: <Landing /> },
       { path: '/s/:sessionId', element: <SessionPage /> },
+      { path: '/privacy', element: <Privacy /> },
+      { path: '/impressum', element: <Impressum /> },
     ],
     { initialEntries: [url] },
   )

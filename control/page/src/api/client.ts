@@ -9,6 +9,7 @@ export type LiveView = Schemas['LiveView']
 export type PodView = Schemas['PodView']
 export type ChaosInRun = Schemas['ChaosInRun']
 export type SecondStats = Schemas['SecondStats']
+export type SiteView = Schemas['SiteView']
 
 export const FINAL_STATES: ReadonlySet<RunState> = new Set(['RECONCILED', 'FAILED', 'EXPIRED'])
 
@@ -48,4 +49,6 @@ export const api = {
   run: (sessionId: string, runId: string) => call<RunView>(`/api/sessions/${sessionId}/runs/${runId}`),
   chaos: (sessionId: string) => call<Schemas['ChaosView']>(`/api/sessions/${sessionId}/chaos`, post()),
   report: (sessionId: string, runId: string) => call<RunReport>(`/api/sessions/${sessionId}/runs/${runId}/report`),
+  site: () => call<SiteView>('/api/site'),
+  requestInvite: (request: Schemas['InviteRequest']) => call<unknown>('/api/invite-requests', post(request)),
 }

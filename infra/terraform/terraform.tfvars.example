@@ -1,3 +1,7 @@
 # Copy to terraform.tfvars (gitignored) with the real values.
 instance_id = 100000000
 domain      = "example.org"
+# From Mailjet's panel, Senders & Domains, once the domain is added there.
+mailjet_dkim_value       = "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQ..."
+mailjet_ownership_record = { name = "mailjet._0123abcd", value = "0123abcd4567ef890123abcd4567ef89" }
+dmarc_report_address     = ""

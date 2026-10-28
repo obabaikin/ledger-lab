@@ -102,6 +102,20 @@ services:
     replicas: 1
     memory: 448Mi
 
+# Mailed invites (ADR 0017). Empty in k3d: no Turnstile check, every mail logged as not sent, no operator on the
+# imprint. On the server deploy.sh fills them from ~/.config/ledger-lab/server.env and refuses to deploy without them.
+invites:
+  turnstileSiteKey: ""
+  mailFrom: ""
+  operator:
+    name: ""
+    address: ""
+    email: ""
+keys:
+  turnstileSecret: ""
+  mailjetApiKey: ""
+  mailjetApiSecret: ""
+
 runs:
   # Transfers per second of all active runs together; 1000 from measurements in k3d (ADR 0012).
   maxTotalTps: 1000

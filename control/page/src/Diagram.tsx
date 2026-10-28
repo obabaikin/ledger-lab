@@ -104,7 +104,13 @@ function Pods({ x, y, w, pods }: { x: number; y: number; w: number; pods: PodVie
 }
 
 /** Without numbers (null) the diagram only shows the way a transfer takes, as for a visitor without an invite. */
-export function Diagram(props: { numbers: DiagramNumbers | null; pods: PodView[] | null | undefined; rates?: number[] }) {
+export function Diagram(props: {
+  numbers: DiagramNumbers | null
+  pods: PodView[] | null | undefined
+  rates?: number[]
+  /** The ledger's look where no pods tell it, as in the illustration. */
+  ledgerLook?: 'dead' | 'recovering' | null
+}) {
   const { pods, rates } = props
   const numbers = props.numbers ?? NO_NUMBERS
   const bare = props.numbers === null
@@ -113,7 +119,13 @@ export function Diagram(props: { numbers: DiagramNumbers | null; pods: PodView[]
   const ledgerPods = pods === undefined ? undefined : (pods?.filter((p) => p.job === 'ledger') ?? null)
   const consuming = ledgerPods?.filter((p) => podState(p) === 'consuming').length
   const ledgerClass =
-    ledgerPods == null || ledgerPods.length === 0 ? '' : consuming === 0 ? 'dead' : consuming! < ledgerPods.length ? 'degraded' : ''
+    ledgerPods == null || ledgerPods.length === 0
+      ? (props.ledgerLook ?? '')
+      : consuming === 0
+        ? 'dead'
+        : consuming! < ledgerPods.length
+          ? 'degraded'
+          : ''
   const lines: Record<string, [string, string, string]> = bare ? {} : {
     clients: [`${shown(requested)} sent`, 'their own count', numbers.duplicatesSent ? `↺ ${count(numbers.duplicatesSent)} pressed twice` : ''],
     gateway: [`${shown(accepted)} accepted`, numbers.refused === null ? '' : `${count(numbers.refused)} refused (503)`, ''],

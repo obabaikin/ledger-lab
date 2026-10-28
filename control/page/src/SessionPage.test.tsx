@@ -5,6 +5,7 @@ import { NO_RANDOM_ID, RUN_NOT_FINISHED } from './Controls'
 import { RUNS_LISTED } from './SessionPage'
 import { fakeControl, report, run, RUN_ID, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
+import { en } from './texts/en'
 
 const SESSION = `/api/sessions/${SESSION_ID}`
 const RUNS = `${SESSION}/runs`
@@ -142,12 +143,29 @@ describe('session page', () => {
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 
-  it('names an unknown session and says where to ask for an invite', async () => {
+  it('names an unknown session and offers a new link', async () => {
     fakeControl({ [`GET ${SESSION}`]: { status: 404, body: { error: 'session not found' } } })
     renderAt(`/s/${SESSION_ID}`)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('This session has ended or the link is wrong')
-    expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.sessionEnded.message)
+    expect(screen.getByRole('button', { name: 'Get a link' })).toBeInTheDocument()
+  })
+
+  it('offers a new link once the invite has expired, and keeps the runs readable', async () => {
+    control([], { [`GET ${SESSION}`]: { status: 200, body: session({ inviteValid: false }) } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByRole('button', { name: 'Get a link' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Start the run/ })).toBeDisabled()
+    expect(screen.getByText('Invite expired; runs can still be read')).toBeInTheDocument()
+  })
+
+  it('shows no link form while the invite is valid', async () => {
+    control([])
+    renderAt(`/s/${SESSION_ID}`)
+
+    await screen.findByRole('button', { name: /Start the run/ })
+    expect(screen.queryByRole('button', { name: 'Get a link' })).not.toBeInTheDocument()
   })
 
   it('does not call the session unknown when only a run of it is not found', async () => {
@@ -347,14 +365,16 @@ describe('session page', () => {
 })
 
 describe('visitor without an invite', () => {
-  it('sees the question, the way a transfer takes without numbers, the links and how to get an invite; no form', async () => {
+  it('sees the question, the way a transfer takes without numbers, the links and the field for a link; no run form', async () => {
     fakeControl({})
     renderAt('/')
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Can a bank lose a server')
-    expect(screen.getByText(/To start your own run, ask the author for an invite on/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: en.inviteForm.heading })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Get a link' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Oleksii Babaikin' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
-    expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
+    expect(screen.getAllByRole('link', { name: en.footer.privacy })[0]).toHaveAttribute('href', '/privacy')
+    expect(screen.getByRole('link', { name: en.footer.impressum })).toHaveAttribute('href', '/impressum')
     expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', expect.stringContaining('#what-it-does'))
     expect(screen.getByRole('link', { name: 'Design decisions' })).toHaveAttribute('href', expect.stringContaining('/docs/adr'))
     expect(screen.queryByRole('button', { name: /Start the run/ })).not.toBeInTheDocument()

@@ -1,3 +1,7 @@
+spring:
+  messages:
+    # A key of its own shows how a mail text with an apostrophe is written.
+    basename: i18n/mail,i18n/mail-test
 control:
   queue:
     # Tests drive the queue and the conductor themselves.
@@ -18,3 +22,10 @@ control:
   prometheus:
     # Through a placeholder: a dynamic property of the base test class would win over a subclass's real Prometheus (E100).
     base-url: ${stub.prometheus-url}
+  mail:
+    # Tests send the due mails themselves, to a stub of the provider.
+    send-interval: 1h
+    api-key: test-key
+    api-secret: test-secret
+  site:
+    base-url: https://ledger-lab.test

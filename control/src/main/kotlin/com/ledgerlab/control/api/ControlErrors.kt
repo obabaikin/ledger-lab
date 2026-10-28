@@ -20,6 +20,9 @@ object ControlErrors {
     const val CHAOS_USED_RECENTLY = "chaos used recently"
     const val LEDGER_DID_NOT_ANSWER = "ledger did not answer"
     const val BUSY = "busy"
+    const val INVALID_EMAIL = "invalid-email"
+    const val VERIFICATION_FAILED = "verification-failed"
+    const val DAILY_LIMIT = "daily-limit"
 
     fun tpsNotAllowed(options: List<Int>) = "tps must be one of $options"
     fun durationNotAllowed(options: List<Int>) = "durationSeconds must be one of $options"

@@ -144,6 +144,24 @@
         "required" : [ "accepted", "posted", "published", "rejected" ],
         "type" : "object"
       },
+      "InviteRequest" : {
+        "description" : "An address to mail an invite link to.",
+        "properties" : {
+          "email" : {
+            "description" : "Where the link goes; trimmed and lowercased.",
+            "type" : [ "string", "null" ]
+          },
+          "turnstileToken" : {
+            "description" : "The Turnstile widget's answer; null where the check is off.",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "email", "turnstileToken" ],
+        "type" : "object"
+      },
+      "InviteRequestAccepted" : {
+        "description" : "Taken; the same for any address, whether a mail goes out or not."
+      },
       "JournalTotals" : {
         "properties" : {
           "acknowledged" : {
@@ -255,6 +273,22 @@
           }
         },
         "required" : [ "chaos", "clients", "ledgerDuplicatesAtLeast", "pods", "readAt", "stats" ],
+        "type" : "object"
+      },
+      "Operator" : {
+        "description" : "Who runs the site.",
+        "properties" : {
+          "address" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "address", "email", "name" ],
         "type" : "object"
       },
       "PodView" : {
@@ -658,6 +692,40 @@
         "required" : [ "chaosAvailable", "chaosReadyInSeconds", "defaultTps", "durationOptions", "inviteValid", "runsLastHour", "runsPerHour", "sessionId", "tpsOptions" ],
         "type" : "object"
       },
+      "SiteView" : {
+        "description" : "What the start, privacy and imprint pages show.",
+        "properties" : {
+          "linkDays" : {
+            "description" : "Days a mailed link works.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "linksPerDay" : {
+            "description" : "Links an address may get in a day.",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "operator" : {
+            "description" : "null where the deployment has not set them.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Operator"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "retentionDays" : {
+            "description" : "Days without use after which an address is deleted.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "turnstileSiteKey" : {
+            "description" : "The Turnstile widget's site key; null where the check is off.",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "linkDays", "linksPerDay", "operator", "retentionDays", "turnstileSiteKey" ],
+        "type" : "object"
+      },
       "StartRunRequest" : {
         "description" : "A run to start.",
         "properties" : {
@@ -759,6 +827,84 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
+    "/api/invite-requests" : {
+      "post" : {
+        "operationId" : "request",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/InviteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InviteRequestAccepted"
+                }
+              }
+            },
+            "description" : "Taken; a mail goes out if the address's limit allows"
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not an address, or unreadable body"
+          },
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Verification failed; nothing recorded"
+          },
+          "429" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The daily limit of all mails is used up; nothing recorded",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds until a mail fits the limit",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
+          },
+          "503" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Verification did not answer; nothing recorded"
+          }
+        },
+        "summary" : "Mail an invite link to an address",
+        "tags" : [ "invite-request-controller" ]
+      }
+    },
     "/api/sessions" : {
       "post" : {
         "operationId" : "create",
@@ -1298,6 +1444,25 @@
         },
         "summary" : "Stop a running run early; the bank still finishes and reconciles it",
         "tags" : [ "run-controller" ]
+      }
+    },
+    "/api/site" : {
+      "get" : {
+        "operationId" : "site",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SiteView"
+                }
+              }
+            },
+            "description" : "The settings"
+          }
+        },
+        "summary" : "The site's settings for the page",
+        "tags" : [ "site-controller" ]
       }
     }
   }
