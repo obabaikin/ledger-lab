@@ -25,14 +25,16 @@ function ask(email: string) {
 }
 
 describe('the link form', () => {
-  it('sends the address and says the same for any address once it is taken', async () => {
+  it('sends the address and says the same for any address once it is taken, and that each mail can delete it', async () => {
     const calls = fakeControl({ 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 202, body: {} } })
     renderAt('/')
     await screen.findByText(/The link works for 7 days\. Your address is deleted after 30 days without use\./)
 
     ask('visitor@example.org')
 
-    expect(await screen.findByRole('status')).toHaveTextContent('A link is on its way to your inbox. You can ask up to 3 times a day.')
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'A link is on its way to your inbox. Each mail has a link to delete your address. You can ask up to 3 times a day.',
+    )
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ email: 'visitor@example.org', turnstileToken: null })
     expect(screen.queryByRole('button', { name: en.inviteForm.submit })).not.toBeInTheDocument()
   })

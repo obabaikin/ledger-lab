@@ -21,7 +21,7 @@ class MailTextsTest : IntegrationTest() {
         MailKind.entries.forEach { kind ->
             val text = when (kind) {
                 MailKind.LINK -> texts().link(UUID.randomUUID().toString())
-                MailKind.LIMIT -> texts().limit(Instant.parse("2026-10-28T10:15:00Z"))
+                MailKind.LIMIT -> texts().limit(UUID.randomUUID().toString(), Instant.parse("2026-10-28T10:15:00Z"))
             }
             assertThat(text.subject).isNotBlank()
             assertThat(text.body).isNotBlank()
@@ -37,7 +37,7 @@ class MailTextsTest : IntegrationTest() {
     fun `numbers in a mail are not grouped`() {
         val limits = props.invites.email.copy(linksPerAddress = 1000)
 
-        val body = texts(limits).limit(Instant.parse("2026-10-28T10:15:00Z")).body
+        val body = texts(limits).limit(UUID.randomUUID().toString(), Instant.parse("2026-10-28T10:15:00Z")).body
 
         assertThat(body).startsWith("You have asked for a link 1000 times in 24 hours, the limit.")
     }

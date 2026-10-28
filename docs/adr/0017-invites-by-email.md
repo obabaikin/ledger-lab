@@ -41,9 +41,18 @@ site's domain to addresses of its choice, or learn which addresses the site know
 - **Turnstile in front.** The form carries a Cloudflare Turnstile answer, checked by the server
   before anything is recorded: `403 verification-failed` if it fails, `503 busy` if the check does
   not answer. Without a secret the check is off, as locally and in tests.
-- **The address is kept 30 days after its last use**, the latest request or visit by its link; then
-  it is deleted with its requests. The invite, its sessions and runs stay, without the address. The
-  log names a mail by its id and kind only, never its address or token.
+- **The address is kept 30 days after its last use**, the latest request or visit by its link, or
+  until 24 hours after its owner asked to delete it; then it is deleted with its requests. The invite,
+  its sessions and runs stay, without the address. The log names a mail by its id and kind only, never
+  its address or token.
+- **Deletion by the mailed link.** Every mail carries `/delete?ref=<token>`. The page there sends
+  `POST /api/address-deletions` only when its button is pressed; the token of any mail sent to the
+  address finds it, also after its invite was replaced. The answer is `202` with the deletion time,
+  the same on a repeat, and whether an earlier request had already set it; or `404 unknown-link` where no
+  address is stored for the token. The page says the deletion starts in 24 hours, or 24 hours after the
+  first request; it holds that number itself, so a changed window needs its text changed too. The address
+  is deleted 24 hours later, the limit's window, under the same lock as the requests: deleted at once,
+  its mails would no longer count toward its limit, and it could be mailed 3 links again right away.
 
 ## Considered and rejected
 
@@ -56,6 +65,11 @@ site's domain to addresses of its choice, or learn which addresses the site know
 - **Limits alone, without Turnstile**: they cap the harm, but a bot could still spend the daily limit
   on other people's addresses and keep real visitors out.
 - **A provider that cannot switch tracking off per mail**: the token would pass through its redirect.
+- **A form to delete any address**: it would need Turnstile and the same answer for any address, and
+  could only confirm by a mail that may not arrive; the link in a mail already proves the address.
+- **Deleting at once**: it would reset the address's limit.
+- **Deleting on `GET`**: mail scanners open links; a page that deleted on load would delete addresses
+  nobody asked to.
 
 ## Consequences
 
@@ -63,3 +77,7 @@ site's domain to addresses of its choice, or learn which addresses the site know
 - A duplicate mail is possible after a crash of the sender; it carries the same link.
 - The daily limit is shared: once a bot spends it, real visitors wait for `Retry-After` too.
 - One person may hold a hand-made invite and a mailed one; quotas are per invite.
+- Asking for a link does not cancel or move a deletion. Once the address is deleted, a request makes it
+  new, with a new invite, while the old link works until it expires; the mails of the window stay, without
+  an address, and count only toward the limit of all mails, so within one window the address may get up to
+  twice its limit, once.

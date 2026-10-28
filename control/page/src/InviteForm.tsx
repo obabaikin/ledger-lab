@@ -88,7 +88,7 @@ export function InviteForm() {
   if (sent) {
     return (
       <p role="status" className="invite-sent">
-        {text.sent}
+        {text.sent} {text.deletionInEveryMail}
         {site && ` ${text.linksPerDay(site.linksPerDay)}`}
       </p>
     )
@@ -130,7 +130,7 @@ export function InviteForm() {
   )
 }
 
-function ErrorText(props: { id?: string; children: string }) {
+export function ErrorText(props: { id?: string; children: string }) {
   return (
     <p role="alert" id={props.id} className="error">
       <span aria-hidden="true">⚠ </span>

@@ -16,7 +16,7 @@ import org.springframework.web.servlet.view.RedirectView
 @Controller
 class PageController {
 
-    @GetMapping("/s/{sessionId}", "/privacy", "/impressum")
+    @GetMapping("/s/{sessionId}", "/privacy", "/impressum", "/delete")
     fun page(): String = "forward:/index.html"
 }
 

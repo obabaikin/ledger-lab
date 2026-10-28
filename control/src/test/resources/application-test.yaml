@@ -22,6 +22,10 @@ control:
   prometheus:
     # Through a placeholder: a dynamic property of the base test class would win over a subclass's real Prometheus (E100).
     base-url: ${stub.prometheus-url}
+  invites:
+    email:
+      # Tests run the deletion tick themselves.
+      deletion-check: 1h
   mail:
     # Tests send the due mails themselves, to a stub of the provider.
     send-interval: 1h

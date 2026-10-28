@@ -4,6 +4,7 @@ export const en = {
     emailLabel: 'Email',
     submit: 'Get a link',
     sent: 'A link is on its way to your inbox.',
+    deletionInEveryMail: 'Each mail has a link to delete your address.',
     linksPerDay: (times: number) => `You can ask up to ${times} times a day.`,
     terms: (linkDays: number, retentionDays: number) =>
       `The link works for ${linkDays} days. Your address is deleted after ${retentionDays} days without use.`,
@@ -15,6 +16,17 @@ export const en = {
     tooManyRequests: (wait: string) => `Too many requests today; try again in ${wait}.`,
     waitMinutes: (minutes: number) => `${minutes} min`,
     waitHours: (hours: number) => `${hours} h`,
+  },
+  deletePage: {
+    title: 'Delete your address',
+    explanation: 'This deletes the email address this link was mailed to. Its invite and runs stay, without the address.',
+    button: 'Delete my address',
+    asked: (hours: number) => `Deletion of your address starts in ${hours} hours.`,
+    askedBefore: (hours: number) => `Deletion of your address starts ${hours} hours after your first request.`,
+    unknown: 'No address is stored for this link: it was deleted, or the link was not mailed.',
+    failed: 'Could not send now, try again.',
+    privacyLink: 'Privacy',
+    backToStart: 'Back to the start',
   },
   privacy: {
     title: 'Privacy',

@@ -264,7 +264,8 @@ class InviteRequestTest : IntegrationTest() {
         assertThat(message.get("Subject").asString()).isEqualTo("Your Ledger Lab link")
         assertThat(message.get("TextPart").asString()).isEqualTo(
             "Here is your link to Ledger Lab:\n\nhttps://ledger-lab.test/?ref=${tokens(email).single()}\n\n" +
-                "The link works for 7 days. Your address is deleted after 30 days without use.\n",
+                "The link works for 7 days. Your address is deleted after 30 days without use.\n" +
+                "To delete your address: https://ledger-lab.test/delete?ref=${tokens(email).single()}\n",
         )
     }
 
@@ -273,6 +274,7 @@ class InviteRequestTest : IntegrationTest() {
         val email = address()
         repeat(4) { requestLink(email) }
         val freesAt = jdbc.sql("SELECT window_frees_at FROM invite_mails WHERE kind = 'LIMIT'").query(java.sql.Timestamp::class.java).single().toInstant()
+        val limitToken = jdbc.sql("SELECT token FROM invite_mails WHERE kind = 'LIMIT'").query(String::class.java).single()
 
         sender.sendDue()
 
@@ -281,7 +283,8 @@ class InviteRequestTest : IntegrationTest() {
         assertThat(message.get("TextPart").asString()).isEqualTo(
             "You have asked for a link 3 times in 24 hours, the limit.\n" +
                 "Ask again after ${UTC_MINUTES.format(minuteAfter(freesAt))} UTC.\n\n" +
-                "The link works for 7 days. Your address is deleted after 30 days without use.\n",
+                "The link works for 7 days. Your address is deleted after 30 days without use.\n" +
+                "To delete your address: https://ledger-lab.test/delete?ref=$limitToken\n",
         )
     }
 

@@ -76,7 +76,8 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
 
 The page is opened with an invite link, `/?ref=<token>`. A visitor gets one by entering an email on the
 start page ([ADR 0017](../adr/0017-invites-by-email.md)); the address is kept with the invite, its visits and
-runs, in `control.invite_emails`, for 30 days after its last use.
+runs, in `control.invite_emails`, for 30 days after its last use, or until 24 hours after its owner asked to
+delete it by the link in any mail (`/delete?ref=<token>`).
 
 ### Mailed invites
 

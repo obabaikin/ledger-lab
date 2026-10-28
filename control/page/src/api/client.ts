@@ -51,4 +51,5 @@ export const api = {
   report: (sessionId: string, runId: string) => call<RunReport>(`/api/sessions/${sessionId}/runs/${runId}/report`),
   site: () => call<SiteView>('/api/site'),
   requestInvite: (request: Schemas['InviteRequest']) => call<unknown>('/api/invite-requests', post(request)),
+  deleteAddress: (token: string) => call<Schemas['AddressDeletionAccepted']>('/api/address-deletions', post({ token })),
 }

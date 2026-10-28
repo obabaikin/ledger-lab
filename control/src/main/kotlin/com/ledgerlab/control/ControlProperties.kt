@@ -78,6 +78,7 @@ data class ControlProperties(
         val lifetime: Duration,
         val runsPerHour: Int,
         val retention: Duration,
+        val deletionCheck: Duration,
     )
 
     /** An empty [secret] switches the check off, as locally and in tests. */

@@ -95,6 +95,7 @@ control:
       lifetime: 7d
       runs-per-hour: 10
       retention: 30d
+      deletion-check: 1m
   turnstile:
     site-key: ""
     secret: ""

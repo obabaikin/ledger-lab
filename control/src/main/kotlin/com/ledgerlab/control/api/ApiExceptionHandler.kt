@@ -8,6 +8,8 @@ import com.ledgerlab.control.entry.DailyLimitException
 import com.ledgerlab.control.entry.InvalidEmailException
 import com.ledgerlab.control.entry.InviteNotValidException
 import com.ledgerlab.control.entry.SessionNotFoundException
+import com.ledgerlab.control.entry.TokenRequiredException
+import com.ledgerlab.control.entry.UnknownLinkException
 import com.ledgerlab.control.entry.VerificationFailedException
 import com.ledgerlab.control.entry.VerifierBusyException
 import com.ledgerlab.control.runs.InvalidRunRequestException
@@ -126,6 +128,14 @@ class ApiExceptionHandler {
         ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
             .header(HttpHeaders.RETRY_AFTER, e.retryAfterSeconds.toString())
             .body(ApiError(ControlErrors.DAILY_LIMIT))
+
+    @ExceptionHandler(TokenRequiredException::class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    fun tokenRequired() = ApiError(ControlErrors.TOKEN_REQUIRED)
+
+    @ExceptionHandler(UnknownLinkException::class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    fun unknownLink() = ApiError(ControlErrors.UNKNOWN_LINK)
 
     private companion object {
         const val SESSION_ID = "sessionId"

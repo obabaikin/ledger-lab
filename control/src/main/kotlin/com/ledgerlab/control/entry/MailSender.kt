@@ -48,7 +48,7 @@ class MailSender(
     private fun deliver(mail: Mail, email: String) {
         val text = when (mail.kind) {
             MailKind.LINK -> texts.link(mail.token)
-            MailKind.LIMIT -> texts.limit(checkNotNull(mail.windowFreesAt))
+            MailKind.LIMIT -> texts.limit(mail.token, checkNotNull(mail.windowFreesAt))
         }
         val reply = mailjet.send(email, text.subject, text.body)
         val attempt = mail.attempts + 1

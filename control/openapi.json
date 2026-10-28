@@ -1,6 +1,33 @@
 {
   "components" : {
     "schemas" : {
+      "AddressDeletionAccepted" : {
+        "description" : "Deletion is set.",
+        "properties" : {
+          "alreadyAsked" : {
+            "description" : "Whether an earlier request had already set the deletion.",
+            "type" : "boolean"
+          },
+          "deleteAt" : {
+            "description" : "From when the address is deleted; asking again keeps the first time.",
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "alreadyAsked", "deleteAt" ],
+        "type" : "object"
+      },
+      "AddressDeletionRequest" : {
+        "description" : "A mailed link whose address is to be deleted.",
+        "properties" : {
+          "token" : {
+            "description" : "The link's ref, from any mail sent to the address.",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "token" ],
+        "type" : "object"
+      },
       "ApiError" : {
         "description" : "Body of an error answer.",
         "properties" : {
@@ -827,6 +854,55 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
+    "/api/address-deletions" : {
+      "post" : {
+        "operationId" : "requestDeletion",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AddressDeletionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AddressDeletionAccepted"
+                }
+              }
+            },
+            "description" : "Deletion is set"
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "No token, or unreadable body"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "No address is stored for this link"
+          }
+        },
+        "summary" : "Delete the address a link was mailed to",
+        "tags" : [ "address-deletion-controller" ]
+      }
+    },
     "/api/invite-requests" : {
       "post" : {
         "operationId" : "request",

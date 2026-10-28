@@ -23,6 +23,8 @@ object ControlErrors {
     const val INVALID_EMAIL = "invalid-email"
     const val VERIFICATION_FAILED = "verification-failed"
     const val DAILY_LIMIT = "daily-limit"
+    const val TOKEN_REQUIRED = "token-required"
+    const val UNKNOWN_LINK = "unknown-link"
 
     fun tpsNotAllowed(options: List<Int>) = "tps must be one of $options"
     fun durationNotAllowed(options: List<Int>) = "durationSeconds must be one of $options"

@@ -11,6 +11,8 @@ enum class MailKind { LINK, LIMIT }
 
 data class AddressMails(val links: Int, val limits: Int, val oldestLink: Instant?)
 
+data class Deletion(val deleteAt: Instant, val alreadyAsked: Boolean)
+
 data class DailyMails(val count: Int, val oldest: Instant?)
 
 data class Mail(
@@ -181,6 +183,26 @@ class InviteMailRepository(private val jdbc: JdbcClient) {
         )
             .param("before", Timestamp.from(before))
             .update()
+
+    fun requestDeletion(token: String, at: Instant): Deletion? =
+        jdbc.sql(
+            """
+            WITH asked AS (
+                SELECT email, delete_at IS NOT NULL AS already_asked FROM invite_emails
+                WHERE email IN (SELECT email FROM invite_emails WHERE token = :token UNION SELECT email FROM invite_mails WHERE token = :token)
+            )
+            UPDATE invite_emails e SET delete_at = coalesce(e.delete_at, :at)
+            FROM asked a WHERE e.email = a.email
+            RETURNING e.delete_at, a.already_asked
+            """,
+        )
+            .param("token", token)
+            .param("at", Timestamp.from(at))
+            .query { rs, _ -> Deletion(rs.getTimestamp("delete_at").toInstant(), rs.getBoolean("already_asked")) }
+            .optional()
+            .orElse(null)
+
+    fun deleteDue(): Int = jdbc.sql("DELETE FROM invite_emails WHERE delete_at <= clock_timestamp()").update()
 
     private fun ResultSet.instantOrNull(column: String): Instant? = getTimestamp(column)?.toInstant()
 

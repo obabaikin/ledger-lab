@@ -14,10 +14,10 @@ class MailTexts(private val messages: MessageSource, private val baseUrl: String
 
     fun link(token: String) = MailText(
         text("mail.link.subject"),
-        text("mail.link.body", "$baseUrl/?ref=$token", lifetime()),
+        text("mail.link.body", "$baseUrl/?ref=$token", lifetime(), deletion(token)),
     )
 
-    fun limit(windowFreesAt: Instant) = MailText(
+    fun limit(token: String, windowFreesAt: Instant) = MailText(
         text("mail.limit.subject"),
         text(
             "mail.limit.body",
@@ -25,10 +25,13 @@ class MailTexts(private val messages: MessageSource, private val baseUrl: String
             limits.window.toHours().toString(),
             UTC_MINUTES.format(minuteAfter(windowFreesAt)),
             lifetime(),
+            deletion(token),
         ),
     )
 
     private fun lifetime() = text("mail.lifetime", limits.lifetime.toDays().toString(), limits.retention.toDays().toString())
+
+    private fun deletion(token: String) = text("mail.deletion", "$baseUrl/delete?ref=$token")
 
     private fun text(key: String, vararg args: String): String = messages.getMessage(key, args, LOCALE)
 
