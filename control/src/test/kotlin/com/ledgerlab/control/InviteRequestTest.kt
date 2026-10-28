@@ -17,8 +17,9 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import java.time.Duration
-import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -92,7 +93,7 @@ class InviteRequestTest : IntegrationTest() {
 
         assertThat(freesAt).isEqualTo(oldestLink + Duration.ofHours(24))
         val limitMail = mailedSends().last().body
-        assertThat(limitMail).contains("Ask again after ${UTC_MINUTES.format(minuteAfter(freesAt))} UTC.")
+        assertThat(limitMail).contains("Ask again after ${BERLIN_MINUTES.format(minuteAfter(freesAt))}.")
     }
 
     @Test
@@ -270,7 +271,7 @@ class InviteRequestTest : IntegrationTest() {
     }
 
     @Test
-    fun `limit mail names the count, hours and UTC time`() {
+    fun `limit mail names the count, hours and the time in Berlin`() {
         val email = address()
         repeat(4) { requestLink(email) }
         val freesAt = jdbc.sql("SELECT window_frees_at FROM invite_mails WHERE kind = 'LIMIT'").query(java.sql.Timestamp::class.java).single().toInstant()
@@ -282,7 +283,7 @@ class InviteRequestTest : IntegrationTest() {
         assertThat(message.get("Subject").asString()).isEqualTo("Ledger Lab: link limit reached")
         assertThat(message.get("TextPart").asString()).isEqualTo(
             "You have asked for a link 3 times in 24 hours, the limit.\n" +
-                "Ask again after ${UTC_MINUTES.format(minuteAfter(freesAt))} UTC.\n\n" +
+                "Ask again after ${BERLIN_MINUTES.format(minuteAfter(freesAt))}.\n\n" +
                 "The link works for 7 days. Your address is deleted after 30 days without use.\n" +
                 "To delete your address: https://ledger-lab.test/delete?ref=$limitToken\n",
         )
@@ -408,7 +409,7 @@ class InviteRequestTest : IntegrationTest() {
 
     private companion object {
         const val CONCURRENT = 12
-        val UTC_MINUTES: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneOffset.UTC)
+        val BERLIN_MINUTES: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm z", Locale.ENGLISH).withZone(ZoneId.of("Europe/Berlin"))
     }
 }
 

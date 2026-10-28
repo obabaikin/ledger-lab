@@ -112,6 +112,7 @@ control:
     # Doubles with each attempt: 1, 2, 4 and 8 minutes.
     first-retry: 1m
     request-timeout: 10s
+    time-zone: Europe/Berlin
   site:
     base-url: http://localhost:8083
     operator-name: ""

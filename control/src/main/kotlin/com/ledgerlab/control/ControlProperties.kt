@@ -2,6 +2,7 @@ package com.ledgerlab.control
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
+import java.time.ZoneId
 
 @ConfigurationProperties("control")
 data class ControlProperties(
@@ -95,6 +96,7 @@ data class ControlProperties(
         val maxAttempts: Int,
         val firstRetry: Duration,
         val requestTimeout: Duration,
+        val timeZone: ZoneId,
     )
 
     /** [baseUrl] is the page's address in the mailed links; the operator's details fill the imprint and privacy pages. */

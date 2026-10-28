@@ -21,7 +21,7 @@ class MailSender(
     messages: MessageSource,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val texts = MailTexts(messages, props.site.baseUrl, props.invites.email)
+    private val texts = MailTexts(messages, props.site.baseUrl, props.invites.email, props.mail.timeZone)
 
     @Scheduled(fixedDelayString = "\${control.mail.send-interval}", initialDelayString = "\${control.mail.send-interval}")
     fun sendDue(): Int {

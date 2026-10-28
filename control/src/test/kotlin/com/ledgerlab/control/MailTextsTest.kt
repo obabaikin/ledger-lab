@@ -14,7 +14,7 @@ class MailTextsTest : IntegrationTest() {
 
     @Autowired lateinit var messages: MessageSource
 
-    private fun texts(limits: ControlProperties.InviteEmail = props.invites.email) = MailTexts(messages, props.site.baseUrl, limits)
+    private fun texts(limits: ControlProperties.InviteEmail = props.invites.email) = MailTexts(messages, props.site.baseUrl, limits, props.mail.timeZone)
 
     @Test
     fun `every mail kind renders`() {
@@ -31,6 +31,15 @@ class MailTextsTest : IntegrationTest() {
     @Test
     fun `a quote in a mail text survives MessageFormat`() {
         assertThat(messages.getMessage("test.quote", arrayOf("here"), Locale.ENGLISH)).isEqualTo("It's here")
+    }
+
+    @Test
+    fun `the limit mail names the time in Berlin, in winter and in summer`() {
+        val winter = texts().limit(UUID.randomUUID().toString(), Instant.parse("2026-10-28T10:15:00Z")).body
+        val summer = texts().limit(UUID.randomUUID().toString(), Instant.parse("2026-07-01T10:15:00Z")).body
+
+        assertThat(winter).contains("Ask again after 28.10.2026 11:15 CET.\n")
+        assertThat(summer).contains("Ask again after 01.07.2026 12:15 CEST.\n")
     }
 
     @Test
