@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SiteView } from './api/client'
 import { looksLikeEmail, waitText } from './InviteForm'
 import { en } from './texts/en'
@@ -132,7 +132,75 @@ describe('the link form', () => {
   })
 })
 
+const CHECK_SCRIPT = 'script[src*="challenges.cloudflare.com"]'
+const checkScripts = () => document.head.querySelectorAll(CHECK_SCRIPT)
+const field = () => screen.getByLabelText(en.inviteForm.emailLabel)
+
 describe('the link form with the bot check on', () => {
+  afterEach(() => {
+    checkScripts().forEach((script) => {
+      script.dispatchEvent(new Event('error'))
+      script.remove()
+    })
+  })
+
+  async function renderWithKey() {
+    const calls = fakeControl({ 'GET /api/site': { status: 200, body: site({ turnstileSiteKey: 'site-key' }) }, [REQUEST]: { status: 202, body: {} } })
+    renderAt('/')
+    await screen.findByText(/The link works for 7 days/)
+    return calls
+  }
+
+  it('the Turnstile script is not requested before the email field is focused', async () => {
+    await renderWithKey()
+
+    expect(checkScripts()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: en.inviteForm.submit })).toBeDisabled()
+  })
+
+  it('focusing the field loads the check once, also when focused again', async () => {
+    await renderWithKey()
+
+    fireEvent.focus(field())
+    await waitFor(() => expect(checkScripts()).toHaveLength(1))
+    fireEvent.blur(field())
+    fireEvent.focus(field())
+
+    expect(checkScripts()).toHaveLength(1)
+  })
+
+  it('typing into the email field loads the check', async () => {
+    await renderWithKey()
+
+    fireEvent.change(field(), { target: { value: 'v' } })
+
+    await waitFor(() => expect(checkScripts()).toHaveLength(1))
+  })
+
+  it('sends nothing on Enter before the check answers', async () => {
+    const calls = await renderWithKey()
+    fireEvent.change(field(), { target: { value: 'visitor@example.org' } })
+
+    fireEvent.submit(field().closest('form')!)
+
+    expect(screen.getByRole('button', { name: en.inviteForm.submit })).toBeDisabled()
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('tries to load the check again when the field is focused after it failed', async () => {
+    await renderWithKey()
+    fireEvent.focus(field())
+    await waitFor(() => expect(checkScripts()).toHaveLength(1))
+    act(() => checkScripts()[0]!.dispatchEvent(new Event('error')))
+    await screen.findByText(en.inviteForm.checkUnavailable)
+
+    fireEvent.blur(field())
+    fireEvent.focus(field())
+
+    await waitFor(() => expect(checkScripts()).toHaveLength(2))
+    expect(screen.queryByText(en.inviteForm.checkUnavailable)).not.toBeInTheDocument()
+  })
+
   it('holds the button until the check answers, then sends its answer, and asks for a fresh one after an error', async () => {
     const callbacks: ((token: string) => void)[] = []
     vi.stubGlobal('turnstile', {
@@ -149,8 +217,9 @@ describe('the link form with the bot check on', () => {
     })
     try {
       renderAt('/')
+      await screen.findByText(/The link works for 7 days/)
+      fireEvent.change(field(), { target: { value: 'visitor@example.org' } })
       await waitFor(() => expect(callbacks.length).toBeGreaterThan(0))
-      fireEvent.change(screen.getByLabelText(en.inviteForm.emailLabel), { target: { value: 'visitor@example.org' } })
       expect(screen.getByRole('button', { name: en.inviteForm.submit })).toBeDisabled()
 
       act(() => callbacks.at(-1)!('first-answer'))
@@ -165,11 +234,11 @@ describe('the link form with the bot check on', () => {
   })
 
   it('says so when the check cannot load', async () => {
-    fakeControl({ 'GET /api/site': { status: 200, body: site({ turnstileSiteKey: 'site-key' }) } })
-    renderAt('/')
-    await waitFor(() => expect(document.head.querySelector('script[src*="challenges.cloudflare.com"]')).not.toBeNull())
+    await renderWithKey()
+    fireEvent.focus(field())
+    await waitFor(() => expect(checkScripts()).toHaveLength(1))
 
-    act(() => document.head.querySelector('script[src*="challenges.cloudflare.com"]')!.dispatchEvent(new Event('error')))
+    act(() => checkScripts()[0]!.dispatchEvent(new Event('error')))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(CHECK_UNAVAILABLE)
     expect(screen.getByRole('button', { name: en.inviteForm.submit })).toBeDisabled()

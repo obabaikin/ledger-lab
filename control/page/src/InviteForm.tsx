@@ -46,6 +46,7 @@ export function InviteForm() {
   const emailInput = useRef<HTMLInputElement>(null)
   const [widgetRound, setWidgetRound] = useState(0)
   const [checkUnavailable, setCheckUnavailable] = useState(false)
+  const [checkWanted, setCheckWanted] = useState(false)
   const onToken = useCallback((answer: string | null) => setToken(answer), [])
   const onUnavailable = useCallback(() => setCheckUnavailable(true), [])
   const waitingForCheck = Boolean(site?.turnstileSiteKey) && token === null
@@ -56,7 +57,16 @@ export function InviteForm() {
     emailInput.current?.focus()
   }
 
+  function wantCheck() {
+    setCheckWanted(true)
+    if (checkUnavailable) {
+      setCheckUnavailable(false)
+      setWidgetRound((round) => round + 1)
+    }
+  }
+
   function changeEmail(value: string) {
+    setCheckWanted(true)
     setEmail(value)
     if (emailInvalid && looksLikeEmail(value)) {
       setMessage(null)
@@ -66,6 +76,7 @@ export function InviteForm() {
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (waitingForCheck) return
     if (!looksLikeEmail(email)) {
       rejectEmail()
       return
@@ -109,6 +120,7 @@ export function InviteForm() {
             value={email}
             aria-invalid={emailInvalid}
             aria-describedby={emailInvalid ? EMAIL_ERROR_ID : undefined}
+            onFocus={wantCheck}
             onChange={(e) => changeEmail(e.target.value)}
           />
         </label>
@@ -119,7 +131,7 @@ export function InviteForm() {
       {(message ?? (checkUnavailable ? text.checkUnavailable : null)) && (
         <ErrorText id={EMAIL_ERROR_ID}>{message ?? text.checkUnavailable}</ErrorText>
       )}
-      {site?.turnstileSiteKey && (
+      {site?.turnstileSiteKey && checkWanted && (
         <TurnstileWidget siteKey={site.turnstileSiteKey} onToken={onToken} onUnavailable={onUnavailable} resetKey={widgetRound} />
       )}
       <p className="hint">
