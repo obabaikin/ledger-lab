@@ -30,20 +30,26 @@ export const en = {
   },
   privacy: {
     title: 'Privacy',
-    heading1: 'heading1',
-    text1: 'text1',
-    heading2: 'heading2',
-    text2: 'text2',
-    heading3: 'heading3',
-    text3: 'text3',
-    heading4: 'heading4',
-    text4: 'text4',
-    heading5: 'heading5',
-    text5: 'text5',
-    heading6: 'heading6',
-    text6: 'text6',
-    heading7: 'heading7',
-    text7: 'text7',
+    heading1: 'What is stored',
+    text1: 'The email address you enter, when you ask for a link, which emails were sent to it, and, for the invite it carries, its visits, sessions and runs.',
+    heading2: 'Why, and on what basis',
+    text2:
+      "We use your email address to send the access link you requested and to control access to the service (Art. 6(1)(b) GDPR). Access links, request limits and bot protection help prevent automated use, abuse and the use of the site's email facility for spam; we process this data on the basis of our legitimate interest in operating and protecting the service (Art. 6(1)(f) GDPR).",
+    heading3: 'How long',
+    text3: (retentionDays: number) =>
+      `The address is deleted ${retentionDays} days after its last use: your last request or your last visit using the link. The invite, its sessions and runs remain after that, without the email address.`,
+    heading4: 'Who else processes it',
+    text4:
+      'The site runs on a server rented from Contabo in [Germany]; Contabo hosts all data listed here. Mailjet sends the emails, from servers in the EU, with open and click tracking switched off. Cloudflare Turnstile checks that a request comes from a person; it loads only when you start entering your email address and processes technical information about your browser and connection, including your IP address, but not your email address. Cloudflare is based in the USA; the transfer relies on the EU-US Data Privacy Framework, and on the EU standard contractual clauses where that does not apply. All three process the data on our behalf (Art. 28 GDPR).',
+    heading5: 'Server log',
+    text5:
+      "The web server logs each request with its time, method, status and duration. It does not log your IP address, your browser's User-Agent, or the address of the page you open. To limit requests, it counts them per IP address in memory only, without storing them. The log is kept until the server restarts.",
+    heading6: 'Deleting it sooner, or asking what is stored',
+    text6:
+      'Every email we send carries a link to delete your address; your address is deleted after a 24-hour waiting period. You may also write to the contact below to ask what data we hold about you, or to exercise your other rights under the GDPR: access, rectification, erasure, restriction of processing, data portability, and objection to processing based on our legitimate interest (Art. 15–21 GDPR).',
+    heading7: 'Controller and contact',
+    text7:
+      'The controller is the operator named below. You also have the right to lodge a complaint with a data protection supervisory authority, in particular in the EU member state where you live or work.',
     backToStart: 'Back to the start',
   },
   impressum: {

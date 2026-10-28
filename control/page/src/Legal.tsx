@@ -20,27 +20,27 @@ function Operator(props: { site: SiteView | null }) {
   )
 }
 
-const PRIVACY_SECTIONS = [
-  [t.privacy.heading1, t.privacy.text1],
-  [t.privacy.heading2, t.privacy.text2],
-  [t.privacy.heading3, t.privacy.text3],
-  [t.privacy.heading4, t.privacy.text4],
-  [t.privacy.heading5, t.privacy.text5],
-  [t.privacy.heading6, t.privacy.text6],
-  [t.privacy.heading7, t.privacy.text7],
-]
-
 export function Privacy() {
   const site = useSite()
+  const p = t.privacy
+  const sections = [
+    [p.heading1, p.text1],
+    [p.heading2, p.text2],
+    [p.heading3, site && p.text3(site.retentionDays)],
+    [p.heading4, p.text4],
+    [p.heading5, p.text5],
+    [p.heading6, p.text6],
+    [p.heading7, p.text7],
+  ]
   return (
     <main>
       <Hero />
       <section className="card legal">
         <h2>{t.privacy.title}</h2>
-        {PRIVACY_SECTIONS.map(([heading, text]) => (
+        {sections.map(([heading, text]) => (
           <Fragment key={heading}>
             <h3>{heading}</h3>
-            <p>{text}</p>
+            {text && <p>{text}</p>}
           </Fragment>
         ))}
         <Operator site={site} />

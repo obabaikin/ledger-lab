@@ -257,13 +257,13 @@ describe('privacy and imprint', () => {
   })
 
   it('privacy shows its seven sections in order, then the operator, who is not set where the deployment has none', async () => {
-    fakeControl({ 'GET /api/site': { status: 200, body: site() } })
+    fakeControl({ 'GET /api/site': { status: 200, body: site({ retentionDays: 45 }) } })
     renderAt('/privacy')
 
     const operator = (await screen.findAllByText(en.operator.notSet, { exact: false }))[0]!.closest('address')!
     const p = en.privacy
     const sections = [
-      [p.heading1, p.text1], [p.heading2, p.text2], [p.heading3, p.text3], [p.heading4, p.text4],
+      [p.heading1, p.text1], [p.heading2, p.text2], [p.heading3, p.text3(45)], [p.heading4, p.text4],
       [p.heading5, p.text5], [p.heading6, p.text6], [p.heading7, p.text7],
     ]
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(p.title)
