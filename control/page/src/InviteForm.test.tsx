@@ -187,11 +187,11 @@ describe('the link form with the bot check on', () => {
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 
-  it('tries to load the check again when the field is focused after it failed', async () => {
+  it.each(['error', 'load'])('tries to load the check again when the field is focused after the script ended with %s and no check', async (event) => {
     await renderWithKey()
     fireEvent.focus(field())
     await waitFor(() => expect(checkScripts()).toHaveLength(1))
-    act(() => checkScripts()[0]!.dispatchEvent(new Event('error')))
+    act(() => checkScripts()[0]!.dispatchEvent(new Event(event)))
     await screen.findByText(en.inviteForm.checkUnavailable)
 
     fireEvent.blur(field())

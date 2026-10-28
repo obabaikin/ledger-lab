@@ -22,11 +22,12 @@ function loadTurnstile(): Promise<TurnstileApi> {
     const script = document.createElement('script')
     script.src = SCRIPT_URL
     script.async = true
-    script.onload = () => (window.turnstile ? resolve(window.turnstile) : reject(new Error('Turnstile did not load')))
-    script.onerror = () => {
+    const fail = () => {
       loading = null
       reject(new Error('Turnstile did not load'))
     }
+    script.onload = () => (window.turnstile ? resolve(window.turnstile) : fail())
+    script.onerror = fail
     document.head.appendChild(script)
   })
   return loading

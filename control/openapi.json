@@ -32,7 +32,7 @@
         "description" : "Body of an error answer.",
         "properties" : {
           "error" : {
-            "description" : "Names the case; the status code tells it apart.",
+            "description" : "Names the case; a kebab-case code tells it apart, a phrase together with the status code.",
             "type" : "string"
           }
         },

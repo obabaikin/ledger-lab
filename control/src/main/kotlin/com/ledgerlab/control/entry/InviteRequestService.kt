@@ -75,7 +75,7 @@ class InviteRequestService(
         Duration.between(now, at).plusMillis(MILLIS_PER_SECOND - 1).toSeconds().coerceAtLeast(1)
 
     private companion object {
-        /** Tells mailed invites from the hand-made `look-` ones in the report. */
+        /** Tells mailed invites from the hand-made `look-` ones. */
         const val MAILED_TOKEN_PREFIX = "mail-"
         const val MILLIS_PER_SECOND = 1000L
     }

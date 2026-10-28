@@ -2,7 +2,7 @@ package com.ledgerlab.control.api
 
 import io.swagger.v3.oas.annotations.media.Schema
 
-/** Error texts of control's API; the page tells the cases apart by status code, the text names it. */
+/** The older phrases the page tells apart by status code; the kebab-case codes it reads to pick its text. */
 object ControlErrors {
     const val INVITE_NOT_VALID = "invite not valid"
     const val SESSION_NOT_FOUND = "session not found"
@@ -31,4 +31,4 @@ object ControlErrors {
 }
 
 @Schema(description = "Body of an error answer.")
-data class ApiError(@field:Schema(description = "Names the case; the status code tells it apart.") val error: String)
+data class ApiError(@field:Schema(description = "Names the case; a kebab-case code tells it apart, a phrase together with the status code.") val error: String)
