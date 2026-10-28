@@ -3,8 +3,8 @@ export const en = {
     heading: 'Crash every ledger mid-run. Will the books still balance?',
     emailLabel: 'Email',
     submit: 'Get a link',
-    sent: 'A link is on its way to your inbox.',
-    deletionInEveryMail: 'Each mail has a link to delete your address.',
+    sent: 'Please check your email.',
+    mailLinks: 'The mail has a link to enter and a link to delete your address.',
     linksPerDay: (times: number) => `You can ask up to ${times} times a day.`,
     terms: (linkDays: number, retentionDays: number) =>
       `The link works for ${linkDays} days. Your address is deleted after ${retentionDays} days without use.`,

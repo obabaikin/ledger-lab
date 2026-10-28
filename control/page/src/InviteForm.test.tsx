@@ -33,7 +33,7 @@ describe('the link form', () => {
     ask('visitor@example.org')
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'A link is on its way to your inbox. Each mail has a link to delete your address. You can ask up to 3 times a day.',
+      `${en.inviteForm.sent} ${en.inviteForm.mailLinks} ${en.inviteForm.linksPerDay(3)}`,
     )
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ email: 'visitor@example.org', turnstileToken: null })
     expect(screen.queryByRole('button', { name: en.inviteForm.submit })).not.toBeInTheDocument()
