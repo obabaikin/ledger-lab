@@ -1,6 +1,6 @@
 #!/bin/sh
-# Deploys a commit's images from GHCR to the server through the SSH tunnel: cert-manager, then the chart.
-# Usage: infra/server/deploy.sh <commit sha> [--force] [helm args]. --force deploys while runs are in progress.
+# Deploys a release's images from GHCR to the server through the SSH tunnel: cert-manager, then the chart.
+# Usage: infra/server/deploy.sh <release tag> [--force] [helm args]. --force deploys while runs are in progress.
 # The first deploy on a new domain: add --set ingress.tls.issuer=letsencrypt-staging, then deploy again without it.
 set -eu
 
@@ -16,16 +16,21 @@ MANIFEST_TYPES="application/vnd.oci.image.index.v1+json,application/vnd.oci.imag
 CHART="$ROOT/infra/helm/ledger-lab"
 PASSWORDS="$CONFIG_DIR/values-server.yaml"
 PLACEHOLDER_PASSWORD=change-me
-USAGE="usage: $0 <40-character commit sha> [--force] [helm args]"
+USAGE="usage: $0 <release tag, vX.Y.Z or vX.Y.Z-rc.N> [--force] [helm args]"
 # Mailed invites and the imprint (ADR 0017); the values stay in server.env, outside the repository.
 REQUIRED_SETTINGS="TURNSTILE_SITE_KEY TURNSTILE_SECRET MAILJET_API_KEY MAILJET_API_SECRET OPERATOR_NAME OPERATOR_ADDRESS OPERATOR_EMAIL"
 
-SHA="${1:-}"
-if ! echo "$SHA" | grep -Eqx '[0-9a-f]{40}'; then
+RELEASE="${1:-}"
+if ! echo "$RELEASE" | grep -Eqx 'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?'; then
   echo "$USAGE" >&2
   exit 2
 fi
 shift
+# A local tag that never reached GitHub has no images; a pushed one is what CI built from.
+if ! git -C "$ROOT" ls-remote --exit-code --tags origin "refs/tags/$RELEASE" >/dev/null; then
+  echo "$RELEASE is not on GitHub: git tag -a $RELEASE <sha> && git push origin $RELEASE, then wait for CI" >&2
+  exit 1
+fi
 force=false
 if [ "${1:-}" = --force ]; then
   force=true
@@ -81,8 +86,8 @@ for module in $MODULES; do
   path="${IMAGE_REPOSITORY#ghcr.io/}/$module"
   token=$(curl -sf "https://ghcr.io/token?scope=repository:$path:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
   if ! curl -sf -o /dev/null -I -H "Authorization: Bearer $token" -H "Accept: $MANIFEST_TYPES" \
-    "https://ghcr.io/v2/$path/manifests/$SHA"; then
-    echo "image $IMAGE_REPOSITORY/$module:$SHA not found, or the package is not public" >&2
+    "https://ghcr.io/v2/$path/manifests/$RELEASE"; then
+    echo "image $IMAGE_REPOSITORY/$module:$RELEASE not found: CI for the tag is not done, or the package is not public" >&2
     exit 1
   fi
 done
@@ -102,7 +107,7 @@ fi
 helm upgrade --install cert-manager "$CERT_MANAGER_CHART" \
   --namespace cert-manager --create-namespace -f "$HERE/cert-manager-values.yaml" --wait --timeout 5m
 helm upgrade --install ledger-lab "$CHART" --namespace "$NAMESPACE" --create-namespace \
-  -f "$HERE/values.yaml" -f "$PASSWORDS" -f "$KEYS" --set image.repository="$IMAGE_REPOSITORY" --set image.tag="$SHA" \
+  -f "$HERE/values.yaml" -f "$PASSWORDS" -f "$KEYS" --set image.repository="$IMAGE_REPOSITORY" --set image.tag="$RELEASE" \
   --set ingress.host="$DOMAIN" --wait --wait-for-jobs --timeout 10m "$@"
 kubectl --namespace "$NAMESPACE" get pods
 echo "control: https://$DOMAIN"

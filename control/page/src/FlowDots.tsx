@@ -33,7 +33,8 @@ const COLOR = ['var(--flow)', 'var(--flow)', 'var(--flow)', 'var(--ok)', 'var(--
 
 type Dot = { el: SVGCircleElement; path: SVGPathElement; length: number; born: number }
 
-export function FlowDots({ rates }: { rates: number[] }) {
+/** [wires] are the paths' `d`, in the order of [rates]. */
+export function FlowDots({ wires, rates }: { wires: string[]; rates: number[] }) {
   const layer = useRef<SVGGElement>(null)
   const latest = useRef(rates)
   latest.current = rates
@@ -42,8 +43,8 @@ export function FlowDots({ rates }: { rates: number[] }) {
     const g = layer.current
     const svg = g?.ownerSVGElement
     if (!g || !svg) return
-    const paths = Array.from(svg.querySelectorAll<SVGPathElement>('path.wire'))
-    if (paths.some((p) => typeof p.getTotalLength !== 'function')) return
+    const paths = wires.map((d) => svg.querySelector<SVGPathElement>(`path.wire[d="${d}"]`))
+    if (!paths.every((p): p is SVGPathElement => p !== null && typeof p.getTotalLength === 'function')) return
     const lengths = paths.map((p) => p.getTotalLength())
     const dots: Dot[] = []
     const owed = paths.map(() => 0)
@@ -82,7 +83,7 @@ export function FlowDots({ rates }: { rates: number[] }) {
       cancelAnimationFrame(frame)
       dots.forEach((d) => d.el.remove())
     }
-  }, [])
+  }, [wires.join()])
 
   return <g ref={layer} />
 }

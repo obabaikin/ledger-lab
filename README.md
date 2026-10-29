@@ -181,7 +181,8 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
 - **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR;
-  `deploy.sh <sha>` deploys a commit by hand and refuses while runs are in progress. Each service stops
+  only a release, a SemVer tag, reaches the server: `deploy.sh v0.4.1` deploys it by hand and refuses while
+  runs are in progress. Each service stops
   before its new version starts; the gateway warms up while it already takes traffic, and no run starts
   until it is done.
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,

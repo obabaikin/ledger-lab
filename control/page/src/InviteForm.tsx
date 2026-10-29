@@ -54,7 +54,8 @@ export function InviteForm() {
   }, [])
   const onUnavailable = useCallback(() => setCheckUnavailable(true), [])
   const waitingForCheck = Boolean(site?.turnstileSiteKey) && token === null
-  const checking = waitingForCheck && checkWanted && !checkUnavailable
+  const errorText = message ?? (checkUnavailable ? text.checkUnavailable : null)
+  const checking = waitingForCheck && checkWanted && !checkUnavailable && errorText === null
 
   function rejectEmail() {
     setMessage(text.notAnAddress)
@@ -133,14 +134,17 @@ export function InviteForm() {
           {text.submit}
         </button>
       </div>
-      {(message ?? (checkUnavailable ? text.checkUnavailable : null)) && (
-        <ErrorText id={EMAIL_ERROR_ID}>{message ?? text.checkUnavailable}</ErrorText>
-      )}
-      {checking && (
-        <p id={CHECK_HINT_ID} className="hint" role="status">
-          {text.checking}
-        </p>
-      )}
+      <div className="form-status">
+        {errorText !== null ? (
+          <ErrorText id={EMAIL_ERROR_ID}>{errorText}</ErrorText>
+        ) : (
+          checking && (
+            <p id={CHECK_HINT_ID} className="hint" role="status">
+              {text.checking}
+            </p>
+          )
+        )}
+      </div>
       {site?.turnstileSiteKey && checkWanted && (
         <TurnstileWidget siteKey={site.turnstileSiteKey} onToken={onToken} onUnavailable={onUnavailable} resetKey={widgetRound} />
       )}
