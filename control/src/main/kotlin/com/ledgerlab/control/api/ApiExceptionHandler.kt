@@ -4,8 +4,14 @@ import com.ledgerlab.control.chaos.ChaosNotAvailableException
 import com.ledgerlab.control.chaos.ChaosUsedRecentlyException
 import com.ledgerlab.control.chaos.LedgerDidNotAnswerException
 import com.ledgerlab.control.chaos.NoRunningRunException
+import com.ledgerlab.control.entry.DailyLimitException
+import com.ledgerlab.control.entry.InvalidEmailException
 import com.ledgerlab.control.entry.InviteNotValidException
 import com.ledgerlab.control.entry.SessionNotFoundException
+import com.ledgerlab.control.entry.TokenRequiredException
+import com.ledgerlab.control.entry.UnknownLinkException
+import com.ledgerlab.control.entry.VerificationFailedException
+import com.ledgerlab.control.entry.VerifierBusyException
 import com.ledgerlab.control.runs.InvalidRunRequestException
 import com.ledgerlab.control.runs.QueueFullException
 import com.ledgerlab.control.runs.QuotaExceededException
@@ -104,6 +110,32 @@ class ApiExceptionHandler {
     @ExceptionHandler(LedgerDidNotAnswerException::class)
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
     fun ledgerDidNotAnswer() = ApiError(ControlErrors.LEDGER_DID_NOT_ANSWER)
+
+    @ExceptionHandler(InvalidEmailException::class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    fun invalidEmail() = ApiError(ControlErrors.INVALID_EMAIL)
+
+    @ExceptionHandler(VerificationFailedException::class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    fun verificationFailed() = ApiError(ControlErrors.VERIFICATION_FAILED)
+
+    @ExceptionHandler(VerifierBusyException::class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    fun verifierBusy() = ApiError(ControlErrors.BUSY)
+
+    @ExceptionHandler(DailyLimitException::class)
+    fun dailyLimit(e: DailyLimitException): ResponseEntity<ApiError> =
+        ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, e.retryAfterSeconds.toString())
+            .body(ApiError(ControlErrors.DAILY_LIMIT))
+
+    @ExceptionHandler(TokenRequiredException::class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    fun tokenRequired() = ApiError(ControlErrors.TOKEN_REQUIRED)
+
+    @ExceptionHandler(UnknownLinkException::class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    fun unknownLink() = ApiError(ControlErrors.UNKNOWN_LINK)
 
     private companion object {
         const val SESSION_ID = "sessionId"

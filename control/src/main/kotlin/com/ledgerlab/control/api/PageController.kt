@@ -11,13 +11,13 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.servlet.ModelAndView
 import org.springframework.web.servlet.view.RedirectView
 
-/** The page routes `/s/<sessionId>` itself; the server only hands it the same document as `/`. */
+/** The page routes its addresses itself; the server only hands it the same document as `/`. */
 @Hidden
 @Controller
 class PageController {
 
-    @GetMapping("/s/{sessionId}")
-    fun session(): String = "forward:/index.html"
+    @GetMapping("/s/{sessionId}", "/privacy", "/impressum", "/delete")
+    fun page(): String = "forward:/index.html"
 }
 
 @Component

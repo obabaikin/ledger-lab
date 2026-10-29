@@ -98,6 +98,8 @@ start of the gateway, end with nothing refused, given up or unknown.
 | only the gateway restarted | 4,000 | 1 s / 3 s | 10.5 / 9.3 s | 0 / 257 | `BALANCED` |
 | only the gateway restarted | 5,000 | 13 s / 6 s | 17.1 / 11.2 s | 0 / 0 | `BALANCED` |
 | only the gateway restarted | 10,000 | 13 s / 24 s | 24.2 / 25.5 s | 0 / 0 | `BALANCED` |
+| the whole bank just deployed, 2026-10-24 | 6,000 | 0 s | 15.5 s | 2,890 (of 3,998 sent) | `BALANCED` |
+| only the gateway restarted, 2026-10-24 | 6,000 | 9 s / 10 s | 13.4 / 14.8 s | 1 / 0 | `BALANCED` |
 
 - **A cold gateway is fixed by waiting.** From 5,000 rounds on, both runs after a restart refused nothing; the
   visitor waits in the queue for up to 13 s at 5,000 rounds and up to 24 s at 10,000, and the page says the
@@ -158,8 +160,9 @@ The rest of the CPU the node reports busy (up to 4.8 cores at 500 TPS) is k3s it
   already is. k3s's own pods stay without one.
 - **Right after a deploy** control admits no run until every gateway instance has finished its warm-up,
   which goes on behind the gateway's readiness for up to 90 s; the queued run says so. On the server the
-  warm-up needs at least 5,000 rounds: with them a restarted gateway refuses nothing. The server is set to
-  6,000, one step above the measured 5,000.
+  warm-up needs at least 5,000 rounds: with them a restarted gateway refused nothing. The server is set to
+  6,000, one step above the measured 5,000; after the deploy of 2026-10-24 two runs at 6,000 had 1 and 0 of
+  4,000 refused.
 - **Right after a full deploy** a run still meets refusals: every JVM starts cold on the same node, and the
   gateway's inserts wait for a database that shares the CPU with them. A restart of the ledger alone, as by the
   chaos button, needs nothing: Kafka holds the transfers until it is back.

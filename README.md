@@ -102,9 +102,9 @@ The same node, measured rate by rate ([full results](docs/results/2026-10-23-ser
 - **The limit is the node's CPU**, PostgreSQL its largest consumer; not the disk and not the hypervisor.
   At 500 TPS the pods use 4.2 of 6 cores, and the node at most 6.4 of its 12 GB.
 - **A crash of every ledger instance at 150 TPS** is absorbed within 47 s, with nothing refused.
-- **Right after a restart of the gateway** a run waits until it has warmed up, then nothing is refused.
-  Right after a full deploy every service starts cold on the same node, and a run still meets refusals;
-  the fix is next.
+- **Right after a restart of the gateway** a run waits until it has warmed up; then two runs of 4,000
+  transfers had 1 and 0 refused. Right after a full deploy every service starts cold on the same node, and a
+  run still meets refusals; the fix is planned with the optimizations.
 
 At most three runs hold a place at once, together at most 300 transactions per second, and only
 once the ledger instances hold all partitions and the gateway has warmed up; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
@@ -238,14 +238,14 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Survives crashes mid-run | one hour at 300 TPS on the server, the ledger crashed twice, `BALANCED` | done |
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
 | Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS, the node's CPU the limit ([results](docs/results/2026-10-23-server-baseline.md)) | done |
-| No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | next |
-| Access on request | a visitor enters an email and receives an invite link; sign-in with Google later | planned |
+| Access on request | a visitor enters an email and receives an invite link | next |
 | A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |
 | Dashboards | Grafana: latency by segment, node, database | planned |
 | The bottleneck, found and explained | measured, with the fix or the reason not to | planned |
+| No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
-| IBAN account numbers at the API | the gateway validates and maps IBANs | planned |
 | Nothing received goes unaccounted | every message a service took is booked or reported | planned |
+| IBAN account numbers at the API (optional) | the gateway validates and maps IBANs | planned |
 
 ## Design notes
 

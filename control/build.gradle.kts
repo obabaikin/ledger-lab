@@ -48,16 +48,41 @@ tasks.check {
     dependsOn(pageKnip)
 }
 
-// The page shows the commit it was built from; a new commit with the same sources must still rebuild it.
-val gitState = providers.exec { commandLine("git", "status", "--porcelain", "--untracked-files=no") }.standardOutput.asText
-val gitHead = providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText
+val gitDescribe = providers.exec {
+    commandLine("git", "describe", "--tags", "--match", "v[0-9]*", "--long", "--always", "--dirty=+changes")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+val gitCommit = providers.exec {
+    commandLine("git", "rev-parse", "HEAD")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+
+// SemVer: the commits after the release tag are build metadata (v0.4.0+11), which leaves the order to the tag.
+fun semver(described: String): String {
+    val match = Regex("""(v.+)-(\d+)-g[0-9a-f]+(\+changes)?""").matchEntire(described)
+        ?: return described.ifEmpty { "unknown" }
+    val (tag, since, changes) = match.destructured
+    val metadata = listOfNotNull(since.takeIf { it != "0" }, "changes".takeIf { changes.isNotEmpty() }).joinToString(".")
+    return if (metadata.isEmpty()) tag else "$tag+$metadata"
+}
+
+val buildVersion = gitDescribe.map(::semver)
+
+springBoot {
+    buildInfo {
+        properties {
+            version = buildVersion
+            additional.put("commit", gitCommit)
+        }
+    }
+}
 
 val pageBuild by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
     dependsOn(pageTypes)
     npmCommand = listOf("run", "build")
     inputs.files(pageSources, "openapi.json")
-    inputs.property("gitHead", gitHead)
-    inputs.property("gitState", gitState)
+    inputs.property("buildVersion", buildVersion)
+    environment.put("BUILD_VERSION", buildVersion)
     outputs.dir(layout.buildDirectory.dir("page"))
 }
 

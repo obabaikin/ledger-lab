@@ -25,6 +25,17 @@ class PageTest : IntegrationTest() {
     }
 
     @Test
+    fun `the privacy and imprint pages are the same document`() {
+        val root = http.getForObject("/", String::class.java)
+
+        listOf("/privacy", "/impressum").forEach { path ->
+            val page = http.getForEntity(path, String::class.java)
+            assertThat(page.statusCode).describedAs(path).isEqualTo(HttpStatus.OK)
+            assertThat(page.body).describedAs(path).isEqualTo(root)
+        }
+    }
+
+    @Test
     fun `the browser asks again for the page on every load, so a deploy is seen at once`() {
         assertThat(http.getForEntity("/", String::class.java).headers.cacheControl).contains("no-cache")
     }

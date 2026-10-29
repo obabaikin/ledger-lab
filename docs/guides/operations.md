@@ -30,16 +30,21 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the bank fits in 8 GB, the generator beside it.
 The server is ordered by hand, and Terraform does not manage it: there is one server, and a
 configuration that can buy one should not exist. Terraform (`infra/terraform`) only reads it and
-manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS record.
+manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS: the A record and the mail
+records (SPF, DKIM, DMARC and Mailjet's ownership record). It runs through `infra/terraform/tf.sh`
+(`tf.sh plan`, `tf.sh apply`): the image CI uses, with the Cloudflare and Contabo keys from
+`~/.config/ledger-lab/cloudflare.env` and `contabo.env`.
 
 ```bash
 SERVER=<ip> infra/server/bootstrap.sh       # over SSH: key-only login, a host firewall, security updates, k3s, a kubeconfig; safe to run again
-ssh -fNL 16443:127.0.0.1:6443 root@<ip>     # the cluster's API is reached only through this tunnel
+infra/server/tunnel-open.sh                 # the cluster's API is reached only through this tunnel; tunnel-close.sh ends it
 infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with that commit's images
 ```
 
 - **Images:** every push to `main` builds the five images in CI and publishes them to GHCR, tagged
   with the commit. Merging deploys nothing.
+- **Releases** are SemVer tags on `main`: after the merge, `git tag -a vX.Y.Z <sha>` and
+  `git push origin vX.Y.Z`. The tag rebuilds that commit's images with the version; deploy once that run is green.
 - **Deploying** is by hand, `deploy.sh <sha>`. It refuses while runs are in progress (`--force`
   overrides), and before Helm when an image is missing. The first deploy generates the database
   passwords into a local file outside the repository; a role added to the chart later gets one on the
@@ -48,8 +53,9 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
 - **HTTPS:** cert-manager gets a Let's Encrypt certificate (HTTP-01 through Traefik); plain HTTP
   redirects to HTTPS, and Traefik limits requests per client address. Prometheus raises an alert
   14 days before the certificate expires. Traefik's access log (`kubectl -n kube-system logs deploy/traefik`)
-  keeps the client address, `User-Agent`, status and router, to tell browsers from bots; the path, query
-  and `Referer` stay out, since they carry invite tokens and session ids. It lives as long as the pod.
+  keeps the time, method, status, duration and router; the client address and `User-Agent` stay out, and so
+  do the path, query and `Referer`, since they carry invite tokens and session ids. It is limited in size; the
+  oldest entries are overwritten.
 - **Node and database metrics:** node-exporter (CPU with steal and iowait, pressure, disks; not the
   node's network, as it runs in its own pod's network) and
   postgres-exporter (commits, checkpoints, locks, connections) are scraped every 5 s. The exporter logs
@@ -73,8 +79,38 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
 
 ## Invites
 
-The page is opened with an invite link, `/?ref=<token>`. Invites are created by hand in the
-database; there is no endpoint for them:
+The page is opened with an invite link, `/?ref=<token>`. A visitor gets one by entering an email on the
+start page ([ADR 0017](../adr/0017-invites-by-email.md)); the address is kept with the invite, its visits and
+runs, in `control.invite_emails`, for 30 days after its last use, or until 24 hours after its owner asked to
+delete it by the link in any mail (`/delete?ref=<token>`).
+
+### Mailed invites
+
+`deploy.sh` refuses to deploy until `~/.config/ledger-lab/server.env` (`SERVER`, `DOMAIN`, outside the
+repository) also has:
+
+```sh
+TURNSTILE_SITE_KEY=<site key>       # Cloudflare Turnstile, a widget for the domain
+TURNSTILE_SECRET=<secret key>
+MAILJET_API_KEY=<API key>           # Mailjet, the sender domain validated
+MAILJET_API_SECRET=<secret key>
+OPERATOR_NAME='<name>'              # the imprint and the privacy page's contact
+OPERATOR_ADDRESS='<postal address>'
+OPERATOR_EMAIL=<contact address>
+```
+
+- **Mailjet:** add the domain under Senders & Domains, then put its DKIM value and ownership record into
+  `infra/terraform/terraform.tfvars` (see `terraform.tfvars.example`) and run `tf.sh apply`. Each mail
+  switches link and open tracking off, so the link goes to the site, not through a tracker. Mail goes from
+  `no-reply@<domain>`.
+- **Without the keys**, as in k3d: no Turnstile check, and each mail is logged as not sent; the link is
+  read from `control.invite_mails`.
+- **Limits:** 3 links an address in 24 hours, then one notice, then nothing; 50 mails a day in all.
+  Addresses unused for 30 days are deleted; copies of them outside the database would outlive that.
+
+### By hand
+
+Invites for a person are still created by hand in the database; there is no endpoint for them:
 
 ```sql
 INSERT INTO control.invite_tokens (token, expires_at, quota)

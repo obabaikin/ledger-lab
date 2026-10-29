@@ -61,3 +61,36 @@ resource "cloudflare_dns_record" "server" {
   # Let's Encrypt's HTTP-01 challenge and the client IP for Traefik's rate limit need the server itself, not a proxy.
   proxied = false
 }
+
+# Mail from the domain through Mailjet (ADR 0017): who may send, the key that signs, what a receiver does with the rest.
+resource "cloudflare_dns_record" "spf" {
+  zone_id = data.cloudflare_zone.domain.zone_id
+  name    = var.domain
+  type    = "TXT"
+  content = "\"v=spf1 include:spf.mailjet.com ~all\""
+  ttl     = local.cloudflare_auto_ttl
+}
+
+resource "cloudflare_dns_record" "dkim" {
+  zone_id = data.cloudflare_zone.domain.zone_id
+  name    = "${var.mailjet_dkim_selector}._domainkey.${var.domain}"
+  type    = "TXT"
+  content = "\"${var.mailjet_dkim_value}\""
+  ttl     = local.cloudflare_auto_ttl
+}
+
+resource "cloudflare_dns_record" "mailjet_ownership" {
+  zone_id = data.cloudflare_zone.domain.zone_id
+  name    = "${var.mailjet_ownership_record.name}.${var.domain}"
+  type    = "TXT"
+  content = "\"${var.mailjet_ownership_record.value}\""
+  ttl     = local.cloudflare_auto_ttl
+}
+
+resource "cloudflare_dns_record" "dmarc" {
+  zone_id = data.cloudflare_zone.domain.zone_id
+  name    = "_dmarc.${var.domain}"
+  type    = "TXT"
+  content = "\"v=DMARC1; p=quarantine${var.dmarc_report_address == "" ? "" : "; rua=mailto:${var.dmarc_report_address}"}\""
+  ttl     = local.cloudflare_auto_ttl
+}

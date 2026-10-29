@@ -11,7 +11,8 @@ bank down. The author also wants to know which invite links were opened, without
 ## Decision
 
 **Entry by invite.** An invite is a random token in the link (`/?ref=<token>`), created by hand in
-the database with an expiry and a quota; there is no endpoint for it. `POST /api/sessions` with the
+the database with an expiry and a quota; there is no endpoint for it. Invites mailed on a visitor's
+request are [ADR 0017](0017-invites-by-email.md). `POST /api/sessions` with the
 token opens a session. Unknown, inactive and expired invites all get the same 403. The session id
 is the key to the session; it travels in the URL, not in a cookie, and a session sees only its own
 runs (another session's run is 404, like a run that does not exist, and so is an id that is not

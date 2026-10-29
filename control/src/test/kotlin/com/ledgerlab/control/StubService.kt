@@ -14,7 +14,8 @@ class StubService : AutoCloseable {
     @Volatile var status: Int = 200
     @Volatile var delay: Duration = Duration.ZERO
 
-    data class Call(val method: String, val path: String, val body: String)
+    /** [headers] by lowercased name. */
+    data class Call(val method: String, val path: String, val body: String, val headers: Map<String, String> = emptyMap())
 
     private data class Answer(val status: Int, val body: String?, val delay: Duration)
 
@@ -25,7 +26,8 @@ class StubService : AutoCloseable {
         createContext("/") { exchange ->
             val method = exchange.requestMethod
             val path = exchange.requestURI.path
-            calls += Call(method, path, exchange.requestBody.readAllBytes().decodeToString())
+            val headers = exchange.requestHeaders.entries.associate { (name, values) -> name.lowercase() to values.joinToString(",") }
+            calls += Call(method, path, exchange.requestBody.readAllBytes().decodeToString(), headers)
             val answer = exchange.requestURI.rawQuery?.let { answers["$method $path?${URLDecoder.decode(it, StandardCharsets.UTF_8)}"] } ?: answers["$method $path"]
             Thread.sleep(answer?.delay ?: delay)
             val body = answer?.body?.toByteArray()

@@ -8,11 +8,12 @@ import { flowRates, stopLedgerWires, type Flow } from './FlowDots'
 import { euros, MS_PER_SECOND, shown } from './format'
 import { BuildInfo } from './BuildInfo'
 import { Hero } from './Hero'
-import { InviteHint } from './InviteHint'
+import { InviteForm } from './InviteForm'
 import { BANK_FINISHING_PHASE, booksFinal, CLIENTS_SENDING_PHASE, PHASES, phaseOf, phaseName, VERDICT_PHASE } from './phase'
 import { otherRunInProgress, runToShow } from './selectRun'
 import { liveCounters } from './shownCounts'
 import { useSmoothed } from './smooth'
+import { t } from './texts'
 import { usePolling } from './usePolling'
 import { Verdict } from './Verdict'
 
@@ -170,10 +171,10 @@ export function SessionPage() {
       <main>
         <Hero />
         <section className="card">
-          <div className="controls">
-            <span role="alert">This session has ended or the link is wrong. Open your invite link again to start a new one. </span>
-            <InviteHint />
-          </div>
+          <p role="alert" className="hint">
+            {t.sessionEnded.message}
+          </p>
+          <InviteForm />
         </section>
       </main>
     )
@@ -260,6 +261,11 @@ export function SessionPage() {
           void pollNow()
         }}
       />
+      {!session.inviteValid && (
+        <section className="card">
+          <InviteForm />
+        </section>
+      )}
       {connectionLost && (
         <p role="status" className="banner">
           Connection lost, retrying. The numbers below are the last ones read.

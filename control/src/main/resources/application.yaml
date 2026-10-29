@@ -1,6 +1,10 @@
 spring:
   application:
     name: control
+  messages:
+    basename: i18n/mail
+    fallback-to-system-locale: false
+    always-use-message-format: true
   threads:
     virtual:
       enabled: true
@@ -82,6 +86,38 @@ control:
     enabled: false
     min-interval: 60s
     request-timeout: 2s
+  invites:
+    email:
+      links-per-address: 3
+      # Every mail counts, the limit notices too.
+      daily-mails: 50
+      window: 24h
+      lifetime: 7d
+      runs-per-hour: 10
+      retention: 30d
+      deletion-check: 1m
+  turnstile:
+    site-key: ""
+    secret: ""
+    base-url: https://challenges.cloudflare.com
+    request-timeout: 5s
+  mail:
+    base-url: https://api.mailjet.com
+    api-key: ""
+    api-secret: ""
+    from: no-reply@localhost
+    send-interval: 5s
+    batch-size: 10
+    max-attempts: 5
+    # Doubles with each attempt: 1, 2, 4 and 8 minutes.
+    first-retry: 1m
+    request-timeout: 10s
+    time-zone: Europe/Berlin
+  site:
+    base-url: http://localhost:8083
+    operator-name: ""
+    operator-address: ""
+    contact-email: ""
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every error handler is added to every operation.

@@ -17,6 +17,8 @@ CHART="$ROOT/infra/helm/ledger-lab"
 PASSWORDS="$CONFIG_DIR/values-server.yaml"
 PLACEHOLDER_PASSWORD=change-me
 USAGE="usage: $0 <40-character commit sha> [--force] [helm args]"
+# Mailed invites and the imprint (ADR 0017); the values stay in server.env, outside the repository.
+REQUIRED_SETTINGS="TURNSTILE_SITE_KEY TURNSTILE_SECRET MAILJET_API_KEY MAILJET_API_SECRET OPERATOR_NAME OPERATOR_ADDRESS OPERATOR_EMAIL"
 
 SHA="${1:-}"
 if ! echo "$SHA" | grep -Eqx '[0-9a-f]{40}'; then
@@ -30,6 +32,13 @@ if [ "${1:-}" = --force ]; then
   shift
 fi
 require_domain
+for setting in $REQUIRED_SETTINGS; do
+  eval "value=\${$setting:-}"
+  if [ -z "$value" ]; then
+    echo "$setting is not set: add it to $SERVER_ENV (docs/guides/operations.md, mailed invites)" >&2
+    exit 1
+  fi
+done
 require_cluster
 
 # Only a first install skips the check; a database that cannot be asked refuses the deploy like a running run.
@@ -46,6 +55,26 @@ if [ "$force" = false ] && helm status ledger-lab --namespace "$NAMESPACE" >/dev
 fi
 
 ensure_passwords "$CHART/values.yaml" "$PASSWORDS"
+
+yaml_string() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
+# mktemp makes it readable by its owner only; it holds the keys.
+KEYS=$(mktemp)
+trap 'rm -f "$KEYS"' EXIT
+# dash runs the EXIT trap on exit, not on a signal; exiting on one runs it.
+trap 'exit 1' INT TERM HUP
+cat >"$KEYS" <<EOF
+invites:
+  turnstileSiteKey: $(yaml_string "$TURNSTILE_SITE_KEY")
+  mailFrom: $(yaml_string "no-reply@$DOMAIN")
+  operator:
+    name: $(yaml_string "$OPERATOR_NAME")
+    address: $(yaml_string "$OPERATOR_ADDRESS")
+    email: $(yaml_string "$OPERATOR_EMAIL")
+keys:
+  turnstileSecret: $(yaml_string "$TURNSTILE_SECRET")
+  mailjetApiKey: $(yaml_string "$MAILJET_API_KEY")
+  mailjetApiSecret: $(yaml_string "$MAILJET_API_SECRET")
+EOF
 
 # Anonymously, as the server's kubelet pulls them.
 for module in $MODULES; do
@@ -64,7 +93,7 @@ if [ -n "$(helm list --namespace "$NAMESPACE" --pending --short)" ]; then
   exit 1
 fi
 
-manifest=$(helm template ledger-lab "$CHART" -f "$HERE/values.yaml" -f "$PASSWORDS" --set ingress.host="$DOMAIN" "$@")
+manifest=$(helm template ledger-lab "$CHART" -f "$HERE/values.yaml" -f "$PASSWORDS" -f "$KEYS" --set ingress.host="$DOMAIN" "$@")
 if echo "$manifest" | grep -q "$PLACEHOLDER_PASSWORD"; then
   echo "a placeholder password would reach the server: every role in $CHART/values.yaml needs one in $PASSWORDS" >&2
   exit 1
@@ -73,7 +102,7 @@ fi
 helm upgrade --install cert-manager "$CERT_MANAGER_CHART" \
   --namespace cert-manager --create-namespace -f "$HERE/cert-manager-values.yaml" --wait --timeout 5m
 helm upgrade --install ledger-lab "$CHART" --namespace "$NAMESPACE" --create-namespace \
-  -f "$HERE/values.yaml" -f "$PASSWORDS" --set image.repository="$IMAGE_REPOSITORY" --set image.tag="$SHA" \
+  -f "$HERE/values.yaml" -f "$PASSWORDS" -f "$KEYS" --set image.repository="$IMAGE_REPOSITORY" --set image.tag="$SHA" \
   --set ingress.host="$DOMAIN" --wait --wait-for-jobs --timeout 10m "$@"
 kubectl --namespace "$NAMESPACE" get pods
 echo "control: https://$DOMAIN"

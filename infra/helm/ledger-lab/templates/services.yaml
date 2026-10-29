@@ -38,6 +38,10 @@ spec:
     metadata:
       labels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 8 }}
       annotations: {{- include "ledger-lab.scrape" $root | nindent 8 }}
+        {{- if eq $name "control" }}
+        # The keys reach control as env, read at start: a changed key restarts it.
+        checksum/keys: {{ include (print $root.Template.BasePath "/secret.yaml") $root | sha256sum }}
+        {{- end }}
     spec:
       # The services never call the Kubernetes API.
       automountServiceAccountToken: false
@@ -105,6 +109,21 @@ spec:
             - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
             - {name: CONTROL_RUNS_MAXTOTALTPS, value: {{ $root.Values.runs.maxTotalTps | quote }}}
+            {{- with $root.Values.ingress.host }}
+            - {name: CONTROL_SITE_BASEURL, value: "https://{{ . }}"}
+            {{- end }}
+            - {name: CONTROL_TURNSTILE_SITEKEY, value: {{ $root.Values.invites.turnstileSiteKey | quote }}}
+            {{- with $root.Values.invites.mailFrom }}
+            - {name: CONTROL_MAIL_FROM, value: {{ . | quote }}}
+            {{- end }}
+            - {name: CONTROL_SITE_OPERATORNAME, value: {{ $root.Values.invites.operator.name | quote }}}
+            - {name: CONTROL_SITE_OPERATORADDRESS, value: {{ $root.Values.invites.operator.address | quote }}}
+            - {name: CONTROL_SITE_CONTACTEMAIL, value: {{ $root.Values.invites.operator.email | quote }}}
+            {{- range $variable, $key := dict "CONTROL_TURNSTILE_SECRET" "turnstile-secret" "CONTROL_MAIL_APIKEY" "mailjet-api-key" "CONTROL_MAIL_APISECRET" "mailjet-api-secret" }}
+            - name: {{ $variable }}
+              valueFrom:
+                secretKeyRef: {name: control-keys, key: {{ $key }}}
+            {{- end }}
             {{- with $root.Values.runs.tpsOptions }}
             - {name: CONTROL_RUNS_TPSOPTIONS, value: {{ join "," . | quote }}}
             {{- end }}

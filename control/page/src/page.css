@@ -32,6 +32,7 @@ button.danger { border-color: var(--bad); color: var(--bad); font-weight: 600; }
 button.danger:hover:not(:disabled) { background: var(--bad); color: #fff; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 .hint { color: var(--muted); font-size: 14px; }
+.error { color: var(--bad); font-size: 14px; }
 .banner { border-left: 4px solid var(--warn); padding: 8px 12px; background: color-mix(in srgb, var(--warn) 10%, var(--card)); border-radius: 6px; margin-bottom: 12px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .banner label { white-space: nowrap; }
 .phases { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; align-items: center; }
@@ -100,3 +101,15 @@ button .why { display: block; font-size: 12px; font-weight: 400; }
 .legend .dot { width: 9px; height: 9px; border-radius: 50%; }
 .podLegend { justify-content: center; margin-top: 4px; }
 .runList button.link { border: none; background: none; color: var(--flow); padding: 6px 0; }
+.invite h2 { font-size: 18px; margin: 0 0 12px; }
+.invite input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); min-width: 0; width: min(320px, 100%); }
+.invite label { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; min-width: 0; }
+.invite input[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
+.invite .turnstile { margin-top: 12px; }
+.invite-sent { margin: 0; }
+.legal h3 { font-size: 15px; margin: 16px 0 4px; }
+.legal address { font-style: normal; margin: 8px 0; }
+.build a { color: inherit; }
+.node.recovering rect.box { fill: color-mix(in srgb, var(--ok) 14%, var(--node)); stroke: var(--ok); }
+.illustration { margin: 4px 0 0; text-align: center; }
+.crash-scene { margin: 0; }
