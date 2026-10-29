@@ -51,6 +51,11 @@ export const en = {
     heading7: 'Controller and contact',
     text7:
       'The controller is the operator named below. You also have the right to lodge a complaint with a data protection supervisory authority, in particular in the EU member state where you live or work.',
+    // The free generator's terms ask for this line, in German, with the link to it.
+    generatorBefore: 'Erstellt mit kostenlosem ',
+    generatorLink: 'Datenschutz-Generator.de',
+    generatorUrl: 'https://datenschutz-generator.de/',
+    generatorAfter: ' von Dr. Thomas Schwenke',
     backToStart: 'Back to the start',
   },
   impressum: {

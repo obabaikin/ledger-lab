@@ -3,7 +3,10 @@ import { useEffect, useRef } from 'react'
 const SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 
 type TurnstileApi = {
-  render: (container: HTMLElement, options: { sitekey: string; callback: (token: string) => void; 'expired-callback': () => void }) => string
+  render: (
+    container: HTMLElement,
+    options: { sitekey: string; appearance: 'interaction-only'; callback: (token: string) => void; 'expired-callback': () => void },
+  ) => string
   reset: (widgetId: string) => void
   remove: (widgetId: string) => void
 }
@@ -49,7 +52,12 @@ export function TurnstileWidget(props: {
     loadTurnstile()
       .then((turnstile) => {
         if (!current || container.current === null) return
-        widgetId = turnstile.render(container.current, { sitekey: siteKey, callback: onToken, 'expired-callback': () => onToken(null) })
+        widgetId = turnstile.render(container.current, {
+          sitekey: siteKey,
+          appearance: 'interaction-only',
+          callback: onToken,
+          'expired-callback': () => onToken(null),
+        })
       })
       .catch(() => current && onUnavailable())
     return () => {

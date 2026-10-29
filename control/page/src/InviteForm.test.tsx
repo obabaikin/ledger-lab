@@ -203,9 +203,11 @@ describe('the link form with the bot check on', () => {
 
   it('holds the button until the check answers, then sends its answer, and asks for a fresh one after an error', async () => {
     const callbacks: ((token: string) => void)[] = []
+    const appearances: string[] = []
     vi.stubGlobal('turnstile', {
-      render: (_: HTMLElement, options: { callback: (token: string) => void }) => {
+      render: (_: HTMLElement, options: { appearance: string; callback: (token: string) => void }) => {
         callbacks.push(options.callback)
+        appearances.push(options.appearance)
         return `widget-${callbacks.length}`
       },
       reset: () => {},
@@ -220,6 +222,7 @@ describe('the link form with the bot check on', () => {
       await screen.findByText(/The link works for 7 days/)
       fireEvent.change(field(), { target: { value: 'visitor@example.org' } })
       await waitFor(() => expect(callbacks.length).toBeGreaterThan(0))
+      expect(appearances.every((a) => a === 'interaction-only')).toBe(true)
       expect(screen.getByRole('button', { name: en.inviteForm.submit })).toBeDisabled()
 
       act(() => callbacks.at(-1)!('first-answer'))
@@ -270,6 +273,9 @@ describe('privacy and imprint', () => {
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(p.title)
     expect(screen.getAllByRole('heading', { level: 3 }).map((h) => [h.textContent, h.nextElementSibling?.textContent])).toEqual(sections)
     expect(screen.getByRole('heading', { name: p.heading7 }).nextElementSibling?.nextElementSibling).toBe(operator)
+    const generator = screen.getByRole('link', { name: p.generatorLink })
+    expect(generator).toHaveAttribute('href', p.generatorUrl)
+    expect(operator.nextElementSibling).toHaveTextContent(`${p.generatorBefore}${p.generatorLink}${p.generatorAfter}`)
   })
 
   it('privacy still says what remains when the site settings do not answer, without a retention it has not read', async () => {
