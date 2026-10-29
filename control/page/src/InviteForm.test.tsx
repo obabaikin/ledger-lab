@@ -201,6 +201,43 @@ describe('the link form with the bot check on', () => {
     expect(screen.queryByText(en.inviteForm.checkUnavailable)).not.toBeInTheDocument()
   })
 
+  it('says the unseen check is running, shows its error until an answer comes, and makes room for it only when it shows', async () => {
+    type Options = { callback: (token: string) => void; 'error-callback': () => void; 'before-interactive-callback': () => void }
+    let options: Options | null = null
+    vi.stubGlobal('turnstile', {
+      render: (_: HTMLElement, given: Options) => {
+        options = given
+        return 'widget'
+      },
+      reset: () => {},
+      remove: () => {},
+    })
+    try {
+      await renderWithKey()
+      fireEvent.focus(field())
+      await waitFor(() => expect(options).not.toBeNull())
+      const button = screen.getByRole('button', { name: en.inviteForm.submit })
+      const widget = document.querySelector('.turnstile')!
+
+      expect(button).toHaveAccessibleDescription(en.inviteForm.checking)
+      expect(widget).not.toHaveClass('shown')
+
+      act(() => options!['error-callback']())
+      expect(screen.getByRole('alert')).toHaveTextContent(CHECK_UNAVAILABLE)
+      expect(screen.queryByText(en.inviteForm.checking)).not.toBeInTheDocument()
+
+      act(() => options!['before-interactive-callback']())
+      expect(widget).toHaveClass('shown')
+
+      act(() => options!.callback('answer'))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.queryByText(en.inviteForm.checking)).not.toBeInTheDocument()
+      expect(button).toBeEnabled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('holds the button until the check answers, then sends its answer, and asks for a fresh one after an error', async () => {
     const callbacks: ((token: string) => void)[] = []
     const appearances: string[] = []

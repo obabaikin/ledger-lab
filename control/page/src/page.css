@@ -105,7 +105,7 @@ button .why { display: block; font-size: 12px; font-weight: 400; }
 .invite input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); min-width: 0; width: min(320px, 100%); }
 .invite label { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; min-width: 0; }
 .invite input[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
-.invite .turnstile { margin-top: 12px; }
+.invite .turnstile.shown { margin-top: 12px; }
 .invite-sent { margin: 0; }
 .legal h3 { font-size: 15px; margin: 16px 0 4px; }
 .legal address { font-style: normal; margin: 8px 0; }
