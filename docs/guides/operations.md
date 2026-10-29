@@ -43,6 +43,8 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
 
 - **Images:** every push to `main` builds the five images in CI and publishes them to GHCR, tagged
   with the commit. Merging deploys nothing.
+- **Releases** are SemVer tags on `main`: after the merge, `git tag -a vX.Y.Z <sha>` and
+  `git push origin vX.Y.Z`. The tag rebuilds that commit's images with the version; deploy once that run is green.
 - **Deploying** is by hand, `deploy.sh <sha>`. It refuses while runs are in progress (`--force`
   overrides), and before Helm when an image is missing. The first deploy generates the database
   passwords into a local file outside the repository; a role added to the chart later gets one on the

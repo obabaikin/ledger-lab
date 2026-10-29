@@ -5,6 +5,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+    # A release tag rebuilds its commit's images, so that they carry the release's version.
+    tags: ['v*']
   # Publishes a branch's images by hand, to deploy it to the server before it is merged.
   workflow_dispatch:
 
@@ -100,7 +102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The page shows the version from the release tags and the commits since.
+          # The version comes from the release tags and the commits since.
           fetch-depth: 0
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
