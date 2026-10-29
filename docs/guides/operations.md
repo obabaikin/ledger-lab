@@ -38,15 +38,19 @@ records (SPF, DKIM, DMARC and Mailjet's ownership record). It runs through `infr
 ```bash
 SERVER=<ip> infra/server/bootstrap.sh       # over SSH: key-only login, a host firewall, security updates, k3s, a kubeconfig; safe to run again
 infra/server/tunnel-open.sh                 # the cluster's API is reached only through this tunnel; tunnel-close.sh ends it
-infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with that commit's images
+infra/server/deploy.sh <release tag>        # cert-manager and the chart, with that release's images
 ```
 
 - **Images:** every push to `main` builds the five images in CI and publishes them to GHCR, tagged
   with the commit. Merging deploys nothing.
-- **Releases** are SemVer tags on `main`: after the merge, `git tag -a vX.Y.Z <sha>` and
-  `git push origin vX.Y.Z`. The tag rebuilds that commit's images with the version; deploy once that run is green.
-- **Deploying** is by hand, `deploy.sh <sha>`. It refuses while runs are in progress (`--force`
-  overrides), and before Helm when an image is missing. The first deploy generates the database
+- **Releases:** only a release reaches the server, so the page there shows a version without build metadata.
+  A release is a SemVer tag on `main`: a new feature raises MINOR (`v0.5.0`), a fix only PATCH (`v0.4.1`).
+  After the merge, `git tag -a vX.Y.Z <sha>` and `git push origin vX.Y.Z`; the tag rebuilds that commit's
+  images with the version and publishes them under the tag too. A branch goes to the server before its merge
+  as a pre-release on its head, `vX.Y.Z-rc.N`.
+- **Deploying** is by hand, `deploy.sh <release tag>`. It refuses a tag that is not on GitHub, and before Helm
+  when a tag's image is missing, which is so until the tag's CI run is green. It refuses while runs are in
+  progress (`--force` overrides). The first deploy generates the database
   passwords into a local file outside the repository; a role added to the chart later gets one on the
   next deploy, and a deploy that would still carry a `change-me` placeholder is refused.
 - **Load:** the server's rates are in `infra/server/values.yaml`.

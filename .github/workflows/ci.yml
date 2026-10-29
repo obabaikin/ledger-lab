@@ -5,10 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main]
-    # A release tag rebuilds its commit's images, so that they carry the release's version.
+    # A release tag rebuilds its commit's images with the release's version and publishes them under the tag;
+    # a branch goes to the server before its merge as a pre-release, vX.Y.Z-rc.N.
     tags: ['v*']
-  # Publishes a branch's images by hand, to deploy it to the server before it is merged.
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -88,7 +87,7 @@ jobs:
         run: docker run --rm -v "$PWD:/w" -w /w "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR infra/server/*.sh infra/k3d/*.sh infra/terraform/*.sh
 
   images:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push'
     needs: [tests, secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -114,7 +113,7 @@ jobs:
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push the five images, tagged with the commit
+      - name: Build and push the five images, tagged with the commit and, for a release, with its tag
         run: |
           for module in $MODULES; do
             image="$IMAGE_REPOSITORY/$module:$GITHUB_SHA"
@@ -122,4 +121,8 @@ jobs:
               --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
               --label "org.opencontainers.image.revision=$GITHUB_SHA" "$module/build/libs"
             docker push "$image"
+            if [ "$GITHUB_REF_TYPE" = tag ]; then
+              docker tag "$image" "$IMAGE_REPOSITORY/$module:$GITHUB_REF_NAME"
+              docker push "$IMAGE_REPOSITORY/$module:$GITHUB_REF_NAME"
+            fi
           done

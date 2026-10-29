@@ -13,8 +13,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 syste
 main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
 h1 { margin: 0; font-size: 28px; }
 .hero { margin: 4px 0 20px; }
-.brand { font-weight: 700; color: var(--muted); letter-spacing: .04em; }
-.hero h1 { font-size: clamp(24px, 4.2vw, 34px); line-height: 1.2; margin: 6px 0 14px; max-width: 760px; }
+.brand { font-size: 16px; font-weight: 700; color: var(--muted); letter-spacing: .04em; margin: 0 0 8px; }
 .links { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; }
 .links a, details a { color: var(--flow); }
 .inv td.sym { font-family: ui-monospace, monospace; text-align: left; }
@@ -106,6 +105,9 @@ button .why { display: block; font-size: 12px; font-weight: 400; }
 .invite label { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; min-width: 0; }
 .invite input[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
 .invite .turnstile.shown { margin-top: 12px; }
+/* One line kept for the error or the check, so the form does not move when either comes or goes. */
+.invite .form-status { min-height: 21px; margin-top: 8px; }
+.invite .form-status p { margin: 0; }
 .invite-sent { margin: 0; }
 .legal h3 { font-size: 15px; margin: 16px 0 4px; }
 .legal address { font-style: normal; margin: 8px 0; }

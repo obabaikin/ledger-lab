@@ -365,11 +365,11 @@ describe('session page', () => {
 })
 
 describe('visitor without an invite', () => {
-  it('sees the question, the way a transfer takes without numbers, the links and the field for a link; no run form', async () => {
+  it('sees the name, the way a transfer takes without numbers, the links and the field for a link; no run form', async () => {
     fakeControl({})
     renderAt('/')
 
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Can a bank lose a server')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Ledger Lab')
     expect(screen.getByRole('heading', { level: 2, name: en.inviteForm.heading })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Get a link' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Oleksii Babaikin' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))

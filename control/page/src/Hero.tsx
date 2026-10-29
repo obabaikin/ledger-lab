@@ -3,8 +3,7 @@ import { REPOSITORY_URL } from './Diagram'
 export function Hero() {
   return (
     <header className="hero">
-      <div className="brand">Ledger Lab</div>
-      <h1>Can a bank lose a server mid-transfer without losing money?</h1>
+      <h1 className="brand">Ledger Lab</h1>
       <nav className="links">
         <a href={`${REPOSITORY_URL}#what-it-does`} target="_blank" rel="noopener">
           How it works
