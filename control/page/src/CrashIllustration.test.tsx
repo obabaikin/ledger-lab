@@ -1,16 +1,17 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CrashIllustration } from './CrashIllustration'
-import { CRASH_AT_MS, SCENE_CYCLE_MS, sceneAt } from './crashScene'
+import { BACK_AT_MS, CRASH_AT_MS, SCENE_CYCLE_MS, sceneAt } from './crashScene'
+import { DOT_TRAVEL_MS } from './FlowDots'
 import { en } from './texts/en'
 
 const ledger = (rates: number[]) => rates.slice(2, 6)
 
 describe('the crash scene', () => {
-  it('flows, crashes at 2 s with the ledger wires still and the clients going on, then catches up faster', () => {
+  it('flows, crashes at 2 s with the clients going on and the ledger wires still once Kafka has no results left, then catches up faster', () => {
     const flowing = sceneAt(0)
-    const crashed = sceneAt(CRASH_AT_MS)
-    const catchingUp = sceneAt(6_000)
+    const crashed = sceneAt(CRASH_AT_MS + 2 * DOT_TRAVEL_MS)
+    const catchingUp = sceneAt(BACK_AT_MS + 2 * DOT_TRAVEL_MS)
 
     expect(sceneAt(CRASH_AT_MS - 1).phase).toBe('flowing')
     expect(crashed).toMatchObject({ phase: 'crashed', ledgerLook: 'dead' })
@@ -20,6 +21,16 @@ describe('the crash scene', () => {
     ledger(catchingUp.rates).forEach((rate, wire) => expect(rate).toBeGreaterThan(ledger(flowing.rates)[wire]!))
     expect(sceneAt(9_000).phase).toBe('flowing')
     expect(sceneAt(SCENE_CYCLE_MS + CRASH_AT_MS).phase).toBe('crashed')
+  })
+
+  it('starts each hop on the way back one dot\'s travel after the hop before it, and stops the gateway\'s answers as late', () => {
+    const on = (at: number) => sceneAt(at).rates.map((rate) => rate > 0)
+
+    expect(on(BACK_AT_MS).slice(2, 6)).toEqual([true, false, false, false])
+    expect(on(BACK_AT_MS + DOT_TRAVEL_MS).slice(2, 6)).toEqual([true, true, true, false])
+    expect(on(BACK_AT_MS + 2 * DOT_TRAVEL_MS).slice(2, 6)).toEqual([true, true, true, true])
+    expect(on(CRASH_AT_MS).slice(2, 6)).toEqual([false, false, false, true])
+    expect(on(CRASH_AT_MS + DOT_TRAVEL_MS).slice(2, 6)).toEqual([false, false, false, false])
   })
 })
 

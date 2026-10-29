@@ -44,6 +44,13 @@ export function Privacy() {
           </Fragment>
         ))}
         <Operator site={site} />
+        <p lang="de">
+          {p.generatorBefore}
+          <a href={p.generatorUrl} target="_blank" rel="noopener noreferrer">
+            {p.generatorLink}
+          </a>
+          {p.generatorAfter}
+        </p>
         <p>
           <Link to="/">{t.privacy.backToStart}</Link>
         </p>

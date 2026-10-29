@@ -9,6 +9,7 @@ import { useSite } from './useSite'
 const text = t.inviteForm
 
 const EMAIL_ERROR_ID = 'email-error'
+const CHECK_HINT_ID = 'check-hint'
 const MAX_EMAIL_LENGTH = 254
 /** The server's rule: one @ with something on each side, no whitespace, comma or control character. */
 const EMAIL_SHAPE = /^[^@\s,\x00-\x1f\x7f-\x9f]+@[^@\s,\x00-\x1f\x7f-\x9f]+$/
@@ -47,9 +48,13 @@ export function InviteForm() {
   const [widgetRound, setWidgetRound] = useState(0)
   const [checkUnavailable, setCheckUnavailable] = useState(false)
   const [checkWanted, setCheckWanted] = useState(false)
-  const onToken = useCallback((answer: string | null) => setToken(answer), [])
+  const onToken = useCallback((answer: string | null) => {
+    setToken(answer)
+    if (answer !== null) setCheckUnavailable(false)
+  }, [])
   const onUnavailable = useCallback(() => setCheckUnavailable(true), [])
   const waitingForCheck = Boolean(site?.turnstileSiteKey) && token === null
+  const checking = waitingForCheck && checkWanted && !checkUnavailable
 
   function rejectEmail() {
     setMessage(text.notAnAddress)
@@ -124,12 +129,17 @@ export function InviteForm() {
             onChange={(e) => changeEmail(e.target.value)}
           />
         </label>
-        <button type="submit" className="primary" disabled={sending || waitingForCheck}>
+        <button type="submit" className="primary" disabled={sending || waitingForCheck} aria-describedby={checking ? CHECK_HINT_ID : undefined}>
           {text.submit}
         </button>
       </div>
       {(message ?? (checkUnavailable ? text.checkUnavailable : null)) && (
         <ErrorText id={EMAIL_ERROR_ID}>{message ?? text.checkUnavailable}</ErrorText>
+      )}
+      {checking && (
+        <p id={CHECK_HINT_ID} className="hint" role="status">
+          {text.checking}
+        </p>
       )}
       {site?.turnstileSiteKey && checkWanted && (
         <TurnstileWidget siteKey={site.turnstileSiteKey} onToken={onToken} onUnavailable={onUnavailable} resetKey={widgetRound} />

@@ -12,7 +12,8 @@ export const en = {
     notAnAddress: "This doesn't look like an email address.",
     verificationFailed: 'Verification failed, try again.',
     couldNotSend: 'Could not send now, try again.',
-    checkUnavailable: 'The check that keeps bots out did not load; reload the page to try again.',
+    checking: 'Checking that you are not a bot…',
+    checkUnavailable: 'The check that keeps bots out did not work; reload the page to try again.',
     tooManyRequests: (wait: string) => `Too many requests today; try again in ${wait}.`,
     waitMinutes: (minutes: number) => `${minutes} min`,
     waitHours: (hours: number) => `${hours} h`,
@@ -51,6 +52,11 @@ export const en = {
     heading7: 'Controller and contact',
     text7:
       'The controller is the operator named below. You also have the right to lodge a complaint with a data protection supervisory authority, in particular in the EU member state where you live or work.',
+    // The free generator's terms ask for this line, in German, with the link to it.
+    generatorBefore: 'Erstellt mit kostenlosem ',
+    generatorLink: 'Datenschutz-Generator.de',
+    generatorUrl: 'https://datenschutz-generator.de/',
+    generatorAfter: ' von Dr. Thomas Schwenke',
     backToStart: 'Back to the start',
   },
   impressum: {

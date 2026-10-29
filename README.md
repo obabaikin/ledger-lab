@@ -4,13 +4,12 @@
 
 An event-driven double-entry ledger under load, with chaos testing and three-way reconciliation.
 
+**Live demo: [ledger-lab.de](https://ledger-lab.de)** — enter your email to get a link and run it yourself.
+
 Pick a transaction rate, run it for up to half a minute, kill the ledger mid-run, and watch the books
 still balance. Built to answer one question properly: *how do you prove no money was lost or
-duplicated when consumers crash?*
-
-**Live:** [ledger-lab.de](https://ledger-lab.de) opens with an invite link; invites on request via
-[LinkedIn](https://www.linkedin.com/in/oleksii-babaikin). Work in progress: what is done and what comes
-next is in the [Roadmap](#roadmap).
+duplicated when consumers crash?* Work in progress: what is done and what comes next is in the
+[Roadmap](#roadmap).
 
 **Contents:** [What it does](#what-it-does) · [How it fits together](#how-it-fits-together) ·
 [A run and its verdict](#a-run-and-its-verdict) · [One hour on the server](#one-hour-on-the-server) ·
@@ -238,7 +237,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Survives crashes mid-run | one hour at 300 TPS on the server, the ledger crashed twice, `BALANCED` | done |
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
 | Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS, the node's CPU the limit ([results](docs/results/2026-10-23-server-baseline.md)) | done |
-| Access on request | a visitor enters an email and receives an invite link | next |
+| Access on request | a visitor enters an email and receives an invite link | done |
 | A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |
 | Dashboards | Grafana: latency by segment, node, database | planned |
 | The bottleneck, found and explained | measured, with the fix or the reason not to | planned |

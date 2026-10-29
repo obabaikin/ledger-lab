@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { sceneAt, type Scene } from './crashScene'
+import { sameScene, sceneAt, type Scene } from './crashScene'
 import { Diagram } from './Diagram'
 import { t } from './texts'
 
@@ -23,7 +23,7 @@ export function CrashIllustration() {
       if (!document.hidden) elapsed += now - last
       last = now
       const next = sceneAt(elapsed)
-      setScene((shown) => (shown.phase === next.phase ? shown : next))
+      setScene((shown) => (sameScene(shown, next) ? shown : next))
     }, TICK_MS)
     return () => clearInterval(timer)
   }, [still])
