@@ -24,8 +24,9 @@ function ledgerIntake(t: number): number {
 
 /**
  * Along the wires of FlowDots: the clients and the gateway go on while the ledger is down, Kafka holds the rest.
- * Each hop on the way back starts and stops one dot's travel after the hop before it: a result reaches the gateway
- * only after the ledger booked the transfer and Kafka got its result.
+ * After a restart each hop on the way back starts one dot's travel after the hop before it: a result reaches the gateway
+ * only after the ledger booked the transfer and Kafka got its result. On a crash only the results already in Kafka
+ * still reach the gateway.
  */
 function ratesAt(t: number): number[] {
   const booked = (at: number) => (phaseAt(at) === 'crashed' ? 0 : ledgerIntake(at - DOT_TRAVEL_MS))

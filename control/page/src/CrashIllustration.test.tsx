@@ -8,7 +8,7 @@ import { en } from './texts/en'
 const ledger = (rates: number[]) => rates.slice(2, 6)
 
 describe('the crash scene', () => {
-  it('flows, crashes at 2 s with the ledger wires still and the clients going on, then catches up faster', () => {
+  it('flows, crashes at 2 s with the clients going on and the ledger wires still once Kafka has no results left, then catches up faster', () => {
     const flowing = sceneAt(0)
     const crashed = sceneAt(CRASH_AT_MS + 2 * DOT_TRAVEL_MS)
     const catchingUp = sceneAt(BACK_AT_MS + 2 * DOT_TRAVEL_MS)

@@ -276,6 +276,7 @@ describe('privacy and imprint', () => {
     const generator = screen.getByRole('link', { name: p.generatorLink })
     expect(generator).toHaveAttribute('href', p.generatorUrl)
     expect(operator.nextElementSibling).toHaveTextContent(`${p.generatorBefore}${p.generatorLink}${p.generatorAfter}`)
+    expect(operator.nextElementSibling).toHaveAttribute('lang', 'de')
   })
 
   it('privacy still says what remains when the site settings do not answer, without a retention it has not read', async () => {
