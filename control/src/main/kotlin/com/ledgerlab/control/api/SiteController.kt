@@ -18,7 +18,7 @@ data class SiteView(
     val linkDays: Long,
     @field:Schema(description = "Days without use after which an address is deleted.")
     val retentionDays: Long,
-    @field:Schema(description = "Links an address may get in a day.")
+    @field:Schema(description = "Links an address may get in 24 hours.")
     val linksPerDay: Int,
     @field:Schema(description = "null where the deployment has not set them.")
     val operator: Operator?,

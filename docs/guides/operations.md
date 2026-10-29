@@ -52,7 +52,8 @@ infra/server/deploy.sh <commit sha>         # cert-manager and the chart, with t
   redirects to HTTPS, and Traefik limits requests per client address. Prometheus raises an alert
   14 days before the certificate expires. Traefik's access log (`kubectl -n kube-system logs deploy/traefik`)
   keeps the time, method, status, duration and router; the client address and `User-Agent` stay out, and so
-  do the path, query and `Referer`, since they carry invite tokens and session ids. It lives as long as the pod.
+  do the path, query and `Referer`, since they carry invite tokens and session ids. It is limited in size; the
+  oldest entries are overwritten.
 - **Node and database metrics:** node-exporter (CPU with steal and iowait, pressure, disks; not the
   node's network, as it runs in its own pod's network) and
   postgres-exporter (commits, checkpoints, locks, connections) are scraped every 5 s. The exporter logs

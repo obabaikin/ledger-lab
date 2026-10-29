@@ -99,7 +99,7 @@ export function InviteForm() {
   if (sent) {
     return (
       <p role="status" className="invite-sent">
-        {text.sent} {text.mailLinks}
+        {text.sent} {text.deletionLink}
         {site && ` ${text.linksPerDay(site.linksPerDay)}`}
       </p>
     )

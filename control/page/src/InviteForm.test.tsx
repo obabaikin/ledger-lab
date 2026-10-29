@@ -33,7 +33,7 @@ describe('the link form', () => {
     ask('visitor@example.org')
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      `${en.inviteForm.sent} ${en.inviteForm.mailLinks} ${en.inviteForm.linksPerDay(3)}`,
+      `${en.inviteForm.sent} ${en.inviteForm.deletionLink} ${en.inviteForm.linksPerDay(3)}`,
     )
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ email: 'visitor@example.org', turnstileToken: null })
     expect(screen.queryByRole('button', { name: en.inviteForm.submit })).not.toBeInTheDocument()
@@ -260,14 +260,24 @@ describe('privacy and imprint', () => {
     fakeControl({ 'GET /api/site': { status: 200, body: site({ retentionDays: 45 }) } })
     renderAt('/privacy')
 
-    const operator = (await screen.findAllByText(en.operator.notSet, { exact: false }))[0]!.closest('address')!
     const p = en.privacy
+    await screen.findByText(`${p.text3(45)} ${p.text3Remains}`)
+    const operator = screen.getAllByText(en.operator.notSet, { exact: false })[0]!.closest('address')!
     const sections = [
-      [p.heading1, p.text1], [p.heading2, p.text2], [p.heading3, p.text3(45)], [p.heading4, p.text4],
+      [p.heading1, p.text1], [p.heading2, p.text2], [p.heading3, `${p.text3(45)} ${p.text3Remains}`], [p.heading4, p.text4],
       [p.heading5, p.text5], [p.heading6, p.text6], [p.heading7, p.text7],
     ]
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(p.title)
     expect(screen.getAllByRole('heading', { level: 3 }).map((h) => [h.textContent, h.nextElementSibling?.textContent])).toEqual(sections)
     expect(screen.getByRole('heading', { name: p.heading7 }).nextElementSibling?.nextElementSibling).toBe(operator)
+  })
+
+  it('privacy still says what remains when the site settings do not answer, without a retention it has not read', async () => {
+    fakeControl({ 'GET /api/site': { status: 500, body: {} } })
+    renderAt('/privacy')
+
+    const how = await screen.findByRole('heading', { name: en.privacy.heading3 })
+
+    expect(how.nextElementSibling?.textContent).toBe(en.privacy.text3Remains)
   })
 })

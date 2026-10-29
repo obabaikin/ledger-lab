@@ -728,7 +728,7 @@
             "type" : "integer"
           },
           "linksPerDay" : {
-            "description" : "Links an address may get in a day.",
+            "description" : "Links an address may get in 24 hours.",
             "format" : "int32",
             "type" : "integer"
           },

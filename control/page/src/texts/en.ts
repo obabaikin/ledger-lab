@@ -4,7 +4,7 @@ export const en = {
     emailLabel: 'Email',
     submit: 'Get a link',
     sent: 'Please check your email.',
-    mailLinks: 'The mail has a link to enter and a link to delete your address.',
+    deletionLink: 'Every mail we send has a link to delete your address.',
     linksPerDay: (times: number) => `You can ask up to ${times} times in 24 hours.`,
     terms: (linkDays: number, retentionDays: number) =>
       `The link works for ${linkDays} days. Your address is deleted after ${retentionDays} days without use.`,
@@ -37,13 +37,14 @@ export const en = {
       "We use your email address to send the access link you requested and to control access to the service (Art. 6(1)(b) GDPR). Access links, request limits and bot protection help prevent automated use, abuse and the use of the site's email facility for spam; we process this data on the basis of our legitimate interest in operating and protecting the service (Art. 6(1)(f) GDPR).",
     heading3: 'How long',
     text3: (retentionDays: number) =>
-      `The address is deleted ${retentionDays} days after its last use: your last request or your last visit using the link. The invite, its sessions and runs remain after that, without the email address.`,
+      `The address is deleted ${retentionDays} days after its last use: your last request or your last visit using the link.`,
+    text3Remains: 'The invite, its sessions and runs, and the records of the emails sent remain after that, without the email address.',
     heading4: 'Who else processes it',
     text4:
-      'The site runs on a server rented from Contabo in [Germany]; Contabo hosts all data listed here. Mailjet sends the emails, from servers in the EU, with open and click tracking switched off. Cloudflare Turnstile checks that a request comes from a person; it loads only when you start entering your email address and processes technical information about your browser and connection, including your IP address, but not your email address. Cloudflare is based in the USA; the transfer relies on the EU-US Data Privacy Framework, and on the EU standard contractual clauses where that does not apply. All three process the data on our behalf (Art. 28 GDPR).',
+      'The site runs on a server rented from Contabo in Germany; Contabo hosts all data listed here. Mailjet sends the emails, from servers in the EU, with open and click tracking switched off. Cloudflare Turnstile checks that a request comes from a person; it loads only when you click into the email field or start typing in it, and processes technical information about your browser and connection, including your IP address, but not your email address. Cloudflare is based in the USA; the transfer relies on the EU-US Data Privacy Framework, and on the EU standard contractual clauses where that does not apply. All three process the data on our behalf (Art. 28 GDPR).',
     heading5: 'Server log',
     text5:
-      "The web server logs each request with its time, method, status and duration. It does not log your IP address, your browser's User-Agent, or the address of the page you open. To limit requests, it counts them per IP address in memory only, without storing them. The log is kept until the server restarts.",
+      "The web server logs each request with technical details such as time, method, status and duration. It does not log your IP address, your browser's User-Agent, or the address of the page you open. To limit requests, it counts them per IP address in memory only, without storing them. The log is limited in size; the oldest entries are overwritten.",
     heading6: 'Deleting it sooner, or asking what is stored',
     text6:
       'Every email we send carries a link to delete your address; your address is deleted after a 24-hour waiting period. You may also write to the contact below to ask what data we hold about you, or to exercise your other rights under the GDPR: access, rectification, erasure, restriction of processing, data portability, and objection to processing based on our legitimate interest (Art. 15–21 GDPR).',

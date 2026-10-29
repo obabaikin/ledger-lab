@@ -55,7 +55,8 @@ a block put in place of the diagram only for that second reads as a flicker.
 **The page is always fresh.** `index.html` names its scripts by content hash, so a cached index keeps
 an old page after a deploy. The jar gives every file the same 1980 timestamp, so a reload checked by
 `Last-Modified` would be told 304. Static files are served with `Cache-Control: no-cache` and
-without `Last-Modified`. The page shows the commit and the build time of its build.
+without `Last-Modified`. The page shows the version and the build time of its build: the release tag, `vX.Y.Z` by SemVer, and
+after it the commits since and the commit, as `git describe` names them.
 
 **One run not final per session.** A start while a run of the session is queued, set up, running or
 draining is refused with 409; a repeat of that run's `requestId` still gets that run. The check runs

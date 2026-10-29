@@ -26,7 +26,7 @@ export function Privacy() {
   const sections = [
     [p.heading1, p.text1],
     [p.heading2, p.text2],
-    [p.heading3, site && p.text3(site.retentionDays)],
+    [p.heading3, site ? `${p.text3(site.retentionDays)} ${p.text3Remains}` : p.text3Remains],
     [p.heading4, p.text4],
     [p.heading5, p.text5],
     [p.heading6, p.text6],
@@ -40,7 +40,7 @@ export function Privacy() {
         {sections.map(([heading, text]) => (
           <Fragment key={heading}>
             <h3>{heading}</h3>
-            {text && <p>{text}</p>}
+            <p>{text}</p>
           </Fragment>
         ))}
         <Operator site={site} />
