@@ -39,8 +39,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .phase.now { border-color: var(--flow); color: var(--flow); font-weight: 600; }
 .phase.done { color: var(--ok); border-color: var(--ok); }
 svg { width: 100%; height: auto; display: block; }
-#diagram { max-height: 80vh; }
-@media (max-width: 640px) { #diagram { max-height: none; } }
+#diagram.across { max-height: 80vh; }
 .node rect.box { fill: var(--node); stroke: var(--line); stroke-width: 1.5; transition: fill .3s, stroke .3s; }
 .node.degraded rect.box { stroke: var(--warn); }
 .node.dead rect.box { fill: color-mix(in srgb, var(--bad) 18%, var(--node)); stroke: var(--bad); }

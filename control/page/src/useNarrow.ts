@@ -15,6 +15,7 @@ export function useNarrow(): boolean {
     if (typeof query.addEventListener !== 'function') return
     const follow = () => setNarrow(query.matches)
     query.addEventListener('change', follow)
+    follow()
     return () => query.removeEventListener('change', follow)
   }, [])
   return narrow

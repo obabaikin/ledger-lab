@@ -77,6 +77,7 @@ type Box = readonly [x: number, y: number, w: number, h: number]
 type Place = { x: number; y: number; anchor: 'start' | 'middle' | 'end' }
 
 type Layout = {
+  name: 'across' | 'upright'
   width: number
   height: number
   bank: Box
@@ -91,6 +92,7 @@ type Layout = {
 }
 
 const ACROSS: Layout = {
+  name: 'across',
   width: 900,
   height: 300,
   bank: [205, 40, 685, 252],
@@ -122,6 +124,7 @@ const ACROSS: Layout = {
 }
 
 const UPRIGHT: Layout = {
+  name: 'upright',
   width: 360,
   height: 690,
   bank: [10, 158, 340, 522],
@@ -134,19 +137,19 @@ const UPRIGHT: Layout = {
     ledger: [95, 496, 170, 96],
   },
   wires: [
-    ['M150 124 L150 196', false],
-    ['M150 292 L150 346', false],
-    ['M150 442 L150 496', false],
-    ['M210 496 L210 442', true],
+    ['M140 124 L140 196', false],
+    ['M140 292 L140 346', false],
+    ['M140 442 L140 496', false],
+    ['M220 496 L220 442', true],
     ['M180 592 L180 626', false],
-    ['M210 346 L210 292', true],
-    ['M210 196 L210 124', true],
+    ['M220 346 L220 292', true],
+    ['M220 196 L220 124', true],
   ],
   labels: {
-    api: { x: 144, y: 148, anchor: 'end' },
-    transfers: { x: 144, y: 323, anchor: 'end' },
-    results: { x: 216, y: 323, anchor: 'start' },
-    final: { x: 216, y: 148, anchor: 'start' },
+    api: { x: 134, y: 148, anchor: 'end' },
+    transfers: { x: 134, y: 323, anchor: 'end' },
+    results: { x: 226, y: 323, anchor: 'start' },
+    final: { x: 226, y: 148, anchor: 'start' },
   },
   arrows: { forward: '↓', back: '↑' },
   bin: [115, 626, 130, 40],
@@ -209,7 +212,7 @@ export function Diagram(props: {
   const { labels, arrows } = layout
   const [binX, binY, binW, binH] = layout.bin
   return (
-    <svg id="diagram" viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label="Transfers flowing through the bank">
+    <svg id="diagram" className={layout.name} viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label="Transfers flowing through the bank">
       <rect x={layout.bank[0]} y={layout.bank[1]} width={layout.bank[2]} height={layout.bank[3]} rx={14} className="bank" />
       <text className="zone" x={layout.bankZone.x} y={layout.bankZone.y} textAnchor={layout.bankZone.anchor}>
         THE BANK
@@ -275,8 +278,7 @@ export function Diagram(props: {
           </a>
         )
       })}
-      {/* FlowDots reads the wires once: a new layout brings new wires, so it starts again. */}
-      {rates && <FlowDots key={layout.width} rates={rates} />}
+      {rates && <FlowDots wires={layout.wires.map(([d]) => d)} rates={rates} />}
       <rect x={binX} y={binY} width={binW} height={binH} rx={8} className="bin" />
       <text x={binX + binW / 2} y={binY + 17} textAnchor="middle" className="binLabel">
         rejected by the rules
