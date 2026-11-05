@@ -22,7 +22,8 @@ spring:
     producer:
       acks: all
     listener:
-      concurrency: 3
+      # One consumer per partition of the local topic (6); in Kubernetes the chart sets partitions / replicas.
+      concurrency: 6
       # Topics come from infrastructure (ADR 0008); a name that does not match fails the start.
       missing-topics-fatal: true
 
