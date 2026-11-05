@@ -18,7 +18,8 @@ spring:
       group-id: ledger
       auto-offset-reset: earliest
       properties:
-        max.poll.records: 500
+        # A batch holds the locks of all its senders until it commits.
+        max.poll.records: 100
     producer:
       acks: all
     listener:
@@ -43,6 +44,9 @@ ledger:
     # Past the last scrape after the run, before a long-lived pod publishes every past run.
     idle-retention: 10m
     sweep-interval: 1m
+  deferred-credits:
+    apply-interval: 250ms
+    batch-size: 1000
   reconciliation:
     # Per query, below control's 5 s call timeout: the database stops a query control has already given up on.
     statement-timeout: 4s

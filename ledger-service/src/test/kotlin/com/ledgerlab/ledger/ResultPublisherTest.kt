@@ -38,9 +38,9 @@ class ResultPublisherTest : IntegrationTest() {
         val overrides = Properties().apply { put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest") }
         consumerFactory.createConsumer("results-test-${UUID.randomUUID()}", null, null, overrides).use { consumer ->
             consumer.subscribe(listOf(resultsTopic))
-            ledger.apply(posted)
-            ledger.apply(rejected)
-            ledger.apply(posted) // duplicate delivery must not produce a second event
+            ledger.applyOne(posted)
+            ledger.applyOne(rejected)
+            ledger.applyOne(posted) // duplicate delivery must not produce a second event
 
             await().atMost(Duration.ofSeconds(30)).untilAsserted {
                 consumer.poll(Duration.ofMillis(200)).forEach {

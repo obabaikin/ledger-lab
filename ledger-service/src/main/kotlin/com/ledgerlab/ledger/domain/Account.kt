@@ -13,3 +13,5 @@ data class Account(
     val dailyLimitCents: Long,
     val dailySpentCents: Long,
 )
+
+data class AccountKey(val runId: UUID, val accountNo: Int)

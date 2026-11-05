@@ -23,7 +23,8 @@ class ReconciliationRepository(private val jdbc: JdbcClient, private val props: 
             """
             SELECT count(*) AS accounts,
                    coalesce(sum(opening_balance_cents), 0) AS opening_total,
-                   coalesce(sum(balance_cents), 0) AS balance_total
+                   coalesce(sum(balance_cents), 0)
+                       + (SELECT coalesce(sum(amount_cents), 0) FROM deferred_credits WHERE run_id = :runId) AS balance_total
             FROM accounts WHERE run_id = :runId
             """,
         ).param("runId", runId).query().singleRow()
@@ -81,7 +82,8 @@ class ReconciliationRepository(private val jdbc: JdbcClient, private val props: 
             .param("rejected", TransferOutcome.REJECTED.name)
             .query(Long::class.java).single()
 
-        // Per-account lookup for the same reason as the journal check above (ADR 0016).
+        // Per-account lookup for the same reason as the journal check above (ADR 0016). A deferred credit is in the
+        // journal before it is in the balance, so the pending ones count as balance (ADR 0018).
         val outOfBalance = jdbc.sql(
             """
             SELECT count(*)
@@ -91,8 +93,13 @@ class ReconciliationRepository(private val jdbc: JdbcClient, private val props: 
                 FROM journal_entries j
                 WHERE j.run_id = a.run_id AND j.account_no = a.account_no
             ) j
+            CROSS JOIN LATERAL (
+                SELECT coalesce(sum(d.amount_cents), 0) AS pending
+                FROM deferred_credits d
+                WHERE d.run_id = a.run_id AND d.account_no = a.account_no
+            ) d
             WHERE a.run_id = :runId
-              AND a.opening_balance_cents + j.movement <> a.balance_cents
+              AND a.opening_balance_cents + j.movement <> a.balance_cents + d.pending
             """,
         ).param("runId", runId).query(Long::class.java).single()
 

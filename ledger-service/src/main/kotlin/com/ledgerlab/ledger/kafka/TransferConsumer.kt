@@ -11,33 +11,44 @@ import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
+import tools.jackson.core.JacksonException
 import tools.jackson.databind.ObjectMapper
 
 @Component
 class TransferConsumer(
     private val ledger: LedgerService,
-    private val objectMapper: ObjectMapper,
+    objectMapper: ObjectMapper,
     private val duplicates: RunDuplicates,
     registry: MeterRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
+    private val reader = objectMapper.readerFor(TransferCommand::class.java)
     private val posted = outcomeCounter(registry, "posted")
     private val rejected = outcomeCounter(registry, "rejected")
 
     // The id lets the readiness check find this container; without idIsGroup = false it would also replace the group id.
-    @KafkaListener(id = LISTENER_ID, idIsGroup = false, topics = ["\${ledger.topic.name}"])
-    fun onTransfer(payload: String) {
-        val command = objectMapper.readValue(payload, TransferCommand::class.java)
-        MDC.put(MDC_RUN_ID, command.runId.toString())
+    @KafkaListener(id = LISTENER_ID, idIsGroup = false, topics = ["\${ledger.topic.name}"], batch = "true")
+    fun onTransfers(payloads: List<String>) {
+        val commands = payloads.mapNotNull(::parse)
+        commands.map { it.runId }.distinct().singleOrNull()?.let { MDC.put(MDC_RUN_ID, it.toString()) }
         try {
-            handle(command)
+            commands.zip(ledger.applyBatch(commands)).forEach { (command, result) -> count(command, result) }
         } finally {
             MDC.remove(MDC_RUN_ID)
         }
     }
 
-    private fun handle(command: TransferCommand) {
-        when (ledger.apply(command)) {
+    // In a batch an exception would fail the whole poll; a message that can never be read is skipped on its own.
+    private fun parse(payload: String): TransferCommand? =
+        try {
+            reader.readValue(payload)
+        } catch (e: JacksonException) {
+            log.error("Unreadable transfer skipped: {}", payload, e)
+            null
+        }
+
+    private fun count(command: TransferCommand, result: TransferResult) {
+        when (result) {
             TransferResult.Posted -> posted.increment()
             is TransferResult.Rejected -> rejected.increment()
             TransferResult.AlreadyProcessed -> {
