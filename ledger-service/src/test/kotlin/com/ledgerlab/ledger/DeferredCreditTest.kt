@@ -8,7 +8,12 @@ import com.ledgerlab.ledger.service.RunService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.test.context.TestPropertySource
+import org.awaitility.Awaitility.await
+import java.time.Duration
+import java.util.concurrent.CompletableFuture
+import javax.sql.DataSource
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -21,6 +26,8 @@ class DeferredCreditTest : IntegrationTest() {
     @Autowired lateinit var ledger: LedgerService
     @Autowired lateinit var runs: RunService
     @Autowired lateinit var credits: DeferredCreditBatch
+    @Autowired lateinit var dataSource: DataSource
+    @Autowired lateinit var jdbc: JdbcClient
 
     @Test
     fun `a pending credit counts in reconciliation and reaches the balance once applied`() {
@@ -94,6 +101,30 @@ class DeferredCreditTest : IntegrationTest() {
 
         assertThat(pendingCredits(runId)).isZero()
     }
+
+    @Test
+    fun `deleting a run while the applier holds its credits waits for the applier instead of deadlocking`() {
+        val runId = openRun()
+        ledger.applyOne(transfer(runId, 2, 1, 100))
+        dataSource.connection.use { applier ->
+            applier.autoCommit = false
+            applier.prepareStatement("DELETE FROM deferred_credits WHERE run_id = ?").use { it.setObject(1, runId); it.executeUpdate() }
+            val waitingBefore = waitingLocks()
+
+            val deleting = CompletableFuture.supplyAsync { runs.deleteRun(runId) }
+            await().atMost(Duration.ofSeconds(5)).until { waitingLocks() > waitingBefore }
+            applier.prepareStatement(
+                "SELECT 1 FROM accounts WHERE run_id = ? AND account_no = 1 FOR NO KEY UPDATE",
+            ).use { it.setObject(1, runId); it.executeQuery().close() }
+            applier.commit()
+
+            assertThat(deleting.get(10, TimeUnit.SECONDS)).isTrue()
+        }
+        assertThat(runs.listAccounts(runId)).isEmpty()
+    }
+
+    private fun waitingLocks(): Int =
+        jdbc.sql("SELECT count(*) FROM pg_locks WHERE NOT granted").query(Int::class.java).single()
 
     private fun openRun(accounts: Int = 3, openingBalanceCents: Long = 1_000): UUID {
         val runId = UUID.randomUUID()

@@ -56,6 +56,9 @@ class DeferredCreditRepository(private val jdbc: JdbcClient) {
             }
             .list()
 
+    fun deleteRun(runId: UUID): Int =
+        jdbc.sql("DELETE FROM deferred_credits WHERE run_id = :runId").param("runId", runId).update()
+
     private companion object {
         const val APPLIER_LOCK = "ledger.deferred-credit-applier"
     }

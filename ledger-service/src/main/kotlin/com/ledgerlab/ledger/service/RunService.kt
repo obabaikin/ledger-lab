@@ -4,6 +4,7 @@ import com.ledgerlab.ledger.domain.Account
 import com.ledgerlab.ledger.domain.AccountStatus
 import com.ledgerlab.ledger.domain.ReconciliationReport
 import com.ledgerlab.ledger.persistence.AccountRepository
+import com.ledgerlab.ledger.persistence.DeferredCreditRepository
 import com.ledgerlab.ledger.persistence.ReconciliationRepository
 import com.ledgerlab.ledger.persistence.TransferRepository
 import org.springframework.dao.DuplicateKeyException
@@ -39,6 +40,7 @@ class RunService(
     private val accounts: AccountRepository,
     private val transfers: TransferRepository,
     private val reconciliation: ReconciliationRepository,
+    private val deferredCredits: DeferredCreditRepository,
 ) {
 
     /** Account numbers start at 1; the last [AccountSetup.blockedAccounts] are blocked. */
@@ -75,6 +77,8 @@ class RunService(
     /** Journal entries go with their transfers and accounts via ON DELETE CASCADE. */
     @Transactional
     fun deleteRun(runId: UUID): Boolean {
+        // Pending credits before accounts, the applier's order: the cascade from the accounts would take them after.
+        deferredCredits.deleteRun(runId)
         transfers.deleteRun(runId)
         return accounts.deleteRun(runId) > 0
     }
