@@ -11,7 +11,7 @@ export const CRASH_AT_MS = 2_000
 export const BACK_AT_MS = 5_000
 const CAUGHT_UP_AT_MS = 7_500
 /** A shown rate, transfers per second: enough dots to read the way without a crowd. */
-const RATE = 150
+const RATE = 560
 const CATCH_UP_FACTOR = 3
 const REJECTED_SHARE = 0.02
 

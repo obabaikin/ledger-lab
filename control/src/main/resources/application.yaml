@@ -31,13 +31,13 @@ control:
   runs:
     max-active: 3
     max-queued: 10
-    # From measurements in k3d (ADR 0012).
-    max-total-tps: 1000
+    # Batched writes sustained 1200 TPS on the server with room above it (ADR 0019).
+    max-total-tps: 2000
     # A start holds a connection of the pool of 10 while it waits for the queue's lock; the rest stay for reads and the tick.
     max-concurrent-starts: 4
     start-wait: 200ms
     queue-timeout: 5m
-    tps-options: 100, 500, 1000
+    tps-options: 100, 500, 1000, 2000
     default-tps: 1000
     duration-options: 10s, 20s, 30s
     setup-timeout: 30s

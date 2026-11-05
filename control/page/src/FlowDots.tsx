@@ -25,11 +25,17 @@ const WIRE_COUNT_ZEROS = [0, 0, 0, 0, 0, 0, 0]
 const SVG_NS = 'http://www.w3.org/2000/svg'
 export const DOT_TRAVEL_MS = 600
 const RATE_CAP = 2000
-const DOTS_PER_THOUSAND = 90
+/** Runs reach 2000 TPS: at that rate a wire still shows single dots, not a crowd. */
+const DOTS_PER_THOUSAND = 24
 const REJECTED_WIRE = 4
 /** About 1 in 100 transfers is rejected: at the common scale its dot would hardly ever show. */
 const BOOST: Record<number, number> = { [REJECTED_WIRE]: 6 }
 const COLOR = ['var(--flow)', 'var(--flow)', 'var(--flow)', 'var(--ok)', 'var(--bad)', 'var(--ok)', 'var(--ok)']
+
+/** Dots a wire gets per second at [rate] transfers per second. */
+export function dotsPerSecond(rate: number, wire: number): number {
+  return (Math.min(rate, RATE_CAP) / 1000) * DOTS_PER_THOUSAND * (BOOST[wire] ?? 1)
+}
 
 type Dot = { el: SVGCircleElement; path: SVGPathElement; length: number; born: number }
 
@@ -54,7 +60,7 @@ export function FlowDots({ wires, rates }: { wires: string[]; rates: number[] })
       const dt = Math.min(now - last, 100) / 1000
       last = now
       paths.forEach((path, k) => {
-        let due = (owed[k] ?? 0) + (Math.min(latest.current[k] ?? 0, RATE_CAP) / 1000) * DOTS_PER_THOUSAND * (BOOST[k] ?? 1) * dt
+        let due = (owed[k] ?? 0) + dotsPerSecond(latest.current[k] ?? 0, k) * dt
         for (; due >= 1; due -= 1) {
           const el = document.createElementNS(SVG_NS, 'circle')
           el.setAttribute('r', k === REJECTED_WIRE ? '4' : '3')

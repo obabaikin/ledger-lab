@@ -130,8 +130,8 @@ keys:
   mailjetApiSecret: ""
 
 runs:
-  # Transfers per second of all active runs together; 1000 from measurements in k3d (ADR 0012).
-  maxTotalTps: 1000
+  # Transfers per second of all active runs together (ADR 0012); 2000 since batched writes (ADR 0019).
+  maxTotalTps: 2000
   # Empty: control's own options and default (control/src/main/resources/application.yaml).
   tpsOptions: []
   defaultTps: null
