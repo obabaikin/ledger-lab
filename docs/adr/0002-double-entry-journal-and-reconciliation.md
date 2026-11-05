@@ -1,6 +1,6 @@
 # ADR 0002: Double-entry journal with independent reconciliation
 
-Status: accepted · Date: 2026-10-07
+Status: accepted · Date: 2026-10-07 · Updated: 2026-11-05
 
 ## Context
 
@@ -11,7 +11,9 @@ not that each transfer was applied exactly once.
 ## Decision
 
 Every posted transfer writes two journal rows (debit and credit) that sum to zero, in the
-same transaction as the balance updates. Reconciliation then checks three views against
+same transaction as the debit of the sender's balance; the credit reaches the receiver's balance
+shortly after, through `deferred_credits` (ADR 0018). Wherever a check reads a balance, it is
+`balance_cents` plus the account's credits not yet applied. Reconciliation then checks three views against
 each other, inside one `REPEATABLE READ` snapshot:
 
 1. total balance equals total opening balance;

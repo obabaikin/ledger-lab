@@ -23,7 +23,9 @@ duplicated when consumers crash?* Work in progress: what is done and what comes 
   stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate. When too
   many are in progress, it refuses one with `503 busy` before writing anything, and the client retries later.
 - The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
-  at-least-once; processing is idempotent, so crashes and rebalances cannot double-post.
+  at-least-once; processing is idempotent, so crashes and rebalances cannot double-post. The money
+  reaches the receiver's balance a moment after the posting (p99 about 1 s), and until then the
+  receiver cannot spend it.
 - A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 200
   transactions per second and counts what was acknowledged.
 - Transfers can be **rejected** for domain reasons: insufficient funds, blocked account,
@@ -241,6 +243,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Access on request | a visitor enters an email and receives an invite link | done |
 | A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |
 | Dashboards | Grafana: latency by segment, node, database | planned |
+| Writes in batches, overload shed at the edge | three series of 1000–1600 TPS on the server: every run `BALANCED`, the excess refused with `503 busy`, no restart | next |
 | The bottleneck, found and explained | measured, with the fix or the reason not to | planned |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
@@ -261,6 +264,13 @@ Decisions with their trade-offs are recorded in [docs/adr](docs/adr). The ones t
 - **Reconciliation from independent views.** Balances, the journal and the transfer log are checked
   against each other per transfer, in one snapshot ([ADR 0002](docs/adr/0002-double-entry-journal-and-reconciliation.md)),
   and the clients' journal against the bank's statement by transfer id ([ADR 0010](docs/adr/0010-client-reconciliation.md)).
+- **Batched writes.** The gateway accepts submissions, the ledger posts transfers and the gateway
+  records results a batch per transaction, each transfer with the outcome it would have had alone. A
+  batch locks only its senders; credits wait in a table until one applier adds them to the balances,
+  and reconciliation counts them meanwhile ([ADR 0018](docs/adr/0018-deferred-credits.md),
+  [ADR 0019](docs/adr/0019-batched-writes-one-result-writer-load-shedding.md)).
+- **Overload is shed at the edge.** Past a limit of open submissions the gateway answers `503 busy`
+  at once instead of filling its heap ([ADR 0019](docs/adr/0019-batched-writes-one-result-writer-load-shedding.md)).
 - **Hand-written SQL, no ORM**, so every lock and query of the ledger is visible ([ADR 0001](docs/adr/0001-jdbc-instead-of-jpa.md)).
 
 Built by Oleksii Babaikin · [LinkedIn](https://www.linkedin.com/in/oleksii-babaikin)

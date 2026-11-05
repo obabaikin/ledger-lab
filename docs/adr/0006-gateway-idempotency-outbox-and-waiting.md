@@ -1,6 +1,6 @@
 # ADR 0006: Gateway: idempotency key at the edge, table as outbox, optional waiting
 
-Status: accepted · Date: 2026-10-07 · Updated: 2026-10-09
+Status: accepted · Date: 2026-10-07 · Updated: 2026-11-05
 
 ## Context
 
@@ -14,23 +14,25 @@ an answer in one request, while the ledger is asynchronous behind Kafka.
 existing transfer, and the same key with a different payload is refused with 422. This is the
 first line; the ledger's `(run_id, transfer_id)` key is the second.
 
-**The transfer row is the outbox.** Accepting a transfer commits one row and answers 202
-before Kafka is involved. A publisher claims rows with `published_at IS NULL` using
+**The transfer row is the outbox.** Accepting a transfer commits its row and answers 202
+before Kafka is involved; many submissions share one transaction and one insert (ADR 0019). A publisher claims rows with `published_at IS NULL` using
 `FOR UPDATE SKIP LOCKED`, sends them, and marks them in the same transaction. Several
 gateway replicas can publish concurrently; a crash between send and mark re-sends, which the
 ledger absorbs. A separate outbox table was not needed: one event type, one row per request,
 and the row's lifecycle (`ACCEPTED → PUBLISHED → POSTED | REJECTED`) is the status clients ask for.
 
 **Results come back over Kafka.** The ledger publishes `transfer-results` through its own
-outbox. Two listeners in the gateway consume them: a shared consumer group records the result
-in the database, and a per-instance group wakes any open request waiting for that transfer.
+outbox. Two listeners in the gateway consume them: a shared consumer group records the results
+of a poll in the database in one update, and a per-instance group wakes any open request waiting
+for that transfer.
 Marking a row published never downgrades a status that already became final.
 
 **The database first, then the answer.** A guarantee comes from one atomic commit, and in each
 service that is its own database transaction. Kafka and the database commit separately, so
-nothing that spans both is guaranteed (the dual-write problem). The instance that wakes a
-waiting request therefore writes the result itself, with the same idempotent update the shared
-listener uses, and answers from the committed row. A client that saw a final status never
+nothing that spans both is guaranteed (the dual-write problem). A woken request therefore
+answers from the committed row, never from the event alone. Only the shared listener writes
+results: the woken request reads its row until the recorder's commit shows there, a few times
+with growing pauses within its wait, and answers 202 if it does not (ADR 0019). A client that saw a final status never
 sees an older one afterwards; if the answer is lost, a retry with the same key reads it from
 the database.
 
@@ -76,9 +78,11 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
   itself cannot tell whether a commit whose acknowledgement was lost went through, and a proxy
   or a crashed process can produce one after the commit.
 - The one exception is the gateway's own refusal under load: at most
-  `gateway.admission.max-concurrent` submissions insert at once; one more waits
-  up to `gateway.admission.wait` and is then answered 503 with error `busy`, before it touches
-  the database. The error, not the code, marks it, because a proxy can answer 503 too. Without
+  `gateway.inflight.max-concurrent` submissions are open at once, a wait for the result included,
+  and one more is answered 503 with error `busy` at once (ADR 0019); inside that, at most
+  `gateway.admission.max-concurrent` submissions insert at once, and one more waits
+  up to `gateway.admission.wait` and is then answered 503 with error `busy`. Either refusal comes
+  before the request touches the database. The error, not the code, marks it, because a proxy can answer 503 too. Without
   the bound, virtual threads accept any number of requests, and a slow database fills the heap
   with requests waiting for a connection (seen at 300 TPS on the server).
 
@@ -88,8 +92,7 @@ The wait is capped by the gateway (`gateway.max-wait`); expiry is a 202, not an 
   accepted and published by the gateway, applied by the ledger.
 - End-to-end latency (`accepted_at` to `resulted_at`) is measured per transfer, with both
   timestamps taken from the database clock, because JVM and database clocks can drift apart.
-- A waited request costs one extra idempotent update; for the shared listener it then
-  changes nothing.
+- A waited request costs up to five reads of its row; results have one writer.
 - The wake-up listener may miss results published while an instance was down. That only means
   a waiting client gets 202 on timeout and finds the result via `GET /v1/transfers/{id}`.
 - Every instance parses every result even when nobody waits. Cheap at the target load; to be
