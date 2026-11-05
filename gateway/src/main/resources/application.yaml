@@ -28,6 +28,9 @@ spring:
 
 server:
   port: 8081
+  tomcat:
+    # Above the in-flight limit, so a submission over it gets 503 busy instead of waiting for a connection.
+    max-connections: 3000
 
 gateway:
   transfers-topic: transfers
@@ -46,6 +49,9 @@ gateway:
     max-reads: 5
   retry-after: 1s
   close-lock-timeout: 5s
+  inflight:
+    # An open submission holds about 120 KB of heap (heap dump on the server); 1500 is about 180 MB of the gateway's heap.
+    max-concurrent: 1500
   admission:
     # About three times what 300 TPS keeps in flight (0.1 s each); measured against the server in a trial.
     max-concurrent: 100

@@ -15,7 +15,7 @@ class TransferAdmissionTest {
             "transfers", "results", GatewayProperties.Outbox(100, Duration.ofSeconds(1)),
             GatewayProperties.Consumer(Duration.ofSeconds(1)), Duration.ofSeconds(10),
             GatewayProperties.WaitRead(Duration.ofMillis(25), 5), Duration.ofSeconds(1),
-            Duration.ofSeconds(5), GatewayProperties.Admission(1, Duration.ofMillis(10)), GatewayProperties.Accept(1, 1, Duration.ofSeconds(5)),
+            Duration.ofSeconds(5), GatewayProperties.Inflight(1), GatewayProperties.Admission(1, Duration.ofMillis(10)), GatewayProperties.Accept(1, 1, Duration.ofSeconds(5)),
             GatewayProperties.WarmUp(0, Duration.ZERO, Duration.ZERO),
         )
     }
@@ -37,5 +37,18 @@ class TransferAdmissionTest {
         admission.admit {
             assertThatThrownBy { admission.admit { "second" } }.isInstanceOf(GatewayBusyException::class.java)
         }
+    }
+
+    @Test
+    fun `an open submission over the in-flight limit is refused at once, and a finished one gives its place back`() {
+        val admission = TransferAdmission(props, SimpleMeterRegistry())
+
+        admission.enter {
+            assertThatThrownBy { admission.enter { "second" } }.isInstanceOf(GatewayBusyException::class.java)
+        }
+        assertThatThrownBy { admission.enter { throw IllegalStateException("ledger down") } }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        assertThat(admission.enter { "taken" }).isEqualTo("taken")
     }
 }

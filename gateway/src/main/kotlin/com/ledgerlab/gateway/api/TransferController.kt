@@ -102,7 +102,9 @@ class TransferController(
         @Valid @RequestBody request: SubmitTransferRequest,
         @Parameter(description = "ISO-8601 duration to wait for the final status, capped by the bank")
         @RequestParam(required = false) wait: Duration?,
-    ): ResponseEntity<TransferResponse> {
+    ): ResponseEntity<TransferResponse> = admission.enter { submitEntered(request, wait) }
+
+    private fun submitEntered(request: SubmitTransferRequest, wait: Duration?): ResponseEntity<TransferResponse> {
         val transferId = request.transferId!!
         MDC.put(MDC_RUN_ID, request.runId.toString())
         val future = wait?.let { waiters.register(transferId) }
