@@ -76,17 +76,30 @@ services:
     module: ledger-service
     port: 8080
     replicas: 3
-    memory: 512Mi
+    # A batch of 100 transfers per consumer, two consumers per pod.
+    memory: 750Mi
   gateway:
     module: gateway
     port: 8081
     replicas: 1
-    memory: 1068Mi
+    # A heap of about 1 GB holds the 1500 open submissions of the in-flight limit (about 120 KB each, heap dump
+    # on the server) with room to spare.
+    memory: 1568Mi
+    # An OutOfMemoryError leaves its heap dump here; it lives as long as the pod.
+    dumps: 2Gi
+    env:
+      # Replaces the image's options whole, so it repeats what the gateway needs of them.
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=65 -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps
+      # Postgres takes 100 connections, 3 for superusers: gateway 40, ledger 3 x 10, control 10, reporting 10 and
+      # the exporter leave 6 of 97.
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "40"
+      # The batch writers take the inserts off the requests; 200 waiting for them fill two batches.
+      GATEWAY_ADMISSION_MAXCONCURRENT: "200"
   generator:
     module: generator
     port: 8082
     replicas: 1
-    # The bank's clients, outside the bank's 8 GB. Most of it is the journals on the heap; about 200 MiB stays for
+    # The bank's clients, outside the bank's 9 GB. Most of it is the journals on the heap; about 200 MiB stays for
     # the JVM itself (measured). 768Mi was OOMKilled at minute 56 of a one-hour run (measured on the server).
     memory: 1280Mi
     env:

@@ -43,7 +43,7 @@ metadata:
   labels: {{- include "ledger-lab.labels" (dict "name" "prometheus") | nindent 4 }}
 spec:
   replicas: 1
-  # As the services: two at once would not fit in the bank's 8 GB.
+  # As the services: two at once would not fit in the bank's 9 GB.
   strategy: {type: Recreate}
   selector:
     matchLabels: {{- include "ledger-lab.labels" (dict "name" "prometheus") | nindent 6 }}
