@@ -1,12 +1,13 @@
 package com.ledgerlab.gateway.persistence
 
 import com.ledgerlab.common.TransferCommand
-import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.gateway.domain.RunSummary
 import com.ledgerlab.gateway.domain.StatementLine
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.domain.TransferStatus
 import com.ledgerlab.gateway.domain.rejectReasonOf
+import com.ledgerlab.gateway.service.LedgerResult
+import com.ledgerlab.gateway.service.TransferRequest
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 import java.sql.Timestamp
@@ -15,24 +16,41 @@ import java.util.UUID
 @Repository
 class TransferRepository(private val jdbc: JdbcClient) {
 
-    fun insertIfAbsent(transferId: UUID, runId: UUID, fromAccount: Int, toAccount: Int, amountCents: Long): Transfer? =
-        jdbc.sql(
+    /**
+     * One statement for many requests; returns only the rows it inserted, so a missing id is a key already taken.
+     * Keys go in one order in every batch: two batches holding the same repeated keys in opposite orders each wait
+     * for the other's uncommitted insert, and Postgres breaks the deadlock by failing one whole batch.
+     */
+    fun insertAllIfAbsent(requests: List<TransferRequest>): List<Transfer> {
+        if (requests.isEmpty()) return emptyList()
+        return jdbc.sql(
             """
             INSERT INTO transfers (transfer_id, run_id, from_account, to_account, amount_cents, status)
-            VALUES (:id, :runId, :from, :to, :amount, :status)
+            SELECT v.transfer_id, v.run_id, v.from_account, v.to_account, v.amount_cents, :status
+            FROM unnest(CAST(:ids AS uuid[]), CAST(:runIds AS uuid[]), CAST(:froms AS int[]), CAST(:tos AS int[]), CAST(:amounts AS bigint[]))
+                AS v(transfer_id, run_id, from_account, to_account, amount_cents)
+            ORDER BY v.transfer_id
             ON CONFLICT (transfer_id) DO NOTHING
             RETURNING *
             """,
         )
-            .param("id", transferId)
-            .param("runId", runId)
-            .param("from", fromAccount)
-            .param("to", toAccount)
-            .param("amount", amountCents)
+            .param("ids", requests.map { it.transferId.toString() }.toTypedArray())
+            .param("runIds", requests.map { it.runId.toString() }.toTypedArray())
+            .param("froms", requests.map { it.fromAccount }.toTypedArray())
+            .param("tos", requests.map { it.toAccount }.toTypedArray())
+            .param("amounts", requests.map { it.amountCents }.toTypedArray())
             .param("status", TransferStatus.ACCEPTED.name)
             .query { rs, _ -> rs.toTransfer() }
-            .optional()
-            .orElse(null)
+            .list()
+    }
+
+    fun findAll(transferIds: Set<UUID>): List<Transfer> {
+        if (transferIds.isEmpty()) return emptyList()
+        return jdbc.sql("SELECT * FROM transfers WHERE transfer_id = ANY(CAST(:ids AS uuid[]))")
+            .param("ids", transferIds.map { it.toString() }.toTypedArray())
+            .query { rs, _ -> rs.toTransfer() }
+            .list()
+    }
 
     fun find(transferId: UUID): Transfer? =
         jdbc.sql("SELECT * FROM transfers WHERE transfer_id = :id")
@@ -84,23 +102,26 @@ class TransferRepository(private val jdbc: JdbcClient) {
     }
 
     /** Idempotent: a result applies once; a repeated event finds the row already final. */
-    fun applyResult(transferId: UUID, outcome: TransferOutcome, rejectReason: String?): Transfer? =
-        jdbc.sql(
+    /** One statement for a poll of result events; a repeated event finds its row already final. Returns the rows it moved. */
+    fun applyResults(results: List<LedgerResult>): List<Transfer> {
+        if (results.isEmpty()) return emptyList()
+        return jdbc.sql(
             """
-            UPDATE transfers
-            SET status = :status, reject_reason = :reason, resulted_at = now()
-            WHERE transfer_id = :id AND status IN (:accepted, :published)
-            RETURNING *
+            UPDATE transfers t
+            SET status = v.status, reject_reason = v.reason, resulted_at = now()
+            FROM unnest(CAST(:ids AS uuid[]), CAST(:statuses AS text[]), CAST(:reasons AS text[])) AS v(transfer_id, status, reason)
+            WHERE t.transfer_id = v.transfer_id AND t.status IN (:accepted, :published)
+            RETURNING t.*
             """,
         )
-            .param("status", outcome.name)
-            .param("reason", rejectReason)
-            .param("id", transferId)
+            .param("ids", results.map { it.transferId.toString() }.toTypedArray())
+            .param("statuses", results.map { it.outcome.name }.toTypedArray())
+            .param("reasons", results.map { it.rejectReason }.toTypedArray())
             .param("accepted", TransferStatus.ACCEPTED.name)
             .param("published", TransferStatus.PUBLISHED.name)
             .query { rs, _ -> rs.toTransfer() }
-            .optional()
-            .orElse(null)
+            .list()
+    }
 
     fun summarize(runId: UUID): RunSummary {
         val totals = jdbc.sql(

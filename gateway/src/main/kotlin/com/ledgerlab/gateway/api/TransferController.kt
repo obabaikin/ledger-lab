@@ -10,8 +10,10 @@ import com.ledgerlab.gateway.service.GatewayBusyException
 import com.ledgerlab.gateway.service.IdempotencyConflictException
 import com.ledgerlab.gateway.service.LedgerResult
 import com.ledgerlab.gateway.service.PeriodClosedException
+import com.ledgerlab.gateway.service.RecordedResultReader
 import com.ledgerlab.gateway.service.ResultWaiters
 import com.ledgerlab.gateway.service.TransferAdmission
+import com.ledgerlab.gateway.service.TransferBatcher
 import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
 import io.micrometer.core.instrument.Counter
@@ -71,7 +73,9 @@ data class TransferResponse(
 @RequestMapping("/{version}/transfers")
 class TransferController(
     private val service: TransferService,
+    private val batcher: TransferBatcher,
     private val waiters: ResultWaiters,
+    private val results: RecordedResultReader,
     private val admission: TransferAdmission,
     private val props: GatewayProperties,
     registry: MeterRegistry,
@@ -104,7 +108,7 @@ class TransferController(
         val future = wait?.let { waiters.register(transferId) }
         try {
             val transfer = admission.admit {
-                service.accept(
+                batcher.accept(
                     TransferRequest(transferId, request.runId!!, request.fromAccount, request.toAccount, request.amountCents),
                 )
             }
@@ -124,12 +128,15 @@ class TransferController(
         }
     }
 
-    private fun awaitResult(transfer: Transfer, future: CompletableFuture<LedgerResult>, timeout: Duration): Transfer =
+    private fun awaitResult(transfer: Transfer, future: CompletableFuture<LedgerResult>, timeout: Duration): Transfer {
+        val deadline = System.nanoTime() + timeout.toNanos()
         try {
-            service.recordResult(future.get(timeout.toMillis(), TimeUnit.MILLISECONDS)) ?: transfer
-        } catch (e: TimeoutException) {
-            service.find(transfer.transferId) ?: transfer
+            future.get(timeout.toNanos(), TimeUnit.NANOSECONDS)
+        } catch (_: TimeoutException) {
+            return service.find(transfer.transferId) ?: transfer
         }
+        return results.readFinal(transfer.transferId, deadline) ?: transfer
+    }
 
     @Operation(summary = "A transfer's current status")
     @ApiResponse(responseCode = "200", description = "Final status")

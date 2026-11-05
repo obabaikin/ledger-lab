@@ -10,12 +10,15 @@ import java.time.Duration
 
 class TransferAdmissionTest {
 
-    private val props = GatewayProperties(
-        "transfers", "results", GatewayProperties.Outbox(100, Duration.ofSeconds(1)),
-        GatewayProperties.Consumer(Duration.ofSeconds(1)), Duration.ofSeconds(10), Duration.ofSeconds(1),
-        Duration.ofSeconds(5), GatewayProperties.Admission(1, Duration.ofMillis(10)),
-        GatewayProperties.WarmUp(0, Duration.ZERO, Duration.ZERO),
-    )
+    companion object {
+        val props = GatewayProperties(
+            "transfers", "results", GatewayProperties.Outbox(100, Duration.ofSeconds(1)),
+            GatewayProperties.Consumer(Duration.ofSeconds(1)), Duration.ofSeconds(10),
+            GatewayProperties.WaitRead(Duration.ofMillis(25), 5), Duration.ofSeconds(1),
+            Duration.ofSeconds(5), GatewayProperties.Admission(1, Duration.ofMillis(10)), GatewayProperties.Accept(1, 1, Duration.ofSeconds(5)),
+            GatewayProperties.WarmUp(0, Duration.ZERO, Duration.ZERO),
+        )
+    }
 
     @Test
     fun `a submission that throws gives its permit back`() {

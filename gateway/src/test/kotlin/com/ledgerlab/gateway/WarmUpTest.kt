@@ -3,6 +3,7 @@ package com.ledgerlab.gateway
 import com.ledgerlab.gateway.api.TransferWarmUp
 import com.ledgerlab.gateway.persistence.RunPeriodRepository
 import com.ledgerlab.gateway.persistence.TransferRepository
+import com.ledgerlab.gateway.service.TransferBatcher
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import jakarta.validation.Validator
@@ -11,9 +12,7 @@ import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.any
+import org.mockito.ArgumentMatchers.anyList
 import org.mockito.AdditionalAnswers
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.mock
@@ -27,7 +26,7 @@ import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.test.context.TestPropertySource
 import org.springframework.transaction.PlatformTransactionManager
 import java.time.Duration
-import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
@@ -89,13 +88,25 @@ class WarmUpTest : IntegrationTest() {
     private fun warmUpWithInsertAfter(pause: () -> Unit): Pair<TransferWarmUp, MeterRegistry> {
         val real = AdditionalAnswers.delegatesTo<Any>(transfers)
         val stubbed = mock(TransferRepository::class.java, real)
-        doAnswer { pause(); real.answer(it) }.`when`(stubbed).insertIfAbsent(any(UUID::class.java) ?: UUID.randomUUID(), any(UUID::class.java) ?: UUID.randomUUID(), anyInt(), anyInt(), anyLong())
+        doAnswer { pause(); real.answer(it) }.`when`(stubbed).insertAllIfAbsent(anyList())
         val ownRegistry = SimpleMeterRegistry()
         return TransferWarmUp(stubbed, periods, transactions, objectMapper, validator, events, props, ownRegistry) to ownRegistry
     }
 
     private fun awaitWarm(registry: MeterRegistry) =
         await().atMost(Duration.ofSeconds(10)).until { registry.get(TransferWarmUp.WARM).gauge().value() == 1.0 }
+
+    @Test
+    fun `the warm-up goes through the batch writers and the gateway becomes ready`() {
+        val threads = ConcurrentHashMap.newKeySet<String>()
+        val (ownWarmUp, ownRegistry) = warmUpWithInsertAfter { threads += Thread.currentThread().name }
+
+        ownWarmUp.warmUp()
+        awaitWarm(ownRegistry)
+
+        assertThat(availability.readinessState).isEqualTo(ReadinessState.ACCEPTING_TRAFFIC)
+        assertThat(threads).isNotEmpty().allMatch { it.startsWith(TransferBatcher.WRITER_THREAD) }
+    }
 
     @Test
     fun `a round that ends just past the long limit counts as the limit reached, not as a stuck round`(output: CapturedOutput) {

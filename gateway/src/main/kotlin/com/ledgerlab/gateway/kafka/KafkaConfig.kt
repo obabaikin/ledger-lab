@@ -29,7 +29,7 @@ class KafkaConfig {
             containerProperties.assignmentCommitOption = ContainerProperties.AssignmentCommitOption.NEVER
         }
 
-    /** Same policy as the ledger: a result is never skipped, only unparseable messages are. */
+    /** A result is never skipped; an unparseable message is (the recorder skips it itself, its poll being a batch). */
     @Bean
     fun kafkaErrorHandler(props: GatewayProperties): DefaultErrorHandler =
         DefaultErrorHandler(FixedBackOff(props.consumer.retryBackoff.toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS)).apply {

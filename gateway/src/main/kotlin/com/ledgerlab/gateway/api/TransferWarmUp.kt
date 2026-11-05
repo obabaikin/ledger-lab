@@ -4,6 +4,7 @@ import com.ledgerlab.gateway.GatewayProperties
 import com.ledgerlab.gateway.persistence.RunPeriodRepository
 import com.ledgerlab.gateway.persistence.TransferRepository
 import com.ledgerlab.gateway.service.TransferAdmission
+import com.ledgerlab.gateway.service.TransferBatcher
 import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
 import io.micrometer.core.instrument.MeterRegistry
@@ -103,27 +104,34 @@ class TransferWarmUp(
         // Instances of its own count into a registry nobody reads: the rounds are not transfers.
         val registry = SimpleMeterRegistry()
         val service = TransferService(transfers, periods, registry)
-        val admission = TransferAdmission(props, registry)
         val rolledBack = TransactionTemplate(transactions)
-        var done = 0
-        while (done < props.warmUp.rounds && System.nanoTime() < deadline && !Thread.currentThread().isInterrupted) {
-            round(service, admission, rolledBack)
-            done++
+        val batcher = TransferBatcher(
+            { requests -> rolledBack.execute { status -> status.setRollbackOnly(); service.acceptAll(requests) } },
+            props,
+            registry,
+        )
+        val admission = TransferAdmission(props, registry)
+        batcher.start()
+        try {
+            var done = 0
+            while (done < props.warmUp.rounds && System.nanoTime() < deadline && !Thread.currentThread().isInterrupted) {
+                round(batcher, admission)
+                done++
+            }
+            return done
+        } finally {
+            batcher.stop()
         }
-        return done
     }
 
-    private fun round(service: TransferService, admission: TransferAdmission, rolledBack: TransactionTemplate) {
+    private fun round(batcher: TransferBatcher, admission: TransferAdmission) {
         val body = objectMapper.writeValueAsString(SubmitTransferRequest(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 1))
         val request = objectMapper.readValue(body, SubmitTransferRequest::class.java)
         check(validator.validate(request).isEmpty()) { "the warm-up request is invalid" }
-        rolledBack.executeWithoutResult { status ->
-            status.setRollbackOnly()
-            val transfer = admission.admit {
-                service.accept(TransferRequest(request.transferId!!, request.runId!!, request.fromAccount, request.toAccount, request.amountCents))
-            }
-            objectMapper.writeValueAsString(transfer.toResponse())
+        val transfer = admission.admit {
+            batcher.accept(TransferRequest(request.transferId!!, request.runId!!, request.fromAccount, request.toAccount, request.amountCents))
         }
+        objectMapper.writeValueAsString(transfer.toResponse())
     }
 
     companion object {

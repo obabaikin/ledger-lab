@@ -1,13 +1,12 @@
 package com.ledgerlab.gateway
 
 import com.ledgerlab.gateway.api.GatewayErrors
-import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
 import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
+import org.mockito.ArgumentMatchers.anyList
 import org.mockito.Mockito.doAnswer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
@@ -30,12 +29,11 @@ class AdmissionTest : IntegrationTest() {
     fun `a submission over the limit is refused with 503 busy before it is written, and a retry is taken`() {
         val held = CountDownLatch(1)
         val inside = AtomicInteger()
-        val sample = TransferRequest(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100)
         doAnswer { call ->
             inside.incrementAndGet()
             held.await()
             call.callRealMethod()
-        }.`when`(service).accept(any(TransferRequest::class.java) ?: sample)
+        }.`when`(service).acceptAll(anyList())
         val refusedBefore = registry.counter("gateway.transfers", "outcome", "refused").count()
         val runId = UUID.randomUUID()
         val refusedId = UUID.randomUUID()
