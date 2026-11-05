@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
 class BatchAcceptTest : IntegrationTest() {
@@ -78,6 +79,24 @@ class BatchAcceptTest : IntegrationTest() {
     }
 
     @Test
+    fun `two batches with the same keys in opposite orders both commit without a deadlock`() {
+        repeat(ROUNDS) {
+            val run = UUID.randomUUID()
+            val batch = List(KEYS) { request(run) }
+            val start = CountDownLatch(1)
+            val outcomes = Executors.newFixedThreadPool(2).use { pool ->
+                listOf(batch, batch.reversed())
+                    .map { requests -> pool.submit<List<Result<*>>> { start.await(); service.acceptAll(requests) } }
+                    .also { start.countDown() }
+                    .map { it.get() }
+            }
+
+            assertThat(outcomes.flatten()).allMatch { it.isSuccess }
+            assertThat(service.summarize(run).accepted).isEqualTo(KEYS.toLong())
+        }
+    }
+
+    @Test
     fun `concurrent submissions through the queue each get their own answer, and a repeat with another body is refused`() {
         val run = UUID.randomUUID()
         val ids = List(200) { UUID.randomUUID() }
@@ -90,5 +109,10 @@ class BatchAcceptTest : IntegrationTest() {
         assertThat(statuses).allMatch { it == HttpStatus.ACCEPTED }
         assertThat(service.summarize(run).accepted).isEqualTo(ids.size.toLong())
         assertThat(submit(body(ids.first(), run, amount = 1)).statusCode).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT)
+    }
+
+    private companion object {
+        const val ROUNDS = 10
+        const val KEYS = 200
     }
 }
