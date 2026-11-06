@@ -26,8 +26,8 @@ duplicated when consumers crash?* Work in progress: what is done and what comes 
   at-least-once; processing is idempotent, so crashes and rebalances cannot double-post. The money
   reaches the receiver's balance a moment after the posting (p99 0.65 s), and until then the
   receiver cannot spend it.
-- A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 200
-  transactions per second and counts what was acknowledged.
+- A **generator** plays the bank's clients: it calls the gateway at 100 to 2000
+  transactions per second, in steps of 100, and counts what was acknowledged.
 - Transfers can be **rejected** for domain reasons: insufficient funds, blocked account,
   daily limit. Rejections are recorded and reconciled too.
 - Every run gets its own **isolated set of accounts**, so several people can run experiments
@@ -100,8 +100,9 @@ second** without a refusal, where the October version refused from 300–400 on;
 How it was measured, how the bottlenecks were found and what was tried and rejected:
 [optimizations](docs/results/2026-11-06-optimizations.md).
 
-The public demo is capped lower on purpose, so that visitors share the node: at most three runs at once, together
-at most 300 transactions per second ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
+On the public demo a run takes 100 to 2000 transactions per second, so a visitor can go past the limit and watch
+the bank fall behind; at most three runs at once, together at most 2000
+([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
 
 ## Stack
 
@@ -183,8 +184,8 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
   a host firewall under the provider's, SSH with a key only, services without root or capabilities.
   Only the page is published.
-- **Load:** the server offers 50 / 100 / 200 transactions per second, 100 by default, and at most
-  300 for all runs together.
+- **Load:** the server offers 100 to 2000 transactions per second in steps of 100, 100 by default, and at
+  most 2000 for all runs together.
 
 Details: [docs/guides/operations.md](docs/guides/operations.md#running-on-a-server).
 
