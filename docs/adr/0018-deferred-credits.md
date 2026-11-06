@@ -36,14 +36,37 @@ holds them.
 
 **Reconciliation counts pending credits as balance.** The journal holds a credit before the balance
 does, so every check that compares balances (ADR 0002) reads `balance_cents` plus the account's rows
-in `deferred_credits`. Deleting a run deletes its pending credits with its accounts.
+in `deferred_credits`. Deleting a run deletes its pending credits first, then its accounts: the
+order in which the applier takes them, so a deletion right after a run waits for the applier
+instead of deadlocking with it.
+
+## Semantics
+
+**A transfer is complete when it is posted.** Its journal rows, the sender's debit and its entry in the
+transfer log commit in one transaction; from then on it is `POSTED` and nothing undoes it. The credit
+reaching the receiver's balance is not part of that step; the journal already holds it.
+
+**What stays:** the posting is atomic, double-entry and idempotent, and no transfer spends money that
+is not there; reconciliation holds at any moment; clients see transfer statuses and statements as
+before, and no API returns an account's current balance.
+
+**What changes:** a sender's funds are checked against its available balance, without credits not yet
+applied. A receiver that sends right after it was paid may be rejected for insufficient funds although
+the money is booked; the check can refuse money that is there, never allow money that is not. Here
+that is acceptable: the clients are simulated, a rejection is a reconciled outcome, and the delay is a
+fraction of a second.
+
+**When it stops being right:**
+
+- the product promises that received money can be spent at once, as instant payments do;
+- an API shows balances: it must show booked and available apart;
+- the delay grows towards seconds because the one applier falls behind. `ledger.credit.delay` shows it
+  first; an alert on its p99 (for instance above 2 s) is not set up yet.
 
 ## Consequences
 
-- Money reaches a receiver's balance shortly after the transfer posted: p50 about 0.3 s, p99 about
-  1.1 s on the server (`ledger.credit.delay`). In that window the receiver cannot spend it, so a
-  transfer from it may be rejected for insufficient funds although the books already show the
-  money. Production would show available and booked balances apart.
+- Money reaches a receiver's balance shortly after the transfer posted: p50 0.15 s, p99 0.61–0.65 s
+  at 1000–1600 transfers per second on the server (`ledger.credit.delay`).
 - A sender is locked once per batch; receivers are not locked by batches at all, and the applier
   holds each of them for one short transaction per round.
 - One applier is a single point of throughput. It is far from its limit at the measured rates

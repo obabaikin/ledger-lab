@@ -24,7 +24,7 @@ duplicated when consumers crash?* Work in progress: what is done and what comes 
   many are in progress, it refuses one with `503 busy` before writing anything, and the client retries later.
 - The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
   at-least-once; processing is idempotent, so crashes and rebalances cannot double-post. The money
-  reaches the receiver's balance a moment after the posting (p99 about 1 s), and until then the
+  reaches the receiver's balance a moment after the posting (p99 0.65 s), and until then the
   receiver cannot spend it.
 - A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 200
   transactions per second and counts what was acknowledged.
@@ -95,20 +95,13 @@ accounts did not change.
 
 ## Limits measured on the server
 
-The same node, measured rate by rate ([full results](docs/results/2026-10-23-server-baseline.md)):
+On one node with the whole bank and the load generator, the current version takes **about 1600 transfers per
+second** without a refusal, where the October version refused from 300–400 on; every run of both ends `BALANCED`.
+How it was measured, how the bottlenecks were found and what was tried and rejected:
+[optimizations](docs/results/2026-11-06-optimizations.md).
 
-- **200 transfers per second sustained**: two runs of 120 s with no refusal, client p99 under 1 s, every
-  transfer booked within 10 s of the end. At 250–300 one run of two refuses; at 500 the gateway refuses
-  thousands, and every run still ends `BALANCED`.
-- **The limit is the node's CPU**, PostgreSQL its largest consumer; not the disk and not the hypervisor.
-  At 500 TPS the pods use 4.2 of 6 cores, and the node at most 6.4 of its 12 GB.
-- **A crash of every ledger instance at 150 TPS** is absorbed within 47 s, with nothing refused.
-- **Right after a restart of the gateway** a run waits until it has warmed up; then two runs of 4,000
-  transfers had 1 and 0 refused. Right after a full deploy every service starts cold on the same node, and a
-  run still meets refusals; the fix is planned with the optimizations.
-
-At most three runs hold a place at once, together at most 300 transactions per second, and only
-once the ledger instances hold all partitions and the gateway has warmed up; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
+The public demo is capped lower on purpose, so that visitors share the node: at most three runs at once, together
+at most 300 transactions per second ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
 
 ## Stack
 
@@ -239,12 +232,12 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Every run reconciles: the books, the bank's events and the client's journal agree | verdict `BALANCED` on each run | done |
 | Survives crashes mid-run | one hour at 300 TPS on the server, the ledger crashed twice, `BALANCED` | done |
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
-| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS, the node's CPU the limit ([results](docs/results/2026-10-23-server-baseline.md)) | done |
+| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS in October ([results](docs/results/2026-10-23-server-baseline.md)), about 1600 with batched writes ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
 | Access on request | a visitor enters an email and receives an invite link | done |
 | A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |
 | Dashboards | Grafana: latency by segment, node, database | planned |
-| Writes in batches, overload shed at the edge | three series of 1000–1600 TPS on the server: every run `BALANCED`, the excess refused with `503 busy`, no restart | next |
-| The bottleneck, found and explained | measured, with the fix or the reason not to | planned |
+| Writes in batches, overload shed at the edge | 1000–1600 TPS on the server without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | next |
+| The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
 | Nothing received goes unaccounted | every message a service took is booked or reported | planned |
