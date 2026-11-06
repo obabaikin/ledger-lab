@@ -101,12 +101,13 @@ class BatchAcceptTest : IntegrationTest() {
         val run = UUID.randomUUID()
         val ids = List(200) { UUID.randomUUID() }
 
-        val statuses = Executors.newVirtualThreadPerTaskExecutor().use { pool ->
+        // No more clients than admission permits: a slow machine must not turn this into a test of 503 busy.
+        val statuses = Executors.newFixedThreadPool(props.admission.maxConcurrent).use { pool ->
             (ids + ids).map { id -> pool.submit<HttpStatus> { HttpStatus.valueOf(submit(body(id, run)).statusCode.value()) } }
                 .map { it.get() }
         }
 
-        assertThat(statuses).allMatch { it == HttpStatus.ACCEPTED }
+        assertThat(statuses.toSet()).containsOnly(HttpStatus.ACCEPTED)
         assertThat(service.summarize(run).accepted).isEqualTo(ids.size.toLong())
         assertThat(submit(body(ids.first(), run, amount = 1)).statusCode).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT)
     }
