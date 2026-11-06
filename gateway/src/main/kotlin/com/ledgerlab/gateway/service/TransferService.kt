@@ -47,22 +47,35 @@ class TransferService(
         .publishPercentiles(*LATENCY_PERCENTILES)
         .register(registry)
 
-    /** One committed row; the response goes out before Kafka is involved. */
+    /**
+     * One transaction and one insert for many requests; each gets, in the same order, the outcome it would have had
+     * alone: its row, or [PeriodClosedException] / [IdempotencyConflictException]. The responses go out after the
+     * commit, before Kafka is involved.
+     */
     @Transactional
-    fun accept(request: TransferRequest): Transfer {
-        periods.lockShared(request.runId)
-        // A separate statement after the lock: its snapshot must see a close that committed while we waited.
-        if (periods.find(request.runId) != null) {
-            val existing = transfers.find(request.transferId) ?: throw PeriodClosedException(request.runId)
-            return repeat(existing, request)
+    fun acceptAll(requests: List<TransferRequest>): List<Result<Transfer>> {
+        // One order for every batch: a close waiting between two shared locks cannot close a cycle.
+        requests.map { it.runId }.distinct().sortedBy { it.toString() }.forEach(periods::lockShared)
+        // A separate statement after the locks: its snapshot must see a close that committed while we waited.
+        val closed = periods.closedAmong(requests.map { it.runId }.toSet())
+        val inserting = requests.filter { it.runId !in closed }.distinctBy { it.transferId }.associateBy { it.transferId }
+        val inserted = transfers.insertAllIfAbsent(inserting.values.toList()).associateBy { it.transferId }
+        accepted.increment(inserted.size.toDouble())
+        val existing = transfers.findAll(requests.map { it.transferId }.filterNot(inserted::containsKey).toSet())
+            .associateBy { it.transferId }
+        val answeredAsInserted = HashSet<UUID>()
+        return requests.map { request ->
+            runCatching {
+                val row = inserted[request.transferId]
+                when {
+                    row != null && inserting[request.transferId] === request && answeredAsInserted.add(request.transferId) -> row
+                    row != null -> repeat(row, request)
+                    else -> existing[request.transferId]?.let { repeat(it, request) }
+                        ?: if (request.runId in closed) throw PeriodClosedException(request.runId)
+                        else error("Transfer ${request.transferId} was neither inserted nor found")
+                }
+            }
         }
-        transfers.insertIfAbsent(
-            request.transferId, request.runId, request.fromAccount, request.toAccount, request.amountCents,
-        )?.let {
-            accepted.increment()
-            return it
-        }
-        return repeat(checkNotNull(transfers.find(request.transferId)), request)
     }
 
     private fun repeat(existing: Transfer, request: TransferRequest): Transfer {
@@ -72,17 +85,15 @@ class TransferService(
     }
 
     /**
-     * A waiting client is answered from this committed row, never from the event alone, so a
-     * final status it has seen is never followed by an older one. Latency uses database
-     * timestamps only, because JVM and database clocks may drift apart.
+     * The only writer of results, one transaction per poll; a waiting client reads the committed row, so a final
+     * status it has seen is never followed by an older one. Latency uses database timestamps only, because JVM and
+     * database clocks may drift apart.
      */
     @Transactional
-    fun recordResult(result: LedgerResult): Transfer? {
-        transfers.applyResult(result.transferId, result.outcome, result.rejectReason)?.let { applied ->
+    fun recordResults(results: List<LedgerResult>) {
+        transfers.applyResults(results).forEach { applied ->
             latency.record(Duration.between(applied.acceptedAt, checkNotNull(applied.resultedAt)))
-            return applied
         }
-        return transfers.find(result.transferId)
     }
 
     fun find(transferId: UUID): Transfer? = transfers.find(transferId)

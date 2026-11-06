@@ -1,6 +1,6 @@
 # ADR 0003: Idempotent consumer that never skips a transfer
 
-Status: accepted · Date: 2026-10-07
+Status: accepted · Date: 2026-10-07 · Updated: 2026-11-05
 
 ## Context
 
@@ -11,14 +11,15 @@ handler retries a failing record ten times and then skips it.
 ## Decision
 
 - The primary key `(run_id, transfer_id)` on the transfer log is the idempotency guard.
-  The transfer row is written with `INSERT ... ON CONFLICT DO NOTHING`; zero inserted rows
-  means "already processed", also when two consumers race on the same transfer after a
+  Transfers already in the log are looked up after the batch has locked its senders, and the
+  rows are written with `INSERT ... ON CONFLICT DO NOTHING`; a transfer found or not inserted
+  is "already processed", also when two consumers race on the same transfer after a
   rebalance. The ledger service owns this contract, not the Kafka listener.
-- Each transfer is one database transaction. Offsets are committed only after the batch
-  has been processed, so a crash can cause redelivery but never loss.
+- Each poll is one database transaction (ADR 0019). Offsets are committed only after the
+  batch has been processed, so a crash can cause redelivery but never loss.
 - Processing errors are retried indefinitely with a short back-off. A ledger that stalls
   is acceptable; a ledger that silently drops a transfer is not. Only unparseable messages
-  are logged and skipped, because retrying cannot fix them.
+  are logged and skipped, one by one, because retrying cannot fix them.
 
 ## Consequences
 

@@ -13,11 +13,11 @@ ingress:
 certManager:
   enabled: true
 
-# One run at up to 200 TPS is sustained; runs together may reach 300, where one run of two met refusals
-# (docs/results/2026-10-23-server-baseline.md).
+# With batched writes the node takes about 1600 TPS without a refusal and falls behind at 2000
+# (docs/results/2026-11-06-optimizations.md); visitors may go up to that edge and past the limit.
 runs:
-  maxTotalTps: 300
-  tpsOptions: [50, 100, 200]
+  maxTotalTps: 2000
+  tpsOptions: [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000]
   defaultTps: 100
 
 # A restarted gateway refused nothing from 5,000 warm-up rounds on and refused at 4,000 (measured on the server,

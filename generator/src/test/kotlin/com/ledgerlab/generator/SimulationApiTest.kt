@@ -157,7 +157,7 @@ class SimulationApiTest {
 
     @Test
     fun `rejects a run beyond the generator limits`() {
-        for ((tps, seconds) in listOf(1_001 to 1, 10 to 31)) {
+        for ((tps, seconds) in listOf(2_001 to 1, 10 to 31)) {
             val request = mapOf("runId" to UUID.randomUUID(), "tps" to tps, "durationSeconds" to seconds, "accountCount" to 10)
             assertThat(http.postForEntity("/internal/simulations", request, String::class.java).statusCode)
                 .isEqualTo(HttpStatus.BAD_REQUEST)

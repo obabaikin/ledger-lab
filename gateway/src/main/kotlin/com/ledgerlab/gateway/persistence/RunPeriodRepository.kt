@@ -50,6 +50,14 @@ class RunPeriodRepository(private val jdbc: JdbcClient) {
             .optional()
             .orElse(null)
 
+    fun closedAmong(runIds: Set<UUID>): Set<UUID> {
+        if (runIds.isEmpty()) return emptySet()
+        return jdbc.sql("SELECT run_id FROM run_periods WHERE run_id = ANY(CAST(:ids AS uuid[]))")
+            .param("ids", runIds.map { it.toString() }.toTypedArray())
+            .query { rs, _ -> rs.getObject("run_id", UUID::class.java) }
+            .set()
+    }
+
     /**
      * Run after the lock was taken: now() is the transaction start, before inserts in flight committed,
      * while this statement's snapshot already sees them.

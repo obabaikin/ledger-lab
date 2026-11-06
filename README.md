@@ -23,9 +23,11 @@ duplicated when consumers crash?* Work in progress: what is done and what comes 
   stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate. When too
   many are in progress, it refuses one with `503 busy` before writing anything, and the client retries later.
 - The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
-  at-least-once; processing is idempotent, so crashes and rebalances cannot double-post.
-- A **generator** plays the bank's clients: it calls the gateway at 50, 100 or 200
-  transactions per second and counts what was acknowledged.
+  at-least-once; processing is idempotent, so crashes and rebalances cannot double-post. The money
+  reaches the receiver's balance a moment after the posting (p99 0.65 s), and until then the
+  receiver cannot spend it.
+- A **generator** plays the bank's clients: it calls the gateway at 100 to 2000
+  transactions per second, in steps of 100, and counts what was acknowledged.
 - Transfers can be **rejected** for domain reasons: insufficient funds, blocked account,
   daily limit. Rejections are recorded and reconciled too.
 - Every run gets its own **isolated set of accounts**, so several people can run experiments
@@ -93,20 +95,14 @@ accounts did not change.
 
 ## Limits measured on the server
 
-The same node, measured rate by rate ([full results](docs/results/2026-10-23-server-baseline.md)):
+On one node with the whole bank and the load generator, the current version takes **about 1600 transfers per
+second** without a refusal, where the October version refused from 300–400 on; every run of both ends `BALANCED`.
+How it was measured, how the bottlenecks were found and what was tried and rejected:
+[optimizations](docs/results/2026-11-06-optimizations.md).
 
-- **200 transfers per second sustained**: two runs of 120 s with no refusal, client p99 under 1 s, every
-  transfer booked within 10 s of the end. At 250–300 one run of two refuses; at 500 the gateway refuses
-  thousands, and every run still ends `BALANCED`.
-- **The limit is the node's CPU**, PostgreSQL its largest consumer; not the disk and not the hypervisor.
-  At 500 TPS the pods use 4.2 of 6 cores, and the node at most 6.4 of its 12 GB.
-- **A crash of every ledger instance at 150 TPS** is absorbed within 47 s, with nothing refused.
-- **Right after a restart of the gateway** a run waits until it has warmed up; then two runs of 4,000
-  transfers had 1 and 0 refused. Right after a full deploy every service starts cold on the same node, and a
-  run still meets refusals; the fix is planned with the optimizations.
-
-At most three runs hold a place at once, together at most 300 transactions per second, and only
-once the ledger instances hold all partitions and the gateway has warmed up; the rest wait in a queue for up to five minutes ([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
+On the public demo a run takes 100 to 2000 transactions per second, so a visitor can go past the limit and watch
+the bank fall behind; at most three runs at once, together at most 2000
+([ADR 0012](docs/adr/0012-invites-quota-and-the-run-queue.md)).
 
 ## Stack
 
@@ -176,7 +172,7 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 
 - **Kubernetes:** one Helm chart (`infra/helm/ledger-lab`) runs in k3d on a laptop, on one node the
   size of the server, and on the server's single-node k3s. The ledger runs three instances; a crashed
-  pod restarts within a second. Every pod of the chart has a memory limit; the bank fits in 8 GB together with k3s and
+  pod restarts within a second. Every pod of the chart has a memory limit; the bank fits in 9 GB together with k3s and
   the OS, and the load generator runs beside it.
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
@@ -188,8 +184,8 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
   a host firewall under the provider's, SSH with a key only, services without root or capabilities.
   Only the page is published.
-- **Load:** the server offers 50 / 100 / 200 transactions per second, 100 by default, and at most
-  300 for all runs together.
+- **Load:** the server offers 100 to 2000 transactions per second in steps of 100, 100 by default, and at
+  most 2000 for all runs together.
 
 Details: [docs/guides/operations.md](docs/guides/operations.md#running-on-a-server).
 
@@ -237,11 +233,12 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Every run reconciles: the books, the bank's events and the client's journal agree | verdict `BALANCED` on each run | done |
 | Survives crashes mid-run | one hour at 300 TPS on the server, the ledger crashed twice, `BALANCED` | done |
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
-| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS, the node's CPU the limit ([results](docs/results/2026-10-23-server-baseline.md)) | done |
+| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS in October ([results](docs/results/2026-10-23-server-baseline.md)), about 1600 with batched writes ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
 | Access on request | a visitor enters an email and receives an invite link | done |
 | A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |
 | Dashboards | Grafana: latency by segment, node, database | planned |
-| The bottleneck, found and explained | measured, with the fix or the reason not to | planned |
+| Writes in batches, overload shed at the edge | 1000–1600 TPS on the server without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | next |
+| The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
 | Nothing received goes unaccounted | every message a service took is booked or reported | planned |
@@ -261,6 +258,13 @@ Decisions with their trade-offs are recorded in [docs/adr](docs/adr). The ones t
 - **Reconciliation from independent views.** Balances, the journal and the transfer log are checked
   against each other per transfer, in one snapshot ([ADR 0002](docs/adr/0002-double-entry-journal-and-reconciliation.md)),
   and the clients' journal against the bank's statement by transfer id ([ADR 0010](docs/adr/0010-client-reconciliation.md)).
+- **Batched writes.** The gateway accepts submissions, the ledger posts transfers and the gateway
+  records results a batch per transaction, each transfer with the outcome it would have had alone. A
+  batch locks only its senders; credits wait in a table until one applier adds them to the balances,
+  and reconciliation counts them meanwhile ([ADR 0018](docs/adr/0018-deferred-credits.md),
+  [ADR 0019](docs/adr/0019-batched-writes-one-result-writer-load-shedding.md)).
+- **Overload is shed at the edge.** Past a limit of open submissions the gateway answers `503 busy`
+  at once instead of filling its heap ([ADR 0019](docs/adr/0019-batched-writes-one-result-writer-load-shedding.md)).
 - **Hand-written SQL, no ORM**, so every lock and query of the ledger is visible ([ADR 0001](docs/adr/0001-jdbc-instead-of-jpa.md)).
 
 Built by Oleksii Babaikin · [LinkedIn](https://www.linkedin.com/in/oleksii-babaikin)

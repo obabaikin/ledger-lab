@@ -20,7 +20,8 @@ class ReconciliationTest : IntegrationTest() {
         val runId = UUID.randomUUID()
         runs.openAccounts(runId, setup(accountCount = 3, openingBalanceCents = 1_000))
         val command = transfer(runId, from = 1, to = 2, amountCents = 100)
-        ledger.apply(command)
+        ledger.applyOne(command)
+        awaitCreditsApplied(runId)
         assertThat(runs.reconcile(runId).balanced).isTrue()
         return runId to command.transferId
     }
@@ -28,8 +29,8 @@ class ReconciliationTest : IntegrationTest() {
     @Test
     fun `sums debits and credits of the journal apart, each as a positive amount, without a rejected transfer`() {
         val (runId, _) = runWithOnePosting()
-        ledger.apply(transfer(runId, from = 2, to = 3, amountCents = 50))
-        ledger.apply(transfer(runId, from = 3, to = 1, amountCents = 1_000_000))
+        ledger.applyOne(transfer(runId, from = 2, to = 3, amountCents = 50))
+        ledger.applyOne(transfer(runId, from = 3, to = 1, amountCents = 1_000_000))
 
         val report = runs.reconcile(runId)
 
@@ -59,7 +60,7 @@ class ReconciliationTest : IntegrationTest() {
     fun `detects a posting with a third journal row balanced by a missing row elsewhere`() {
         val (runId, transferId) = runWithOnePosting()
         val second = transfer(runId, from = 2, to = 3, amountCents = 50)
-        ledger.apply(second)
+        ledger.applyOne(second)
         // Reattach one of the second posting's rows to the first posting: counts and sums per run stay the same.
         jdbc.sql("UPDATE journal_entries SET transfer_id = :first WHERE run_id = :runId AND transfer_id = :second AND amount_cents > 0")
             .param("first", transferId).param("runId", runId).param("second", second.transferId).update()
@@ -73,7 +74,7 @@ class ReconciliationTest : IntegrationTest() {
     fun `detects journal rows attached to a rejected transfer`() {
         val (runId, _) = runWithOnePosting()
         val rejected = transfer(runId, from = 1, to = 2, amountCents = 1_000_000)
-        ledger.apply(rejected)
+        ledger.applyOne(rejected)
         jdbc.sql("INSERT INTO journal_entries (run_id, transfer_id, account_no, amount_cents) VALUES (:runId, :t, 1, -5), (:runId, :t, 2, 5)")
             .param("runId", runId).param("t", rejected.transferId).update()
 
@@ -100,7 +101,7 @@ class ReconciliationTest : IntegrationTest() {
     fun `detects a posting whose debit amount differs from the transfer`() {
         val (runId, transferId) = runWithOnePosting()
         val second = transfer(runId, from = 2, to = 3, amountCents = 50)
-        ledger.apply(second)
+        ledger.applyOne(second)
         // Shift 10 between the two postings' debits: each account and every total still agree.
         jdbc.sql("UPDATE journal_entries SET amount_cents = amount_cents - 10 WHERE run_id = :runId AND transfer_id = :t AND amount_cents < 0")
             .param("runId", runId).param("t", transferId).update()

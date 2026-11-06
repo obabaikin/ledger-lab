@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
+import tools.jackson.core.JacksonException
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.databind.ObjectReader
@@ -47,20 +48,30 @@ class ResultEventReader(private val objectMapper: ObjectMapper, private val regi
     }
 }
 
-/** Durable path: exactly one gateway instance records each result in the database. */
+/** Durable path: exactly one gateway instance records each result in the database, one transaction per poll. */
 @Component
 class ResultRecorder(private val service: TransferService, private val reader: ResultEventReader) {
+    private val log = LoggerFactory.getLogger(javaClass)
 
-    @KafkaListener(topics = ["\${gateway.results-topic}"], groupId = "\${spring.kafka.consumer.group-id}")
-    fun onResult(payload: String) {
-        val result = reader.read(payload, ResultEventReader.Listener.RECORDER)
-        MDC.put(MDC_RUN_ID, result.runId.toString())
+    @KafkaListener(topics = ["\${gateway.results-topic}"], groupId = "\${spring.kafka.consumer.group-id}", batch = "true")
+    fun onResults(payloads: List<String>) {
+        val results = payloads.mapNotNull(::parse)
+        results.map { it.runId }.distinct().singleOrNull()?.let { MDC.put(MDC_RUN_ID, it.toString()) }
         try {
-            service.recordResult(result)
+            service.recordResults(results)
         } finally {
             MDC.remove(MDC_RUN_ID)
         }
     }
+
+    // In a batch an exception would fail the whole poll; a message that can never be read is skipped on its own.
+    private fun parse(payload: String): LedgerResult? =
+        try {
+            reader.read(payload, ResultEventReader.Listener.RECORDER)
+        } catch (e: JacksonException) {
+            log.error("Unreadable result skipped: {}", payload, e)
+            null
+        }
 }
 
 /**

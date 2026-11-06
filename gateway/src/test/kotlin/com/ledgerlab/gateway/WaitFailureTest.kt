@@ -9,7 +9,6 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.doThrow
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DataAccessResourceFailureException
@@ -27,12 +26,13 @@ class WaitFailureTest : IntegrationTest() {
     @Autowired lateinit var registry: MeterRegistry
 
     @Test
-    fun `a database failure while waiting answers 202, not 5xx, because the transfer is committed`() {
+    fun `a database failure while reading the result answers 202, not 5xx, because the transfer is committed`() {
         val transferId = UUID.randomUUID()
         val runId = UUID.randomUUID()
         val result = LedgerResult(runId, transferId, TransferOutcome.POSTED, null)
-        doThrow(DataAccessResourceFailureException("connection lost"))
-            .`when`(service).recordResult(any(LedgerResult::class.java) ?: result)
+        // Only the first read fails: the status query after the answer reads the row.
+        doThrow(DataAccessResourceFailureException("connection lost")).doCallRealMethod()
+            .`when`(service).find(transferId)
         val failuresBefore = registry.counter("gateway.wait.failed").count()
         Executors.newSingleThreadExecutor().use { pool ->
             val pending = pool.submit<ResponseEntity<Map<*, *>>> { submit(body(transferId, runId), wait = "PT5S") }

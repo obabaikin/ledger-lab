@@ -31,7 +31,7 @@ class LedgerConcurrencyTest : IntegrationTest() {
 
         val pool = Executors.newFixedThreadPool(16)
         val results = try {
-            pool.invokeAll(commands.map { Callable { ledger.apply(it) } }).map { it.get(30, TimeUnit.SECONDS) }
+            pool.invokeAll(commands.map { Callable { ledger.applyOne(it) } }).map { it.get(30, TimeUnit.SECONDS) }
         } finally {
             pool.shutdownNow()
         }
@@ -51,7 +51,7 @@ class LedgerConcurrencyTest : IntegrationTest() {
 
         val pool = Executors.newFixedThreadPool(16)
         val results = try {
-            pool.invokeAll(List(16) { Callable { ledger.apply(command) } }).map { it.get(30, TimeUnit.SECONDS) }
+            pool.invokeAll(List(16) { Callable { ledger.applyOne(command) } }).map { it.get(30, TimeUnit.SECONDS) }
         } finally {
             pool.shutdownNow()
         }

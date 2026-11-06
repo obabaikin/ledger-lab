@@ -43,8 +43,8 @@ data class StartSimulationRequest(
     @field:Min(1) @field:Max(MAX_WAIT_TIMEOUT_SECONDS) val waitTimeoutSeconds: Int = 5,
 )
 
-/** Run limits of the public demo (shared vCPUs, a person waiting on the page); raise only with a recorded reason. */
-private const val MAX_TPS = 1_000L
+/** Run limits of the public demo (shared vCPUs, a person waiting on the page); raise only with a recorded reason (ADR 0019). */
+private const val MAX_TPS = 2_000L
 private const val MAX_WAIT_TIMEOUT_SECONDS = 30L
 /** A transfer needs a sender and a different receiver. */
 private const val MIN_ACCOUNTS = 2L

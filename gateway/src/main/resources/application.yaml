@@ -28,6 +28,9 @@ spring:
 
 server:
   port: 8081
+  tomcat:
+    # Above the in-flight limit, so a submission over it gets 503 busy instead of waiting for a connection.
+    max-connections: 3000
 
 gateway:
   transfers-topic: transfers
@@ -39,12 +42,26 @@ gateway:
   consumer:
     retry-backoff: 500ms
   max-wait: 10s
+  wait-read:
+    # The recorder commits a result about 25 ms after the event wakes the request (median, measured on the server).
+    first-pause: 25ms
+    # Reads at about 25, 75, 175, 375 and 775 ms; a result the recorder has not committed by then is 202, asked again later.
+    max-reads: 5
   retry-after: 1s
   close-lock-timeout: 5s
+  inflight:
+    # An open submission holds about 120 KB of heap (heap dump on the server); 1500 is about 180 MB of the gateway's heap.
+    max-concurrent: 1500
   admission:
     # About three times what 300 TPS keeps in flight (0.1 s each); measured against the server in a trial.
     max-concurrent: 100
     wait: 200ms
+  accept:
+    batch-size: 200
+    # More writers keep the database busy while one commits; as many as connections would undo the batching.
+    writers: 2
+    # The client gives up after 5 s; an answer later than that reaches nobody.
+    answer-timeout: 5s
   warm-up:
     # After a deploy a cold gateway answered 300 TPS with a wave of 503 busy (measured on the server); a warm one did not.
     rounds: 2000

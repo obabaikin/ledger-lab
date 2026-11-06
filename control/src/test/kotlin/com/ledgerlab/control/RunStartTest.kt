@@ -55,7 +55,7 @@ class RunStartTest : IntegrationTest() {
         val missing = start(sessionId, tps = null)
 
         assertThat(tps.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
-        assertThat(tps.body!!["error"]).isEqualTo("tps must be one of [100, 500, 1000]")
+        assertThat(tps.body!!["error"]).isEqualTo("tps must be one of [100, 500, 1000, 2000]")
         assertThat(duration.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         assertThat(duration.body!!["error"]).isEqualTo("durationSeconds must be one of [10, 20, 30]")
         assertThat(missing.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
