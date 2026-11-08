@@ -36,6 +36,9 @@ postgres:
   memory: 912Mi
   # The indexes of a run are written in random order, so they must stay cached.
   sharedBuffers: 384MB
+  # The services' pools take 94 (gateway 40, ledger 2 x 10, control 10, reporting 10, the exporter and the operator);
+  # while the gateway is replaced, its old and new pod hold their pools at once.
+  maxConnections: 150
 
 prometheus:
   image: prom/prometheus:v3.5.0
@@ -78,35 +81,47 @@ services:
   ledger:
     module: ledger-service
     port: 8080
-    replicas: 3
-    # A batch of 100 transfers per consumer, two consumers per pod.
+    # Two: a third added no throughput, the ledger waits on row locks in Postgres, not on its own CPU (about
+    # 120m per pod at 1300 TPS, measured on the server), and its memory is needed while the gateway is replaced.
+    replicas: 2
+    # A batch of 100 transfers per consumer, three consumers per pod.
     memory: 750Mi
   gateway:
     module: gateway
     port: 8081
+    # One: a second on the same node took about a core from the ledger and Postgres and added no throughput
+    # (docs/adr/0020-gateway-deploys-without-downtime.md). A deploy starts the new pod before the old one stops.
     replicas: 1
-    # A heap of about 1 GB holds the 1500 open submissions of the in-flight limit (about 120 KB each, heap dump
-    # on the server) with room to spare.
+    rollingUpdate: true
+    # Longer than a wait for a result (gateway.max-wait), the pause and the drain together.
+    terminationGraceSeconds: 30
+    # The Service stops sending to the old pod before it stops taking requests.
+    preStopSeconds: 5
     memory: 1568Mi
+    # The template sets the heap to the memory less this, fixed from the start: outside the heap the JVM took about
+    # 330 MiB whatever the load (metaspace, JIT code, G1's structures, threads; measured on the server), and a heap
+    # of a share of the memory left 1024Mi pods 25 MiB of it, so the kernel killed them. A heap that grows again
+    # after a quiet hour slowed the first requests (measured on the server).
+    nativeReserve: 400Mi
+    # Replaces the image's options whole, so it repeats what the gateway needs of them. The JIT keeps its code
+    # through a quiet hour as well.
+    jvmOptions: -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps -XX:-UseCodeCacheFlushing -Xlog:gc,gc+cpu:stdout:time,level,tags
     # An OutOfMemoryError leaves its heap dump here; it lives as long as the pod.
     dumps: 2Gi
     env:
-      # Replaces the image's options whole, so it repeats what the gateway needs of them.
-      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=65 -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps
-      # Postgres takes 100 connections, 3 for superusers: gateway 40, ledger 3 x 10, control 10, reporting 10 and
-      # the exporter leave 6 of 97.
       SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "40"
-      # The batch writers take the inserts off the requests; 200 waiting for them fill two batches.
-      GATEWAY_ADMISSION_MAXCONCURRENT: "200"
+      # 200 waiting for the batch writers met 503 busy at 300 TPS on the server; 1000 took 2000 TPS without them.
+      GATEWAY_ADMISSION_MAXCONCURRENT: "1000"
   generator:
     module: generator
     port: 8082
     replicas: 1
-    # The bank's clients, outside the bank's 9 GB. Most of it is the journals on the heap; about 200 MiB stays for
-    # the JVM itself (measured). 768Mi was OOMKilled at minute 56 of a one-hour run (measured on the server).
+    # The bank's clients; the journals of a run stay on the heap until it is reconciled, at most 179 MiB live at
+    # 279,000 entries (measured on the server).
     memory: 1280Mi
-    env:
-      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=65
+    # As the gateway's: about 320 MiB outside the heap (measured), the heap fixed from the start.
+    nativeReserve: 400Mi
+    jvmOptions: -Xlog:gc,gc+cpu:stdout:time,level,tags
   control:
     module: control
     port: 8083

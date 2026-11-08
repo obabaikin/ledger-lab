@@ -1,6 +1,9 @@
 spring:
   application:
     name: gateway
+  lifecycle:
+    # The pod's grace period (30 s) less the pause before the stop (5 s), with room left: the longest wait is 10 s.
+    timeout-per-shutdown-phase: 20s
   threads:
     virtual:
       enabled: true
@@ -28,6 +31,8 @@ spring:
 
 server:
   port: 8081
+  # A deploy stops the old pod after the new one is ready: requests it holds, waits included, are answered first.
+  shutdown: graceful
   tomcat:
     # Above the in-flight limit, so a submission over it gets 503 busy instead of waiting for a connection.
     max-connections: 3000

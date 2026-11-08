@@ -171,16 +171,16 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 ## Deployment
 
 - **Kubernetes:** one Helm chart (`infra/helm/ledger-lab`) runs in k3d on a laptop, on one node the
-  size of the server, and on the server's single-node k3s. The ledger runs three instances; a crashed
-  pod restarts within a second. Every pod of the chart has a memory limit; the bank fits in 9 GB together with k3s and
-  the OS, and the load generator runs beside it.
+  size of the server, and on the server's single-node k3s. The ledger runs two instances and the gateway one;
+  a deploy replaces the gateway without downtime ([ADR 0020](docs/adr/0020-gateway-deploys-without-downtime.md)),
+  the other services stop before their new version starts. A crashed pod restarts within a second. Every pod of the
+  chart has a memory limit; the bank, the load generator, monitoring, k3s and the OS fit in the server's 12 GB together.
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
 - **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR, once;
   a release, a SemVer tag, only adds its name to them, and only a release reaches the server: `deploy.sh v0.4.1`
-  deploys it by hand, names the version the page shows, and refuses while runs are in progress. Each service stops
-  before its new version starts; the gateway warms up while it already takes traffic, and no run starts
-  until it is done.
+  deploys it by hand, names the version the page shows, and refuses while runs are in progress. The gateway
+  warms up while it already takes traffic, and no run starts until it is done.
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
   a host firewall under the provider's, SSH with a key only, services without root or capabilities.
   Only the page is published.
@@ -239,6 +239,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Dashboards | Grafana: latency by segment, node, database | planned |
 | Writes in batches, overload shed at the edge | 1000–1600 TPS on the server without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | next |
 | The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
+| Gateway deploys without downtime | replaced during a 400 TPS run: no transfer lost or duplicated, the run `BALANCED` | next |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
 | Nothing received goes unaccounted | every message a service took is booked or reported | planned |
