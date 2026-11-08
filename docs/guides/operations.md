@@ -44,11 +44,11 @@ infra/server/deploy.sh <release tag>        # cert-manager and the chart, with t
 
 - **Images:** every push to `main` builds the five images in CI and publishes them to GHCR, tagged
   with the commit. Merging deploys nothing.
-- **Releases:** only a release reaches the server, so the page there shows a version without build metadata.
-  A release is a SemVer tag on `main`: a new feature raises MINOR (`v0.5.0`), a fix only PATCH (`v0.4.1`).
-  After the merge, `git tag -a vX.Y.Z <sha>` and `git push origin vX.Y.Z`; the tag rebuilds that commit's
-  images with the version and publishes them under the tag too. A branch goes to the server before its merge
-  as a pre-release on its head, `vX.Y.Z-rc.N`.
+- **Releases:** only a release reaches the server. A release is a SemVer tag on `main`: a new feature raises
+  MINOR (`v0.5.0`), a fix only PATCH (`v0.4.1`). After the merge and its CI run, `git tag -a vX.Y.Z <sha>` and
+  `git push origin vX.Y.Z`; the tag adds its name to the images `main` built from that commit, nothing is
+  rebuilt, so the server runs the images CI tested. The images carry no version: `deploy.sh` passes the tag to
+  the chart, and the page shows it. A commit that is not on `main` has no images and cannot be released.
 - **Deploying** is by hand, `deploy.sh <release tag>`. It refuses a tag that is not on GitHub, and before Helm
   when a tag's image is missing, which is so until the tag's CI run is green. It refuses while runs are in
   progress (`--force` overrides). The first deploy generates the database

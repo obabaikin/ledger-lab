@@ -118,6 +118,8 @@ control:
     operator-name: ""
     operator-address: ""
     contact-email: ""
+    # The deployment names the version it runs (infra/k3d/up.sh, infra/server/deploy.sh); the image carries none.
+    version: dev
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every error handler is added to every operation.

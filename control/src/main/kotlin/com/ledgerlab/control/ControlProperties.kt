@@ -100,5 +100,11 @@ data class ControlProperties(
     )
 
     /** [baseUrl] is the page's address in the mailed links; the operator's details fill the imprint and privacy pages. */
-    data class Site(val baseUrl: String, val operatorName: String, val operatorAddress: String, val contactEmail: String)
+    data class Site(
+        val baseUrl: String,
+        val operatorName: String,
+        val operatorAddress: String,
+        val contactEmail: String,
+        val version: String,
+    )
 }

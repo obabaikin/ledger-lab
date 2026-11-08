@@ -2,7 +2,9 @@ package com.ledgerlab.control
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.test.context.TestPropertySource
 
+@TestPropertySource(properties = ["control.site.version=$DEPLOYED_VERSION"])
 class SiteTest : IntegrationTest() {
 
     @Test
@@ -16,4 +18,13 @@ class SiteTest : IntegrationTest() {
         assertThat(site.containsKey("operator")).isTrue()
         assertThat(site["operator"]).isNull()
     }
+
+    @Test
+    fun `the site api returns the version it was deployed with`() {
+        val site = http.getForEntity("/api/site", Map::class.java).body!!
+
+        assertThat(site["version"]).isEqualTo(DEPLOYED_VERSION)
+    }
 }
+
+private const val DEPLOYED_VERSION = "v9.8.7-rc.6"

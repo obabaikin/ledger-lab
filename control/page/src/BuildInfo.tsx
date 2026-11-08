@@ -1,17 +1,17 @@
 import { Link } from 'react-router'
 import { AUTHOR_NAME, AUTHOR_URL } from './author'
 import { t } from './texts'
-
-declare const __BUILD_VERSION__: string
+import { useSite } from './useSite'
 
 export function BuildInfo() {
+  const site = useSite()
   return (
     <footer className="build">
       by{' '}
       <a href={AUTHOR_URL} target="_blank" rel="noopener">
         {AUTHOR_NAME}
       </a>{' '}
-      · {__BUILD_VERSION__} · <Link to="/privacy">{t.footer.privacy}</Link> ·{' '}
+      · {site && `${site.version} · `}<Link to="/privacy">{t.footer.privacy}</Link> ·{' '}
       <Link to="/impressum">{t.footer.impressum}</Link>
     </footer>
   )

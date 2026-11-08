@@ -4,6 +4,9 @@ image:
   tag: dev
   pullPolicy: IfNotPresent
 
+# Shown on the page; the deploy scripts set it, the image carries none (built once, deployed under any tag).
+version: dev
+
 managementPort: 9000
 chaos: true
 initMemory: 64Mi

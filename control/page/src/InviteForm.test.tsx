@@ -16,6 +16,7 @@ const site = (changes: Partial<SiteView> = {}): SiteView => ({
   retentionDays: 30,
   linksPerDay: 3,
   operator: null,
+  version: 'v0.0.0',
   ...changes,
 })
 
@@ -286,6 +287,13 @@ describe('the link form with the bot check on', () => {
 })
 
 describe('privacy and imprint', () => {
+  it('the footer shows the version from the site API', async () => {
+    fakeControl({ 'GET /api/site': { status: 200, body: site({ version: 'v9.8.7-rc.6' }) } })
+    renderAt('/impressum')
+
+    expect(await screen.findByRole('contentinfo')).toHaveTextContent('· v9.8.7-rc.6 ·')
+  })
+
   it('show the operator the deployment sets', async () => {
     const operator = { name: 'Site Operator', address: 'Example Street 1, 12345 Example City', email: 'contact@example.org' }
     fakeControl({ 'GET /api/site': { status: 200, body: site({ operator }) } })

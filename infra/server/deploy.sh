@@ -108,7 +108,7 @@ helm upgrade --install cert-manager "$CERT_MANAGER_CHART" \
   --namespace cert-manager --create-namespace -f "$HERE/cert-manager-values.yaml" --wait --timeout 5m
 helm upgrade --install ledger-lab "$CHART" --namespace "$NAMESPACE" --create-namespace \
   -f "$HERE/values.yaml" -f "$PASSWORDS" -f "$KEYS" --set image.repository="$IMAGE_REPOSITORY" --set image.tag="$RELEASE" \
-  --set ingress.host="$DOMAIN" --wait --wait-for-jobs --timeout 10m "$@"
+  --set version="$RELEASE" --set ingress.host="$DOMAIN" --wait --wait-for-jobs --timeout 10m "$@"
 kubectl --namespace "$NAMESPACE" get pods
 echo "control: https://$DOMAIN"
 

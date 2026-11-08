@@ -39,8 +39,9 @@ done
 # shellcheck disable=SC2046
 k3d image import --cluster "$CLUSTER" $(for module in $MODULES; do echo "ledger-lab/$module:$TAG"; done)
 
+VERSION="$(git -C "$ROOT" describe --tags --match 'v[0-9]*' --long --always --dirty=+changes)"
 helm upgrade --install ledger-lab "$ROOT/infra/helm/ledger-lab" --namespace "$NAMESPACE" --create-namespace \
-  --set image.tag="$TAG" --wait --timeout 10m "$@"
+  --set image.tag="$TAG" --set version="$VERSION" --wait --timeout 10m "$@"
 
 # k3s installs its ingress controller on its own schedule, after helm already reports the release ready.
 INGRESS_ATTEMPTS="${INGRESS_ATTEMPTS:-90}"
