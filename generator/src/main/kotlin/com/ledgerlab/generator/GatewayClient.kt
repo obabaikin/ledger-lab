@@ -30,6 +30,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.Executors
 import java.util.concurrent.ThreadLocalRandom
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -86,8 +87,11 @@ class GatewayClient(
         .description("2xx answers with a value this client does not know; the status code still decided the outcome, and a statement line is not compared")
         .register(registry)
 
+    // Its default executor is an unbounded pool of platform threads, one per answer being handled: when the bank
+    // answered slowly, hundreds of them outgrew the container's memory outside the heap.
     private val http: HttpClient = HttpClient.newBuilder()
         .connectTimeout(props.connectTimeout)
+        .executor(Executors.newVirtualThreadPerTaskExecutor())
         .build()
 
     // A gateway one version ahead may send a status or reason this client does not know; the code still decides the outcome.

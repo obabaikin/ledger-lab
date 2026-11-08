@@ -47,7 +47,7 @@ class FakeGateway(
     private val tamperStatement: (page: Int, Statement) -> Statement = { _, page -> page },
 ) : AutoCloseable {
     private val objectMapper = jacksonObjectMapper()
-    private val server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
+    private val server = HttpServer.create(InetSocketAddress("localhost", 0), CONNECTION_BACKLOG)
     val attemptsById = ConcurrentHashMap<String, AtomicInteger>()
     val requests = AtomicInteger()
     @Volatile var answersHeld: CountDownLatch? = null
@@ -142,3 +142,6 @@ class FakeGateway(
         }
     }
 }
+
+// A test opens hundreds of connections at once; the system's default queue drops some, and the client gives up on them.
+private const val CONNECTION_BACKLOG = 1_024

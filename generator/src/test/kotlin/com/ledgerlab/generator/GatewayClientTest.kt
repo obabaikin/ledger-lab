@@ -6,6 +6,7 @@ import com.ledgerlab.generator.bank.TransferStatus
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -17,6 +18,9 @@ import java.net.ServerSocket
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 
 class GatewayClientTest {
 
@@ -34,6 +38,35 @@ class GatewayClientTest {
     }
 
     private fun closedPort(): Int = ServerSocket(0).use { it.localPort }
+
+    private fun httpClientPlatformWorkers(): Int =
+        Thread.getAllStackTraces().keys.count { !it.isVirtual && it.name.startsWith("HttpClient-") && it.name.contains("-Worker-") }
+
+    @Test
+    fun `answers to many open submissions arriving at once take no platform thread each`(): Unit = runBlocking {
+        FakeGateway().use { gateway ->
+            val held = CountDownLatch(1)
+            gateway.answersHeld = held
+            val client = client(gateway.url, maxAttempts = 1)
+            val pending = List(OPEN_SUBMISSIONS) { async(Dispatchers.IO) { client.submit(transfer(), wait = null) } }
+            await().atMost(Duration.ofSeconds(30)).until { gateway.requests.get() == OPEN_SUBMISSIONS }
+
+            val peak = AtomicInteger()
+            val watcher = thread {
+                while (!Thread.currentThread().isInterrupted) {
+                    peak.accumulateAndGet(httpClientPlatformWorkers(), ::maxOf)
+                    try { Thread.sleep(2) } catch (_: InterruptedException) { break }
+                }
+            }
+            held.countDown()
+            val results = pending.awaitAll()
+            watcher.interrupt()
+            watcher.join()
+
+            assertThat(results).allSatisfy { assertThat(it.outcome).isEqualTo(SubmissionOutcome.ACKNOWLEDGED) }
+            assertThat(peak.get()).isZero()
+        }
+    }
 
     @Test
     fun `a gateway that cannot be reached on any attempt is a failure`(): Unit = runBlocking {
@@ -153,3 +186,6 @@ class GatewayClientTest {
         }
     }
 }
+
+// As many as the server's slow answers kept open at 1300 TPS, where the generator's container ran out of memory.
+private const val OPEN_SUBMISSIONS = 500
