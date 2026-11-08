@@ -98,17 +98,21 @@ services:
     # The Service stops sending to the old pod before it stops taking requests.
     preStopSeconds: 5
     memory: 1568Mi
-    # The template sets the heap to the memory less this, fixed from the start: outside the heap the JVM took 330 to
-    # 367 MiB whatever the load, more with a larger heap (metaspace, JIT code, G1's structures, threads; measured on
-    # the server), and a heap of a share of the memory left 1024Mi pods 25 MiB of it, so the kernel killed them. A
-    # heap that grows again after a quiet hour slowed the first requests (measured on the server).
-    nativeReserve: 500Mi
+    # The template sets the heap to the memory less this, fixed from the start. Outside the heap the JVM itself took
+    # about 290 MiB at any load (Native Memory Tracking: G1 72, metaspace 81, JIT code up to 69, symbols 30, classes
+    # 25, threads 7), and glibc's malloc took more under load and kept it (measured on the server). A heap of a share
+    # of the memory left 1024Mi pods 25 MiB of it, so the kernel killed them; a heap that grows again after a quiet
+    # hour slowed the first requests.
+    nativeReserve: 550Mi
     # Replaces the image's options whole, so it repeats what the gateway needs of them. The JIT keeps its code
     # through a quiet hour as well.
     jvmOptions: -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps -XX:-UseCodeCacheFlushing -Xlog:gc,gc+cpu:stdout:time,level,tags
     # An OutOfMemoryError leaves its heap dump here; it lives as long as the pod.
     dumps: 2Gi
     env:
+      # glibc keeps an arena per busy thread and gives little back: up to 135 MiB outside the heap with its default,
+      # 71 with two (measured on the server).
+      MALLOC_ARENA_MAX: "2"
       SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "40"
       # 200 waiting for the batch writers met 503 busy at 300 TPS on the server; 1000 took 2000 TPS without them.
       GATEWAY_ADMISSION_MAXCONCURRENT: "1000"
@@ -119,9 +123,12 @@ services:
     # The bank's clients; the journals of a run stay on the heap until it is reconciled, at most 179 MiB live at
     # 279,000 entries (measured on the server).
     memory: 1280Mi
-    # As the gateway's: about 330 MiB outside the heap (measured), the heap fixed from the start.
+    # As the gateway's: about 330 MiB outside the heap (measured), the heap fixed from the start, malloc's arenas
+    # limited the same way.
     nativeReserve: 450Mi
     jvmOptions: -Xlog:gc,gc+cpu:stdout:time,level,tags
+    env:
+      MALLOC_ARENA_MAX: "2"
   control:
     module: control
     port: 8083

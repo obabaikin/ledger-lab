@@ -28,9 +28,10 @@ A test runs two instances on the same containers and checks these.
 - The ledger runs two instances instead of three. A third added no throughput: it used about 120m CPU at
   1300 TPS, the ledger waits on row locks in Postgres. Its memory holds the extra pod, so all memory limits,
   k3s and the OS stay within the server's 12 GB during the swap too.
-- Each JVM's heap is its memory less a fixed reserve, 500 MiB for the gateway and 450 MiB for the generator,
-  fixed from the start. Outside the heap the gateway took 330 to 367 MiB whatever the load, more with a larger
-  heap; a heap set as a share of the memory left a 1024Mi pod 25 MiB of it, and the kernel killed it.
+- Each JVM's heap is its memory less a fixed reserve, 550 MiB for the gateway and 450 MiB for the generator,
+  fixed from the start, and glibc's malloc keeps two arenas. Outside the heap the gateway's JVM took about
+  290 MiB whatever the load; malloc took up to 135 MiB more under load and kept it, 71 with two arenas. A heap
+  set as a share of the memory left a 1024Mi pod 25 MiB of it, and the kernel killed it.
 
 ## Considered: two gateways all the time
 
