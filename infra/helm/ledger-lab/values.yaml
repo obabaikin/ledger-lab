@@ -98,11 +98,11 @@ services:
     # The Service stops sending to the old pod before it stops taking requests.
     preStopSeconds: 5
     memory: 1568Mi
-    # The template sets the heap to the memory less this, fixed from the start: outside the heap the JVM took about
-    # 330 MiB whatever the load (metaspace, JIT code, G1's structures, threads; measured on the server), and a heap
-    # of a share of the memory left 1024Mi pods 25 MiB of it, so the kernel killed them. A heap that grows again
-    # after a quiet hour slowed the first requests (measured on the server).
-    nativeReserve: 400Mi
+    # The template sets the heap to the memory less this, fixed from the start: outside the heap the JVM took 330 to
+    # 367 MiB whatever the load, more with a larger heap (metaspace, JIT code, G1's structures, threads; measured on
+    # the server), and a heap of a share of the memory left 1024Mi pods 25 MiB of it, so the kernel killed them. A
+    # heap that grows again after a quiet hour slowed the first requests (measured on the server).
+    nativeReserve: 500Mi
     # Replaces the image's options whole, so it repeats what the gateway needs of them. The JIT keeps its code
     # through a quiet hour as well.
     jvmOptions: -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps -XX:-UseCodeCacheFlushing -Xlog:gc,gc+cpu:stdout:time,level,tags
@@ -119,8 +119,8 @@ services:
     # The bank's clients; the journals of a run stay on the heap until it is reconciled, at most 179 MiB live at
     # 279,000 entries (measured on the server).
     memory: 1280Mi
-    # As the gateway's: about 320 MiB outside the heap (measured), the heap fixed from the start.
-    nativeReserve: 400Mi
+    # As the gateway's: about 330 MiB outside the heap (measured), the heap fixed from the start.
+    nativeReserve: 450Mi
     jvmOptions: -Xlog:gc,gc+cpu:stdout:time,level,tags
   control:
     module: control

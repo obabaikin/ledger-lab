@@ -23,7 +23,7 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 - **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether a run may
   start is control's question, answered by the partitions the live instances hold.
 - **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap; the gateway's and the generator's heap is their
-  memory less 400 MiB, fixed from the start, as outside the heap a JVM took about 330 MiB: the gateway's heap holds
+  memory less a fixed reserve (500 and 450 MiB), set from the start, as outside the heap a JVM took 330 to 367 MiB: the gateway's heap holds
   the open submissions, the generator's the journals. An OutOfMemoryError of the
   gateway leaves a heap dump in its pod's `/dumps`.
 - **A crashed pod restarts within a second**: the cluster caps the kubelet's crash-loop backoff at 1 s
