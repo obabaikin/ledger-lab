@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.builder.SpringApplicationBuilder
+import org.springframework.context.ApplicationListener
 import org.springframework.context.ConfigurableApplicationContext
+import org.springframework.context.event.ContextClosedEvent
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.JdbcTemplate
@@ -45,12 +47,14 @@ class TwoInstancesTest : IntegrationTest() {
     @Autowired lateinit var waiters: ResultWaiters
 
     private lateinit var other: ConfigurableApplicationContext
-    private val otherUrl get() = "http://localhost:${other.environment.getProperty("local.server.port")}"
+    private val otherUrl get() = urlOf(other)
 
-    @BeforeAll
-    fun startTheOtherInstance() {
-        other = SpringApplicationBuilder(GatewayApplication::class.java)
+    private fun urlOf(instance: ConfigurableApplicationContext) = "http://localhost:${instance.environment.getProperty("local.server.port")}"
+
+    private fun startInstance(vararg listeners: ApplicationListener<*>): ConfigurableApplicationContext =
+        SpringApplicationBuilder(GatewayApplication::class.java)
             .profiles("test")
+            .listeners(*listeners)
             // Arguments, not default properties: those rank below application.yaml.
             .run(
                 "--server.port=0",
@@ -60,9 +64,17 @@ class TwoInstancesTest : IntegrationTest() {
                 "--spring.kafka.bootstrap-servers=${broker.bootstrapServers}",
                 "--spring.kafka.listener.concurrency=$RECORDERS_PER_INSTANCE",
             )
+
+    private fun awaitEachOwnsItsShare() {
         await().atMost(Duration.ofSeconds(60)).until {
             listOf(registry, other.getBean(KafkaListenerEndpointRegistry::class.java)).all { it.ownsItsShare() }
         }
+    }
+
+    @BeforeAll
+    fun startTheOtherInstance() {
+        other = startInstance()
+        awaitEachOwnsItsShare()
     }
 
     @AfterAll
@@ -138,6 +150,37 @@ class TwoInstancesTest : IntegrationTest() {
         }
     }
 
+    @Test
+    fun `a request waiting on an instance that is stopping is still woken by its result`() {
+        val closing = CountDownLatch(1)
+        val stopping = startInstance(ApplicationListener<ContextClosedEvent> { closing.countDown() })
+        val stoppingWaiters = stopping.getBean(ResultWaiters::class.java)
+        await().atMost(Duration.ofSeconds(60)).until {
+            stopping.getBean(KafkaListenerEndpointRegistry::class.java).allListenerContainers
+                .single { it.groupId != RECORDER_GROUP }.assignedPartitions.isNullOrEmpty().not()
+        }
+        val runId = UUID.randomUUID()
+        val transferId = UUID.randomUUID()
+        Executors.newFixedThreadPool(2).use { pool ->
+            val pending = pool.submit<Pair<ResponseEntity<Map<*, *>>, Long>> {
+                http.postForEntity("${urlOf(stopping)}/v1/transfers?wait=PT5S", body(transferId, runId), Map::class.java) to System.nanoTime()
+            }
+            await().atMost(Duration.ofSeconds(10)).until { stoppingWaiters.size() == 1 }
+            pool.submit { stopping.close() }
+            closing.await()
+            // Long enough for listeners that stop first to be gone, short of the drain it is waiting in.
+            Thread.sleep(SHUTDOWN_UNDER_WAY.toMillis())
+            publishResult(runId, transferId, TransferOutcome.POSTED)
+            val published = System.nanoTime()
+
+            val (answer, answeredAt) = pending.get()
+            assertThat(answer.statusCode).isEqualTo(HttpStatus.OK)
+            assertThat(answer.body!!["status"]).isEqualTo(TransferStatus.POSTED.name)
+            assertThat(Duration.ofNanos(answeredAt - published)).isLessThan(props.maxWait.dividedBy(2))
+        }
+        awaitEachOwnsItsShare()
+    }
+
     private fun KafkaListenerEndpointRegistry.ownsItsShare(): Boolean {
         val containers = allListenerContainers
         val recorder = containers.single { it.groupId == RECORDER_GROUP }
@@ -150,6 +193,7 @@ class TwoInstancesTest : IntegrationTest() {
         const val RESULT_PARTITIONS = 2
         const val TRANSFERS = 20
         const val PUBLISHED = 400
+        val SHUTDOWN_UNDER_WAY: Duration = Duration.ofSeconds(1)
     }
 }
 

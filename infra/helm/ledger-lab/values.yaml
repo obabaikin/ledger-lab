@@ -36,7 +36,7 @@ postgres:
   memory: 912Mi
   # The indexes of a run are written in random order, so they must stay cached.
   sharedBuffers: 384MB
-  # The services' pools take 94 (gateway 40, ledger 2 x 10, control 10, reporting 10, the exporter and the operator);
+  # The services' pools take 84 (gateway 40, ledger 2 x 10, control 10, reporting 10, the exporter and the operator);
   # while the gateway is replaced, its old and new pod hold their pools at once.
   maxConnections: 150
 
@@ -93,8 +93,9 @@ services:
     # (docs/adr/0020-gateway-deploys-without-downtime.md). A deploy starts the new pod before the old one stops.
     replicas: 1
     rollingUpdate: true
-    # Longer than a wait for a result (gateway.max-wait), the pause and the drain together.
-    terminationGraceSeconds: 30
+    # The pause (5 s), the web server's drain (at most 15 s; the longest wait is 10 s) and the Kafka listeners' stop
+    # (at most 10 s), with room left.
+    terminationGraceSeconds: 40
     # The Service stops sending to the old pod before it stops taking requests.
     preStopSeconds: 5
     memory: 1568Mi

@@ -18,7 +18,7 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 - **The ledger runs two instances** with Kafka's static membership: an instance that restarts under
   its name gets its own partitions back without a rebalance of the others.
 - **The gateway is replaced without downtime**: the new pod becomes ready before the old one stops; the old one
-  answers what it holds within 30 s. Postgres takes 150 connections so both pools fit during the swap
+  answers what it holds within 40 s. Postgres takes 150 connections so both pools fit during the swap
   ([ADR 0020](../adr/0020-gateway-deploys-without-downtime.md)).
 - **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether a run may
   start is control's question, answered by the partitions the live instances hold.

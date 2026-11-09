@@ -14,7 +14,8 @@ The ledger, reporting and the generator change their logic in the next phase and
 **The new pod takes requests before the old one stops.** The gateway rolls with one extra pod and none
 unavailable: the new pod starts and becomes ready; only then the old one is told to stop. It waits 5 s so the
 Service stops sending it requests, answers what it holds, a wait for a result included (at most 10 s), and is
-gone within 30 s. The new pod warms up while it already takes requests, as after any start.
+gone within 40 s. Its Kafka listeners stop only after that, so a waiting request is still woken and results are
+still recorded. The new pod warms up while it already takes requests, as after any start.
 
 **Two gateways at once are safe.** For the seconds of the swap two instances share one database and one
 broker, and what they share was built for it (ADR 0006): a key sent to both is one row; each unpublished row

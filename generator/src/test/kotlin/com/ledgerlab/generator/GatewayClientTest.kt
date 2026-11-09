@@ -51,7 +51,9 @@ class GatewayClientTest {
             val pending = List(OPEN_SUBMISSIONS) { async(Dispatchers.IO) { client.submit(transfer(), wait = null) } }
             await().atMost(Duration.ofSeconds(30)).until { gateway.requests.get() == OPEN_SUBMISSIONS }
 
-            val peak = AtomicInteger()
+            // Other clients in this JVM keep idle workers of the same name for a minute; only new ones count.
+            val before = httpClientPlatformWorkers()
+            val peak = AtomicInteger(before)
             val watcher = thread {
                 while (!Thread.currentThread().isInterrupted) {
                     peak.accumulateAndGet(httpClientPlatformWorkers(), ::maxOf)
@@ -64,7 +66,7 @@ class GatewayClientTest {
             watcher.join()
 
             assertThat(results).allSatisfy { assertThat(it.outcome).isEqualTo(SubmissionOutcome.ACKNOWLEDGED) }
-            assertThat(peak.get()).isZero()
+            assertThat(peak.get() - before).isZero()
         }
     }
 
