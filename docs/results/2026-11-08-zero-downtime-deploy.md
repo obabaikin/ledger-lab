@@ -13,7 +13,7 @@ The decision is in [ADR 0020](../adr/0020-gateway-deploys-without-downtime.md); 
 | Steps of 30 s without a refusal | up to 1300 TPS | up to 2000 TPS in the last staircase; earlier staircases of the same setup refused at 1200–1300 or from 1800 |
 | Client p99, 1000–2000 TPS | 0.85–11.8 s | 0.32–2.1 s in the last staircase |
 | Memory left under load | gateway 33–55 MiB of its limit, twice killed at 1024Mi; generator killed at 1300–1600 TPS | gateway 199 MiB, generator 144 MiB |
-| Reconciliation | every run `BALANCED` | every run `BALANCED` |
+| Reconciliation | every run `BALANCED` | every run of 30 s `BALANCED`; the 5-minute runs' was not computed |
 
 The node's CPU stayed the limit: 4.1–5.3 of 6 cores busy before, 4.4–5.2 now.
 
@@ -74,9 +74,18 @@ generator.
 | 1900 | 0 / 0 | 481 / 330 | 11378 / 1615 |
 | 2000 | 1225 / 0 | 1180 / 281 | 10888 / 951 |
 
-**A cold start is not covered.** After about 10 minutes idle, the first run at 2000 TPS met 5,667 refusals. The
-gateway's outbox took up to 1 s and the ledger's posting up to 3.4 s in its first 25 s. The runs after it met none.
-The ledger's JVM has no fixed heap yet; warming the whole path is next.
+## Runs of 5 minutes
+
+| TPS | 503 | Failed (the client gave up) | p50 ms | p99 ms | Ledger: Kafka → posted, p99 |
+|---|---|---|---|---|---|
+| 1000 | 0 | 0 | 203 | 1,156 | 0.6 s |
+| 1300 | 0 | 0 | 194 | 888 | 0.4 s |
+| 1400 | 435 | 0 | 270 | 1,338 | 0.7 s |
+| 1500 | 669 | 0 | 247 | 1,190 | 0.7 s |
+| 1700 | 14,941 | 546 | 481 | 20,922 | 20 s |
+| 1800 | 6,856 | 173 | 740 | 20,720 | 20 s |
+| 1900 | 10,240 | 277 | 805 | 35,658 | 35 s |
+| 2000 | 12,141 | 427 | 889 | 49,587 | 49 s |
 
 ## Considered: two gateways all the time
 
@@ -87,8 +96,9 @@ slowed 5–20 times. It waits for a second node.
 ## Method
 
 - One VPS, 6 vCPU, 12 GB, k3s; the bank, the load generator and monitoring on it.
-- A staircase: one generator run per step, 30 s each, 1000 to 2000 TPS in steps of 100, in two halves (the generator
-  keeps at most 300,000 journal entries); after about 12 minutes of warm-up; 100 accounts per run.
+- A staircase: one generator run per step, 30 s each, 1000 to 2000 TPS in steps of 100, after about 12 minutes of
+  warm-up; 100 accounts per run.
+- Runs of 5 minutes: one generator run per rate, each on its own, after the same warm-up.
 - The deploy: `kubectl rollout restart` of the gateway 10 s into the run.
 - Stages from the timestamps in the database; CPU from `kubectl top` and node-exporter; container memory from cgroup;
   threads from `/proc`; the JVM's memory from Native Memory Tracking.
