@@ -4,10 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ledger Lab</title>
+    <meta name="description" content="Ledger Lab by Oleksii Babaikin: an event-driven double-entry ledger under load, with chaos testing and three-way reconciliation." />
+    <meta property="og:title" content="Ledger Lab" />
+    <meta property="og:description" content="An event-driven double-entry ledger under load, with chaos testing and three-way reconciliation. Built by Oleksii Babaikin." />
+    <meta property="og:type" content="website" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Ledger Lab",
+        "description": "An event-driven double-entry ledger under load, with chaos testing and three-way reconciliation.",
+        "author": {
+          "@type": "Person",
+          "name": "Oleksii Babaikin",
+          "sameAs": ["https://github.com/obabaikin", "https://www.linkedin.com/in/oleksii-babaikin"]
+        }
+      }
+    </script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6fde'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h9' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <h1>Ledger Lab</h1>
+      <p>
+        An event-driven double-entry ledger under load, with chaos testing and three-way reconciliation.
+        Pick a transaction rate, kill the ledger mid-run and watch the books still balance.
+        Built by Oleksii Babaikin. Source code:
+        <a href="https://github.com/obabaikin/ledger-lab">github.com/obabaikin/ledger-lab</a>.
+      </p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

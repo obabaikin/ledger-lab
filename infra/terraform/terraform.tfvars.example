@@ -5,3 +5,5 @@ domain      = "example.org"
 mailjet_dkim_value       = "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQ..."
 mailjet_ownership_record = { name = "mailjet._0123abcd", value = "0123abcd4567ef890123abcd4567ef89" }
 dmarc_report_address     = ""
+# From Google Search Console, the domain's verification by a DNS TXT record, without "google-site-verification=".
+google_site_verification = "AbCdEf0123456789AbCdEf0123456789AbCdEf01234"

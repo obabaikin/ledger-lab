@@ -94,3 +94,12 @@ resource "cloudflare_dns_record" "dmarc" {
   content = "\"v=DMARC1; p=quarantine${var.dmarc_report_address == "" ? "" : "; rua=mailto:${var.dmarc_report_address}"}\""
   ttl     = local.cloudflare_auto_ttl
 }
+
+# Google Search Console reads it to prove the domain is ours; the page's robots.txt and sitemap.xml come from control.
+resource "cloudflare_dns_record" "google_site_verification" {
+  zone_id = data.cloudflare_zone.domain.zone_id
+  name    = var.domain
+  type    = "TXT"
+  content = "\"google-site-verification=${var.google_site_verification}\""
+  ttl     = local.cloudflare_auto_ttl
+}

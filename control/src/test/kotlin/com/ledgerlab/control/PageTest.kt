@@ -19,7 +19,7 @@ class PageTest : IntegrationTest() {
 
         assertThat(root.statusCode).isEqualTo(HttpStatus.OK)
         assertThat(root.headers.contentType?.isCompatibleWith(MediaType.TEXT_HTML)).isTrue()
-        assertThat(root.body).contains("<div id=\"root\"></div>")
+        assertThat(root.body).contains("<div id=\"root\">")
         assertThat(session.statusCode).isEqualTo(HttpStatus.OK)
         assertThat(session.body).isEqualTo(root.body)
     }
