@@ -8,6 +8,7 @@ A deploy stopped every service before its new version started: for up to a minut
 transfer. The bank is meant to run around the clock, and deploys are its most frequent planned interruption.
 The gateway goes first: its API to the clients is stable, so a new version is the same contract on new code.
 The ledger, reporting and the generator change their logic in the next phase and follow then.
+The measurements are in [the results](../results/2026-11-08-zero-downtime-deploy.md).
 
 ## Decision
 
