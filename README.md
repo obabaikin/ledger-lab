@@ -47,7 +47,7 @@ flowchart LR
     control -->|start, stop, client reconciliation| generator
     generator -->|transfers, statement| gateway
     gateway -->|outbox| transfers[[Kafka: transfers]]
-    transfers --> ledger["ledger × 3"]
+    transfers --> ledger["ledger × 2"]
     ledger -->|outbox| results[[Kafka: transfer-results]]
     results --> gateway
     transfers --> reporting
@@ -77,7 +77,7 @@ books: debits against credits and the total of all accounts before and after.
 ### One hour on the server
 
 A trial run on the server: 300 transfers per second for one hour, on 6 vCPU with the bank capped at
-8 GB RAM and the load generator beside it. All three ledger instances were crashed twice. Of 1,080,000
+8 GB RAM and the load generator beside it. The ledger ran three instances then; each was crashed twice. Of 1,080,000
 transfers sent, the gateway accepted 1,079,295 and the ledger booked 1,068,504 and rejected 10,791 by
 its rules. The verdict is `BALANCED`: none lost or doubled, debits equal credits, and the total of all
 accounts did not change.
@@ -219,7 +219,8 @@ What is deliberately left out, and what production would add:
   registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
 - **One node, no failover.** The server is a single k3s node; if it goes down, so does the system.
 - **No continuous deployment.** One server with runs in progress: a deploy is chosen by hand and
-  waits for runs to end. Production would deploy on merge with rolling updates and several instances.
+  waits for runs to end. The gateway is replaced without downtime; the other services stop for the deploy.
+  Production would deploy on merge, roll every service and run several instances.
 - **No database backups.** Runs are disposable and deleted after 24 hours; invites are re-issued.
 - **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
   the status. Production would add signed webhooks with retried delivery.
