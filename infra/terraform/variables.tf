@@ -27,6 +27,11 @@ variable "mailjet_ownership_record" {
   })
 }
 
+variable "google_site_verification" {
+  description = "The code Google Search Console gives to prove the domain is ours, without the \"google-site-verification=\" prefix."
+  type        = string
+}
+
 variable "dmarc_report_address" {
   description = "Where receivers send DMARC reports; empty for none."
   type        = string
