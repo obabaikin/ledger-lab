@@ -6,7 +6,7 @@ For the services on the host with Docker Compose, see the [README](../../README.
 ## Running in local Kubernetes
 
 The same system on k3s in Docker ([k3d](https://k3d.io)), on one node the size of the target server
-(12 GB: the bank in 9 GB, the generator beside it). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
+(12 GB: the bank, the generator, monitoring, k3s and the OS fit in it together). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
 
 ```bash
 infra/k3d/up.sh     # cluster, the five images, the chart (infra/helm/ledger-lab); safe to run again
@@ -15,12 +15,17 @@ infra/k3d/down.sh   # deletes the cluster with its volumes
 
 Control answers on `localhost:8083` (an invite is created as below); nothing else is exposed.
 
-- **The ledger runs three instances** with Kafka's static membership: an instance that restarts under
+- **The ledger runs two instances** with Kafka's static membership: an instance that restarts under
   its name gets its own partitions back without a rebalance of the others.
+- **The gateway is replaced without downtime**: the new pod becomes ready before the old one stops; the old one
+  answers what it holds within 40 s. Postgres takes 150 connections so both pools fit during the swap
+  ([ADR 0020](../adr/0020-gateway-deploys-without-downtime.md)).
 - **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether a run may
   start is control's question, answered by the partitions the live instances hold.
-- **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap, the gateway and the generator about two
-  thirds: the gateway's heap holds the open submissions, the generator's the journals. An OutOfMemoryError of the
+- **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap; the gateway's and the generator's heap is their
+  memory less a fixed reserve (550 and 450 MiB), set from the start, and malloc keeps two arenas, as outside the heap
+  a JVM took about 290 MiB and malloc up to 135 MiB more under load: the gateway's heap holds
+  the open submissions, the generator's the journals. An OutOfMemoryError of the
   gateway leaves a heap dump in its pod's `/dumps`.
 - **A crashed pod restarts within a second**: the cluster caps the kubelet's crash-loop backoff at 1 s
   (`infra/k3d/kubelet-crash-loop-backoff.yaml`), otherwise a second crash in a row waits 10 s, then twice as long.
@@ -28,7 +33,7 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 
 ## Running on a server
 
-One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the bank fits in 9 GB, the generator beside it.
+One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the bank, the generator, monitoring, k3s and the OS fit in its 12 GB together.
 The server is ordered by hand, and Terraform does not manage it: there is one server, and a
 configuration that can buy one should not exist. Terraform (`infra/terraform`) only reads it and
 manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS: the A record and the mail
@@ -44,11 +49,11 @@ infra/server/deploy.sh <release tag>        # cert-manager and the chart, with t
 
 - **Images:** every push to `main` builds the five images in CI and publishes them to GHCR, tagged
   with the commit. Merging deploys nothing.
-- **Releases:** only a release reaches the server, so the page there shows a version without build metadata.
-  A release is a SemVer tag on `main`: a new feature raises MINOR (`v0.5.0`), a fix only PATCH (`v0.4.1`).
-  After the merge, `git tag -a vX.Y.Z <sha>` and `git push origin vX.Y.Z`; the tag rebuilds that commit's
-  images with the version and publishes them under the tag too. A branch goes to the server before its merge
-  as a pre-release on its head, `vX.Y.Z-rc.N`.
+- **Releases:** only a release reaches the server. A release is a SemVer tag on `main`: a new feature raises
+  MINOR (`v0.5.0`), a fix only PATCH (`v0.4.1`). After the merge and its CI run, `git tag -a vX.Y.Z <sha>` and
+  `git push origin vX.Y.Z`; the tag adds its name to the images `main` built from that commit, nothing is
+  rebuilt, so the server runs the images CI tested. The images carry no version: `deploy.sh` passes the tag to
+  the chart, and the page shows it. A commit that is not on `main` has no images and cannot be released.
 - **Deploying** is by hand, `deploy.sh <release tag>`. It refuses a tag that is not on GitHub, and before Helm
   when a tag's image is missing, which is so until the tag's CI run is green. It refuses while runs are in
   progress (`--force` overrides). The first deploy generates the database

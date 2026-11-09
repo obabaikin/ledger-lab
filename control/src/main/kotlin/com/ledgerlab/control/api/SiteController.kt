@@ -22,6 +22,8 @@ data class SiteView(
     val linksPerDay: Int,
     @field:Schema(description = "null where the deployment has not set them.")
     val operator: Operator?,
+    @field:Schema(description = "The version the site was deployed with.")
+    val version: String,
 )
 
 @RestController
@@ -40,6 +42,7 @@ class SiteController(private val props: ControlProperties) {
             linksPerDay = email.linksPerAddress,
             operator = Operator(site.operatorName, site.operatorAddress, site.contactEmail)
                 .takeIf { listOf(it.name, it.address, it.email).all(String::isNotEmpty) },
+            version = site.version,
         )
     }
 }

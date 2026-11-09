@@ -27,8 +27,11 @@ spec:
   serviceName: {{ $name }}
   # Instances start and stop together; each one's partitions wait for it under its name (static membership).
   podManagementPolicy: Parallel
+  {{- else if $service.rollingUpdate }}
+  # The new pod takes requests once it is ready; only then the old one stops.
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
   {{- else }}
-  # The old pod goes before the new one starts: two at once would not fit in the bank's 9 GB.
+  # The old pod goes before the new one starts: a second pod of every service would not fit in the server's 12 GB.
   strategy: {type: Recreate}
   {{- end }}
   replicas: {{ $service.replicas }}
@@ -45,6 +48,9 @@ spec:
     spec:
       # The services never call the Kubernetes API.
       automountServiceAccountToken: false
+      {{- with $service.terminationGraceSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       securityContext:
         seccompProfile: {type: RuntimeDefault}
       initContainers:
@@ -109,6 +115,7 @@ spec:
             - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
             - {name: CONTROL_RUNS_MAXTOTALTPS, value: {{ $root.Values.runs.maxTotalTps | quote }}}
+            - {name: CONTROL_SITE_VERSION, value: {{ $root.Values.version | quote }}}
             {{- with $root.Values.ingress.host }}
             - {name: CONTROL_SITE_BASEURL, value: "https://{{ . }}"}
             {{- end }}
@@ -130,14 +137,33 @@ spec:
             {{- with $root.Values.runs.defaultTps }}
             - {name: CONTROL_RUNS_DEFAULTTPS, value: {{ . | quote }}}
             {{- end }}
+            {{- with $root.Values.runs.accountCount }}
+            - {name: CONTROL_RUNS_ACCOUNTS_COUNT, value: {{ . | quote }}}
+            {{- end }}
             {{- range $i := until (int $root.Values.services.ledger.replicas) }}
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_NAME, value: "ledger-{{ $i }}"}
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_URL, value: "http://ledger-{{ $i }}.ledger:{{ $root.Values.managementPort }}"}
             {{- end }}
             {{- end }}
+            {{- with $service.nativeReserve }}
+            {{- if not (and (hasSuffix "Mi" $service.memory) (hasSuffix "Mi" .)) }}
+            {{- fail (printf "services.%s.memory and nativeReserve must be in Mi" $name) }}
+            {{- end }}
+            {{- $heap := sub (trimSuffix "Mi" $service.memory | int) (trimSuffix "Mi" . | int) }}
+            {{- if le $heap 0 }}
+            {{- fail (printf "services.%s.nativeReserve leaves no heap" $name) }}
+            {{- end }}
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xms{{ $heap }}m -Xmx{{ $heap }}m {{ $service.jvmOptions }}"
+            {{- end }}
             {{- range $key, $value := $service.env }}
             - {name: {{ $key }}, value: {{ $value | quote }}}
             {{- end }}
+          {{- with $service.preStopSeconds }}
+          lifecycle:
+            preStop:
+              sleep: {seconds: {{ . }}}
+          {{- end }}
           ports:
             - {name: http, containerPort: {{ $service.port }}}
             - {name: management, containerPort: {{ $root.Values.managementPort }}}

@@ -748,9 +748,13 @@
           "turnstileSiteKey" : {
             "description" : "The Turnstile widget's site key; null where the check is off.",
             "type" : [ "string", "null" ]
+          },
+          "version" : {
+            "description" : "The version the site was deployed with.",
+            "type" : "string"
           }
         },
-        "required" : [ "linkDays", "linksPerDay", "operator", "retentionDays", "turnstileSiteKey" ],
+        "required" : [ "linkDays", "linksPerDay", "operator", "retentionDays", "turnstileSiteKey", "version" ],
         "type" : "object"
       },
       "StartRunRequest" : {

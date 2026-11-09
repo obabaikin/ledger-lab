@@ -1,6 +1,10 @@
 spring:
   application:
     name: gateway
+  lifecycle:
+    # Per phase of the stop: the web server's drain (the longest wait is 10 s), then the Kafka listeners. With the pause
+    # before the stop they fit the pod's grace period (infra/helm/ledger-lab/values.yaml).
+    timeout-per-shutdown-phase: 15s
   threads:
     virtual:
       enabled: true
@@ -28,6 +32,8 @@ spring:
 
 server:
   port: 8081
+  # A deploy stops the old pod after the new one is ready: requests it holds, waits included, are answered first.
+  shutdown: graceful
   tomcat:
     # Above the in-flight limit, so a submission over it gets 503 busy instead of waiting for a connection.
     max-connections: 3000

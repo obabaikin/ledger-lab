@@ -47,7 +47,7 @@ flowchart LR
     control -->|start, stop, client reconciliation| generator
     generator -->|transfers, statement| gateway
     gateway -->|outbox| transfers[[Kafka: transfers]]
-    transfers --> ledger["ledger × 3"]
+    transfers --> ledger["ledger × 2"]
     ledger -->|outbox| results[[Kafka: transfer-results]]
     results --> gateway
     transfers --> reporting
@@ -77,7 +77,7 @@ books: debits against credits and the total of all accounts before and after.
 ### One hour on the server
 
 A trial run on the server: 300 transfers per second for one hour, on 6 vCPU with the bank capped at
-8 GB RAM and the load generator beside it. All three ledger instances were crashed twice. Of 1,080,000
+8 GB RAM and the load generator beside it. The ledger ran three instances then; each was crashed twice. Of 1,080,000
 transfers sent, the gateway accepted 1,079,295 and the ledger booked 1,068,504 and rejected 10,791 by
 its rules. The verdict is `BALANCED`: none lost or doubled, debits equal credits, and the total of all
 accounts did not change.
@@ -171,16 +171,16 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
 ## Deployment
 
 - **Kubernetes:** one Helm chart (`infra/helm/ledger-lab`) runs in k3d on a laptop, on one node the
-  size of the server, and on the server's single-node k3s. The ledger runs three instances; a crashed
-  pod restarts within a second. Every pod of the chart has a memory limit; the bank fits in 9 GB together with k3s and
-  the OS, and the load generator runs beside it.
+  size of the server, and on the server's single-node k3s. The ledger runs two instances and the gateway one;
+  a deploy replaces the gateway without downtime ([ADR 0020](docs/adr/0020-gateway-deploys-without-downtime.md)),
+  the other services stop before their new version starts. A crashed pod restarts within a second. Every pod of the
+  chart has a memory limit; the bank, the load generator, monitoring, k3s and the OS fit in the server's 12 GB together.
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
-- **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR;
-  only a release, a SemVer tag, reaches the server: `deploy.sh v0.4.1` deploys it by hand and refuses while
-  runs are in progress. Each service stops
-  before its new version starts; the gateway warms up while it already takes traffic, and no run starts
-  until it is done.
+- **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR, once;
+  a release, a SemVer tag, only adds its name to them, and only a release reaches the server: `deploy.sh v0.4.1`
+  deploys it by hand, names the version the page shows, and refuses while runs are in progress. The gateway
+  warms up while it already takes traffic, and no run starts until it is done.
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
   a host firewall under the provider's, SSH with a key only, services without root or capabilities.
   Only the page is published.
@@ -219,7 +219,8 @@ What is deliberately left out, and what production would add:
   registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
 - **One node, no failover.** The server is a single k3s node; if it goes down, so does the system.
 - **No continuous deployment.** One server with runs in progress: a deploy is chosen by hand and
-  waits for runs to end. Production would deploy on merge with rolling updates and several instances.
+  waits for runs to end. The gateway is replaced without downtime; the other services stop for the deploy.
+  Production would deploy on merge, roll every service and run several instances.
 - **No database backups.** Runs are disposable and deleted after 24 hours; invites are re-issued.
 - **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
   the status. Production would add signed webhooks with retried delivery.
@@ -239,6 +240,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Dashboards | Grafana: latency by segment, node, database | planned |
 | Writes in batches, overload shed at the edge | 1000–1600 TPS on the server without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | next |
 | The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
+| Gateway deploys without downtime | replaced during a 400 TPS run: no transfer lost or duplicated, the run `BALANCED` | done |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
 | Nothing received goes unaccounted | every message a service took is booked or reported | planned |
