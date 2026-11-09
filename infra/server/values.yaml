@@ -19,6 +19,8 @@ runs:
   maxTotalTps: 2000
   tpsOptions: [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000]
   defaultTps: 100
+  # The number of accounts did not change what the bank takes, from 10,000 to 1,000,000 (measured on the server).
+  accountCount: 1000
 
 # A restarted gateway refused nothing from 5,000 warm-up rounds on and refused at 4,000 (measured on the server,
 # docs/results/2026-10-23-server-baseline.md); one step of 1,000 above that.

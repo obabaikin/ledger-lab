@@ -160,3 +160,5 @@ runs:
   # Empty: control's own options and default (control/src/main/resources/application.yaml).
   tpsOptions: []
   defaultTps: null
+  # Accounts a run opens; empty: control's own (100).
+  accountCount: null
