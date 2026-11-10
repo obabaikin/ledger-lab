@@ -241,7 +241,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
 | Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS in October ([results](docs/results/2026-10-23-server-baseline.md)), about 1600 in steps of 30 s with batched writes ([optimizations](docs/results/2026-11-06-optimizations.md)); runs of 5 minutes by day already refuse at 1300 ([comparison](docs/results/2026-11-10-kotlin-vs-java.md)) | done |
 | Access on request | a visitor enters an email and receives an invite link | done |
-| A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |
+| A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | next |
 | Dashboards | Grafana: latency by segment, node, database | planned |
 | Writes in batches, overload shed at the edge | 1000–1600 TPS on the server in steps of 30 s without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | done |
 | The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
