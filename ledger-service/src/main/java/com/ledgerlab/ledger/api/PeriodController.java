@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class PeriodController {
 
     public static final String STATEMENT_TIMEOUT = "database statement timeout";
-    public static final String UNKNOWN_PERIOD = "unknown period";
+    public static final String UNKNOWN_PERIOD = "unknown-period";
 
     private static final Logger log = LoggerFactory.getLogger(PeriodController.class);
 

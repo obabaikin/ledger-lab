@@ -52,16 +52,24 @@ public class PartitionRepository {
             .toList();
     }
 
-    public void create(PartitionedTable table, Period period) {
+    /**
+     * Both take the strongest lock on the table: they wait for every transaction that uses it, and all that come after
+     * wait behind them. So they give up after the timeout, and the next maintenance tries again.
+     */
+    public void create(PartitionedTable table, Period period, Duration lockTimeout) {
+        limitLockWait(lockTimeout);
         jdbc.sql("CREATE TABLE IF NOT EXISTS %s PARTITION OF %s FOR VALUES FROM ('%s') TO ('%s')"
             .formatted(name(table, period.start()), table.tableName(), period.start(), period.end()))
             .update();
     }
 
-    /** Dropping waits for every transaction that uses the table and holds up all that come after it: it gives up instead. */
     public void drop(PartitionedTable table, Instant periodStart, Duration lockTimeout) {
-        jdbc.sql("SET LOCAL lock_timeout = '" + lockTimeout.toMillis() + "ms'").update();
+        limitLockWait(lockTimeout);
         jdbc.sql("DROP TABLE IF EXISTS " + name(table, periodStart)).update();
+    }
+
+    private void limitLockWait(Duration lockTimeout) {
+        jdbc.sql("SET LOCAL lock_timeout = '" + lockTimeout.toMillis() + "ms'").update();
     }
 
     public long rowsOutsidePartitions(PartitionedTable table) {

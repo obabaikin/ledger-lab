@@ -52,7 +52,8 @@ ledger:
     retention: 4h
     partitions-ahead: 48h
     maintenance-interval: 1m
-    drop-lock-timeout: 2s
+    # Creating or dropping a partition holds up every booking while it waits for the table.
+    lock-timeout: 2s
     snapshot-retention: 48h
   pool:
     opening-balance-cents: 10000000000

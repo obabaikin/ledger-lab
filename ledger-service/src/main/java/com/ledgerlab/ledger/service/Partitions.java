@@ -104,7 +104,7 @@ public class Partitions implements InitializingBean {
             if (!existing.contains(period.start())) {
                 var missing = period;
                 // Each in its own transaction: one that cannot be created leaves the others in place.
-                attempt("create", table, missing.start(), () -> partitions.create(table, missing));
+                attempt("create", table, missing.start(), () -> partitions.create(table, missing, props.lockTimeout()));
             }
         }
     }
@@ -114,7 +114,7 @@ public class Partitions implements InitializingBean {
         var horizon = now.minus(props.retention());
         for (var start : partitions.periodStarts(table)) {
             if (!start.plus(props.length()).isAfter(horizon)) {
-                attempt("drop", table, start, () -> partitions.drop(table, start, props.dropLockTimeout()));
+                attempt("drop", table, start, () -> partitions.drop(table, start, props.lockTimeout()));
             }
         }
     }

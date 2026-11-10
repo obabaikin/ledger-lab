@@ -54,7 +54,7 @@
       "PeriodCheck" : {
         "properties" : {
           "accountExamples" : {
-            "description" : "Up to 20 of them",
+            "description" : "The first of them, up to the configured number",
             "items" : {
               "$ref" : "#/components/schemas/AccountMismatch"
             },
@@ -87,7 +87,7 @@
             "type" : "array"
           },
           "invalidJournalExamples" : {
-            "description" : "Up to 20 of them",
+            "description" : "The first of them, up to the configured number",
             "items" : {
               "format" : "uuid",
               "type" : "string"

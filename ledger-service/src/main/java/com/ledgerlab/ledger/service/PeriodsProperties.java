@@ -9,7 +9,13 @@ public record PeriodsProperties(
     Duration retention,
     Duration partitionsAhead,
     Duration maintenanceInterval,
-    Duration dropLockTimeout,
+    Duration lockTimeout,
     Duration snapshotRetention
 ) {
+    /** Partitions are named to the minute of their period's start. */
+    public PeriodsProperties {
+        if (length.compareTo(Duration.ofMinutes(1)) < 0 || !length.equals(Duration.ofMinutes(length.toMinutes()))) {
+            throw new IllegalArgumentException("ledger.periods.length must be whole minutes, at least one");
+        }
+    }
 }

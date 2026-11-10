@@ -21,7 +21,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -81,36 +83,33 @@ public class PoolService {
             return 0;
         }
         var state = pool.state();
-        var looked = 0;
 
+        var round = new ArrayList<Integer>();
         var perAccount = props.round().dividedBy(accountsProps.count());
         var due = Duration.between(state.roundAdvancedAt(), now).dividedBy(perAccount);
         if (due > 0) {
             var batch = (int) Math.min(due, props.maxBatch());
-            var accountNos = new ArrayList<Integer>(batch);
             var next = state.nextAccountNo();
             for (var i = 0; i < batch; i++) {
-                accountNos.add(next);
+                round.add(next);
                 next = next >= accountsProps.count() ? Account.FIRST_CLIENT_ACCOUNT_NO : next + 1;
             }
-            level(accountNos, Levelling.TO_OPENING_BALANCE, now);
-            looked += batch;
             // Behind by more than a batch, after a stop: the round goes on from now instead of catching up in a burst.
             var advancedAt = due > batch ? now : state.roundAdvancedAt().plus(perAccount.multipliedBy(batch));
             state = new PoolState(next, advancedAt, state.hotSweptAt());
         }
 
+        var hot = new ArrayList<Integer>();
         if (!now.isBefore(state.hotSweptAt().plus(props.hotSweepInterval()))) {
-            var hot = new ArrayList<Integer>();
             for (var no = Account.FIRST_CLIENT_ACCOUNT_NO; no < Account.FIRST_CLIENT_ACCOUNT_NO + props.hotAccounts(); no++) {
                 hot.add(no);
             }
-            level(hot, Levelling.SURPLUS_ONLY, now);
-            looked += hot.size();
             state = new PoolState(state.nextAccountNo(), state.roundAdvancedAt(), now);
         }
 
+        var looked = round.size() + hot.size();
         if (looked > 0) {
+            level(round, hot, now);
             pool.save(state);
             visited.increment(looked);
         }
@@ -119,41 +118,27 @@ public class PoolService {
 
     private enum Levelling { TO_OPENING_BALANCE, SURPLUS_ONLY }
 
-    private void level(List<Integer> accountNos, Levelling levelling, Instant now) {
-        var numbers = new LinkedHashSet<>(accountNos);
+    /**
+     * Every account of both lists and the pool's own are locked by one statement, in the one order every caller locks
+     * in: a second lock later in the transaction would take lower numbers after higher ones and deadlock with a batch.
+     */
+    private void level(List<Integer> round, List<Integer> hot, Instant now) {
+        var numbers = new LinkedHashSet<Integer>();
         numbers.add(Account.POOL_ACCOUNT_NO);
+        numbers.addAll(round);
+        numbers.addAll(hot);
         var locked = new LinkedHashMap<Integer, Account>();
-        // The pool's account with the others in the one order every caller locks in, or the pool and a batch deadlock.
         accounts.lockAll(numbers).forEach(it -> locked.put(it.accountNo(), it));
-        var poolAccount = Objects.requireNonNull(locked.get(Account.POOL_ACCOUNT_NO), "the pool's account");
         var postedAt = now.truncatedTo(ChronoUnit.MICROS);
 
         var moves = new ArrayList<TransferCommand>();
-        var changed = new ArrayList<Account>();
-        for (var accountNo : accountNos) {
-            var account = locked.get(accountNo);
-            if (account == null || account.status() != AccountStatus.ACTIVE) {
-                continue;
-            }
-            var surplus = account.balanceCents() - account.openingBalanceCents();
-            if (surplus > 0) {
-                moves.add(new TransferCommand(UUID.randomUUID(), accountNo, Account.POOL_ACCOUNT_NO, surplus, postedAt));
-            } else if (surplus < 0 && levelling == Levelling.TO_OPENING_BALANCE) {
-                if (poolAccount.balanceCents() < -surplus) {
-                    skipped.increment();
-                    continue;
-                }
-                moves.add(new TransferCommand(UUID.randomUUID(), Account.POOL_ACCOUNT_NO, accountNo, -surplus, postedAt));
-            } else {
-                continue;
-            }
-            poolAccount = poolAccount.withBalance(poolAccount.balanceCents() + surplus);
-            changed.add(account.withBalance(account.openingBalanceCents()));
-        }
+        var changed = new LinkedHashSet<Integer>();
+        round.forEach(accountNo -> levelOne(accountNo, Levelling.TO_OPENING_BALANCE, locked, postedAt, moves, changed));
+        hot.forEach(accountNo -> levelOne(accountNo, Levelling.SURPLUS_ONLY, locked, postedAt, moves, changed));
         if (moves.isEmpty()) {
             return;
         }
-        changed.add(poolAccount);
+        changed.add(Account.POOL_ACCOUNT_NO);
 
         transfers.insertAllIfAbsent(moves.stream().map(it -> new TransferRow(it, null)).toList(), TransferKind.POOL);
         var entries = new ArrayList<JournalEntry>(moves.size() * 2);
@@ -163,7 +148,37 @@ public class PoolService {
         }
         journal.insertAll(entries);
         // Both sides at once: the pool holds both locks, so its credit needs no deferring.
-        accounts.updateBalances(changed);
+        accounts.updateBalances(changed.stream().map(no -> Objects.requireNonNull(locked.get(no), "a changed account is a locked one")).toList());
         postings.increment(moves.size());
+    }
+
+    private void levelOne(
+        int accountNo,
+        Levelling levelling,
+        Map<Integer, Account> locked,
+        Instant postedAt,
+        List<TransferCommand> moves,
+        Set<Integer> changed
+    ) {
+        var account = locked.get(accountNo);
+        var poolAccount = Objects.requireNonNull(locked.get(Account.POOL_ACCOUNT_NO), "the pool's account");
+        if (account == null || account.status() != AccountStatus.ACTIVE) {
+            return;
+        }
+        var surplus = account.balanceCents() - account.openingBalanceCents();
+        if (surplus > 0) {
+            moves.add(new TransferCommand(UUID.randomUUID(), accountNo, Account.POOL_ACCOUNT_NO, surplus, postedAt));
+        } else if (surplus < 0 && levelling == Levelling.TO_OPENING_BALANCE) {
+            if (poolAccount.balanceCents() < -surplus) {
+                skipped.increment();
+                return;
+            }
+            moves.add(new TransferCommand(UUID.randomUUID(), Account.POOL_ACCOUNT_NO, accountNo, -surplus, postedAt));
+        } else {
+            return;
+        }
+        locked.put(Account.POOL_ACCOUNT_NO, poolAccount.withBalance(poolAccount.balanceCents() + surplus));
+        locked.put(accountNo, account.withBalance(account.openingBalanceCents()));
+        changed.add(accountNo);
     }
 }

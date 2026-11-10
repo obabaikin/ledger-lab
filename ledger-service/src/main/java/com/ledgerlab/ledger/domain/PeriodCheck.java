@@ -14,11 +14,11 @@ public record PeriodCheck(
     long debitsCents,
     long creditsCents,
     long transfersWithInvalidJournal,
-    @Schema(description = "Up to 20 of them") List<UUID> invalidJournalExamples,
+    @Schema(description = "The first of them, up to the configured number") List<UUID> invalidJournalExamples,
     @Schema(description = "False when the period before has no snapshot of the balances: the accounts were not compared")
     boolean accountsCompared,
     long accountsOutOfBalance,
-    @Schema(description = "Up to 20 of them") List<AccountMismatch> accountExamples
+    @Schema(description = "The first of them, up to the configured number") List<AccountMismatch> accountExamples
 ) {
     @JsonProperty
     public List<ReconciliationCheck> failedChecks() {

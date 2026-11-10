@@ -11,13 +11,17 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
 
+// The schedule would create and drop partitions between the steps of a test.
+@TestPropertySource(properties = "ledger.periods.maintenance-interval=1h")
 class PartitionsTest extends IntegrationTest {
 
     @Autowired Partitions partitions;
@@ -29,6 +33,11 @@ class PartitionsTest extends IntegrationTest {
 
     private final Instant now = Instant.now();
 
+    @BeforeEach
+    void partitionsAsOfTheTestsNow() {
+        partitions.maintain(now);
+    }
+
     /** The other tests of this context find the partitions a ledger started now would have. */
     @AfterEach
     void partitionsAsOfNow() {
@@ -37,7 +46,7 @@ class PartitionsTest extends IntegrationTest {
             jdbc.sql("DELETE FROM " + PartitionRepository.defaultPartition(table)).update();
             for (var start : partitionRepository.periodStarts(table)) {
                 if (start.isAfter(newest)) {
-                    tx.executeWithoutResult(status -> partitionRepository.drop(table, start, periodsProperties.dropLockTimeout()));
+                    tx.executeWithoutResult(status -> partitionRepository.drop(table, start, periodsProperties.lockTimeout()));
                 }
             }
         }

@@ -71,7 +71,9 @@ class PeriodControllerTest extends IntegrationTest {
 
         assertThat(http.postForEntity(checkOf(period.start()), null, Void.class).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
 
-        assertThat(jdbc.sql("SELECT finished_at FROM period_checks").query(Timestamp.class).list()).containsExactly(finishedAt);
+        // The second request works beside the answer: it gets the time a check takes before the kept one is looked at.
+        await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+            assertThat(jdbc.sql("SELECT finished_at FROM period_checks").query(Timestamp.class).list()).containsExactly(finishedAt));
     }
 
     @Test
