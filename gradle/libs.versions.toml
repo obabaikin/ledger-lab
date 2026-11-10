@@ -1,10 +1,8 @@
 [versions]
-kotlin = "2.3.21"
 spring-boot = "4.1.1"
 spring-dependency-management = "1.1.7"
 springdoc = "3.1.1"
 node-gradle = "7.1.0"
-detekt = "1.23.8"
 errorprone = "2.52.0"
 errorprone-plugin = "5.2.0"
 nullaway = "0.14.3"
@@ -18,10 +16,7 @@ nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 
 [plugins]
-kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
-kotlin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
 spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "spring-dependency-management" }
 node-gradle = { id = "com.github.node-gradle.node", version.ref = "node-gradle" }
-detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 errorprone = { id = "net.ltgt.errorprone", version.ref = "errorprone-plugin" }

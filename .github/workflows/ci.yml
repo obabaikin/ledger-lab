@@ -42,7 +42,6 @@ jobs:
           path: |
             **/build/reports/tests/
             **/build/test-results/
-            **/build/reports/detekt/
 
   secrets:
     runs-on: ubuntu-latest

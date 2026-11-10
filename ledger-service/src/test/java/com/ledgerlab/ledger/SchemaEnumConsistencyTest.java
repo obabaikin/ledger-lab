@@ -10,7 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Kotlin enums mirror CHECK constraints in the schema; this fails if one side gains a value the other lacks. */
+/** The enums mirror CHECK constraints in the schema; this fails if one side gains a value the other lacks. */
 @Transactional
 class SchemaEnumConsistencyTest extends IntegrationTest {
 
