@@ -5,16 +5,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.common.TransferCommand;
 import com.ledgerlab.ledger.domain.Account;
+import com.ledgerlab.ledger.domain.Period;
 import com.ledgerlab.ledger.service.LedgerService;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 class LedgerServiceTest extends IntegrationTest {
 
     @Autowired LedgerService ledger;
+    @Autowired JdbcClient jdbc;
 
     @Test
     void posts_a_transfer_as_two_journal_entries_and_moves_the_balance() {
@@ -51,6 +57,22 @@ class LedgerServiceTest extends IntegrationTest {
         assertThat(applyOne(ledger, command)).isEqualTo(ALREADY_PROCESSED);
 
         assertThat(balances().get(1)).isEqualTo(900);
+    }
+
+    @Test
+    void a_transfer_accepted_before_the_oldest_period_the_ledger_holds_is_not_booked_and_leaves_no_trace() {
+        openBank(2, 1_000);
+        var heldSince = Instant.now().minus(periodsProperties.retention());
+        var oldestHeld = Period.containing(heldSince, periodsProperties.length());
+        var expired = transferAt(oldestHeld.start().minus(1, ChronoUnit.MICROS), 1, 2, 100);
+        var stillHeld = transferAt(oldestHeld.start(), 1, 2, 30);
+
+        assertThat(ledger.applyBatch(List.of(expired, stillHeld, expired))).containsExactly(EXPIRED, POSTED, EXPIRED);
+
+        awaitCreditsApplied();
+        assertThat(balances()).containsExactlyInAnyOrderEntriesOf(Map.of(1, 970L, 2, 1_030L));
+        assertThat(jdbc.sql("SELECT transfer_id FROM transfers").query(UUID.class).list()).containsExactly(stillHeld.transferId());
+        assertThat(jdbc.sql("SELECT count(*) FROM journal_entries").query(Long.class).single()).isEqualTo(2);
     }
 
     @Test

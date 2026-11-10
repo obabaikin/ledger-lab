@@ -54,6 +54,20 @@ class TransferConsumerTest extends IntegrationTest {
             .containsPattern("(?m)^ledger_kafka_assigned_partitions [1-9]");
     }
 
+    @Test
+    void a_transfer_delivered_after_its_period_was_dropped_is_counted_and_the_ones_after_it_are_booked() throws Exception {
+        openBank(2, 1_000);
+        var expiredBefore = registry.get(TransferConsumer.EXPIRED_METRIC).counter().count();
+        send(transferAt(period.start().minus(periodsProperties.retention()).minus(periodsProperties.length()), 1, 2, 100));
+        send(transfer(1, 2, 30));
+
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(reconciliation().postedTransfers()).isEqualTo(1));
+
+        assertThat(registry.get(TransferConsumer.EXPIRED_METRIC).counter().count() - expiredBefore).isEqualTo(1.0);
+        awaitCreditsApplied();
+        assertThat(balances().get(1)).isEqualTo(970);
+    }
+
     private void send(TransferCommand command) throws Exception {
         kafka.send(topic, command.partitionKey(), objectMapper.writeValueAsString(command)).get();
     }

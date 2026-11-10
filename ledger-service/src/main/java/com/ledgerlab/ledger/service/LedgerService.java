@@ -4,6 +4,7 @@ import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.common.TransferCommand;
 import com.ledgerlab.ledger.domain.Account;
 import com.ledgerlab.ledger.domain.AccountStatus;
+import com.ledgerlab.ledger.domain.Period;
 import com.ledgerlab.ledger.domain.TransferKind;
 import com.ledgerlab.ledger.domain.TransferResult;
 import com.ledgerlab.ledger.persistence.AccountRepository;
@@ -13,6 +14,8 @@ import com.ledgerlab.ledger.persistence.JournalRepository;
 import com.ledgerlab.ledger.persistence.TransferKey;
 import com.ledgerlab.ledger.persistence.TransferRepository;
 import com.ledgerlab.ledger.persistence.TransferRow;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -32,22 +35,29 @@ public class LedgerService {
 
     private static final TransferResult POSTED = new TransferResult.Posted();
     private static final TransferResult ALREADY_PROCESSED = new TransferResult.AlreadyProcessed();
+    private static final TransferResult EXPIRED = new TransferResult.Expired();
 
     private final AccountRepository accounts;
     private final TransferRepository transfers;
     private final JournalRepository journal;
     private final DeferredCreditRepository deferredCredits;
+    private final PeriodsProperties periods;
+    private final Clock clock;
 
     public LedgerService(
         AccountRepository accounts,
         TransferRepository transfers,
         JournalRepository journal,
-        DeferredCreditRepository deferredCredits
+        DeferredCreditRepository deferredCredits,
+        PeriodsProperties periods,
+        Clock clock
     ) {
         this.accounts = accounts;
         this.transfers = transfers;
         this.journal = journal;
         this.deferredCredits = deferredCredits;
+        this.periods = periods;
+        this.clock = clock;
     }
 
     /**
@@ -60,19 +70,25 @@ public class LedgerService {
             return List.of();
         }
         var commands = delivered.stream().map(LedgerService::asTheDatabaseKeepsIt).toList();
+        var held = heldSince();
+        var bookable = commands.stream().filter(it -> isHeld(it, held)).toList();
         // Everything the database would refuse must be rejected here: the consumer retries
         // database errors forever, which would stall the partition.
-        var movable = commands.stream().filter(it -> it.amountCents() > 0 && it.fromAccount() != it.toAccount()).toList();
+        var movable = bookable.stream().filter(it -> it.amountCents() > 0 && it.fromAccount() != it.toAccount()).toList();
         var senders = new HashMap<Integer, Account>();
         accounts.lockAll(keys(movable, TransferCommand::fromAccount)).forEach(it -> senders.put(it.accountNo(), it));
         var receivers = new HashMap<Integer, Account>();
         accounts.findAll(keys(movable, TransferCommand::toAccount)).forEach(it -> receivers.put(it.accountNo(), it));
         var batch = new BatchAccounts(senders, receivers);
         // After the lock: a consumer posting the same transfer holds the same sender, so its commit is visible now.
-        var seen = new HashSet<>(transfers.findRecorded(keys(commands, TransferKey::of)));
+        var seen = new HashSet<>(transfers.findRecorded(keys(bookable, TransferKey::of)));
 
         var results = new ArrayList<TransferResult>(commands.size());
         for (var command : commands) {
+            if (!isHeld(command, held)) {
+                results.add(EXPIRED);
+                continue;
+            }
             if (!seen.add(TransferKey.of(command))) {
                 results.add(ALREADY_PROCESSED);
                 continue;
@@ -93,6 +109,15 @@ public class LedgerService {
             }
         }
         return results;
+    }
+
+    /** The partition of a period is dropped once the whole period is older than the retention, and its keys with it. */
+    private Instant heldSince() {
+        return clock.instant().minus(periods.retention());
+    }
+
+    private boolean isHeld(TransferCommand command, Instant heldSince) {
+        return Period.containing(command.acceptedAt(), periods.length()).end().isAfter(heldSince);
     }
 
     /**
@@ -153,6 +178,8 @@ public class LedgerService {
             var command = commands.get(i);
             switch (results.get(i)) {
                 case TransferResult.AlreadyProcessed() -> {
+                }
+                case TransferResult.Expired() -> {
                 }
                 case TransferResult.Rejected(var reason) -> decided.add(new TransferRow(command, reason));
                 case TransferResult.Posted() -> {

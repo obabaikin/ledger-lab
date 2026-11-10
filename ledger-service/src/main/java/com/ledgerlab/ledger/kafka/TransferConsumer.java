@@ -21,6 +21,7 @@ public class TransferConsumer {
 
     public static final String LISTENER_ID = "transfers";
     public static final String DUPLICATES_METRIC = "ledger.duplicates";
+    public static final String EXPIRED_METRIC = "ledger.transfers.expired";
 
     private static final Logger log = LoggerFactory.getLogger(TransferConsumer.class);
 
@@ -29,6 +30,7 @@ public class TransferConsumer {
     private final Counter posted;
     private final Counter rejected;
     private final Counter duplicates;
+    private final Counter expired;
 
     public TransferConsumer(LedgerService ledger, ObjectMapper objectMapper, MeterRegistry registry) {
         this.ledger = ledger;
@@ -37,6 +39,9 @@ public class TransferConsumer {
         this.rejected = outcomeCounter(registry, "rejected");
         this.duplicates = Counter.builder(DUPLICATES_METRIC)
             .description("Redeliveries the ledger skipped; a lower bound, what a killed instance counted is gone with it (ADR 0015)")
+            .register(registry);
+        this.expired = Counter.builder(EXPIRED_METRIC)
+            .description("Transfers delivered after the ledger dropped their period: not booked, their periods do not reconcile")
             .register(registry);
     }
 
@@ -70,6 +75,10 @@ public class TransferConsumer {
         switch (result) {
             case TransferResult.Posted() -> posted.increment();
             case TransferResult.Rejected(var reason) -> rejected.increment();
+            case TransferResult.Expired() -> {
+                expired.increment();
+                log.warn("Transfer {} accepted at {} is older than the ledger holds and was not booked", command.transferId(), command.acceptedAt());
+            }
             case TransferResult.AlreadyProcessed() -> {
                 duplicates.increment();
                 log.debug("Duplicate delivery ignored: transfer={}", command.transferId());

@@ -46,6 +46,7 @@ abstract class IntegrationTest {
 
     protected static final TransferResult POSTED = new TransferResult.Posted();
     protected static final TransferResult ALREADY_PROCESSED = new TransferResult.AlreadyProcessed();
+    protected static final TransferResult EXPIRED = new TransferResult.Expired();
     protected static final long POOL_OPENING_BALANCE_CENTS = 1_000_000;
 
     private static final long DEFAULT_OPENING_BALANCE_CENTS = 100_000;
