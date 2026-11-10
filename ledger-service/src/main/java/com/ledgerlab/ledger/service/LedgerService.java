@@ -3,8 +3,8 @@ package com.ledgerlab.ledger.service;
 import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.common.TransferCommand;
 import com.ledgerlab.ledger.domain.Account;
-import com.ledgerlab.ledger.domain.AccountKey;
 import com.ledgerlab.ledger.domain.AccountStatus;
+import com.ledgerlab.ledger.domain.TransferKind;
 import com.ledgerlab.ledger.domain.TransferResult;
 import com.ledgerlab.ledger.persistence.AccountRepository;
 import com.ledgerlab.ledger.persistence.DeferredCreditRepository;
@@ -13,6 +13,7 @@ import com.ledgerlab.ledger.persistence.JournalRepository;
 import com.ledgerlab.ledger.persistence.TransferKey;
 import com.ledgerlab.ledger.persistence.TransferRepository;
 import com.ledgerlab.ledger.persistence.TransferRow;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -54,24 +55,25 @@ public class LedgerService {
      * command is a no-op, also when two consumers process it at the same time.
      */
     @Transactional
-    public List<TransferResult> applyBatch(List<TransferCommand> commands) {
-        if (commands.isEmpty()) {
+    public List<TransferResult> applyBatch(List<TransferCommand> delivered) {
+        if (delivered.isEmpty()) {
             return List.of();
         }
+        var commands = delivered.stream().map(LedgerService::asTheDatabaseKeepsIt).toList();
         // Everything the database would refuse must be rejected here: the consumer retries
         // database errors forever, which would stall the partition.
         var movable = commands.stream().filter(it -> it.amountCents() > 0 && it.fromAccount() != it.toAccount()).toList();
-        var senders = new HashMap<AccountKey, Account>();
-        accounts.lockAll(keys(movable, LedgerService::fromKey)).forEach(it -> senders.put(key(it), it));
-        var receivers = new HashMap<AccountKey, Account>();
-        accounts.findAll(keys(movable, LedgerService::toKey)).forEach(it -> receivers.put(key(it), it));
+        var senders = new HashMap<Integer, Account>();
+        accounts.lockAll(keys(movable, TransferCommand::fromAccount)).forEach(it -> senders.put(it.accountNo(), it));
+        var receivers = new HashMap<Integer, Account>();
+        accounts.findAll(keys(movable, TransferCommand::toAccount)).forEach(it -> receivers.put(it.accountNo(), it));
         var batch = new BatchAccounts(senders, receivers);
         // After the lock: a consumer posting the same transfer holds the same sender, so its commit is visible now.
-        var seen = new HashSet<>(transfers.findRecorded(keys(commands, LedgerService::key)));
+        var seen = new HashSet<>(transfers.findRecorded(keys(commands, TransferKey::of)));
 
         var results = new ArrayList<TransferResult>(commands.size());
         for (var command : commands) {
-            if (!seen.add(key(command))) {
+            if (!seen.add(TransferKey.of(command))) {
                 results.add(ALREADY_PROCESSED);
                 continue;
             }
@@ -86,15 +88,26 @@ public class LedgerService {
         var inserted = persist(commands, results, batch);
         // A rejection someone else recorded meanwhile is theirs to report, as with a duplicate found up front.
         for (var i = 0; i < commands.size(); i++) {
-            if (results.get(i) instanceof TransferResult.Rejected && !inserted.contains(key(commands.get(i)))) {
+            if (results.get(i) instanceof TransferResult.Rejected && !inserted.contains(TransferKey.of(commands.get(i)))) {
                 results.set(i, ALREADY_PROCESSED);
             }
         }
         return results;
     }
 
-    private record BatchAccounts(Map<AccountKey, Account> senders, Map<AccountKey, Account> receivers, Map<AccountKey, Long> credits) {
-        BatchAccounts(Map<AccountKey, Account> senders, Map<AccountKey, Account> receivers) {
+    /**
+     * accepted_at is half of the transfer's key, and the database keeps microseconds: a finer time would come back
+     * from it as another key, and the transfer would never be found recorded.
+     */
+    private static TransferCommand asTheDatabaseKeepsIt(TransferCommand command) {
+        var acceptedAt = command.acceptedAt().truncatedTo(ChronoUnit.MICROS);
+        return acceptedAt.equals(command.acceptedAt())
+            ? command
+            : new TransferCommand(command.transferId(), command.fromAccount(), command.toAccount(), command.amountCents(), acceptedAt);
+    }
+
+    private record BatchAccounts(Map<Integer, Account> senders, Map<Integer, Account> receivers, Map<Integer, Long> credits) {
+        BatchAccounts(Map<Integer, Account> senders, Map<Integer, Account> receivers) {
             this(senders, receivers, new HashMap<>());
         }
     }
@@ -106,11 +119,15 @@ public class LedgerService {
         if (command.fromAccount() == command.toAccount()) {
             return RejectReason.SAME_ACCOUNT;
         }
-        var from = batch.senders().get(fromKey(command));
+        // The pool's account is the bank's own: to a client it does not exist.
+        if (command.fromAccount() < Account.FIRST_CLIENT_ACCOUNT_NO || command.toAccount() < Account.FIRST_CLIENT_ACCOUNT_NO) {
+            return RejectReason.UNKNOWN_ACCOUNT;
+        }
+        var from = batch.senders().get(command.fromAccount());
         if (from == null) {
             return RejectReason.UNKNOWN_ACCOUNT;
         }
-        var to = batch.receivers().get(toKey(command));
+        var to = batch.receivers().get(command.toAccount());
         if (to == null) {
             return RejectReason.UNKNOWN_ACCOUNT;
         }
@@ -120,18 +137,13 @@ public class LedgerService {
         if (from.balanceCents() < command.amountCents()) {
             return RejectReason.INSUFFICIENT_FUNDS;
         }
-        if (from.dailySpentCents() + command.amountCents() > from.dailyLimitCents()) {
-            return RejectReason.DAILY_LIMIT_EXCEEDED;
-        }
         return null;
     }
 
     private static void post(TransferCommand command, BatchAccounts batch) {
-        batch.senders().computeIfPresent(fromKey(command), (key, from) -> from.withBalanceAndDailySpent(
-            from.balanceCents() - command.amountCents(),
-            from.dailySpentCents() + command.amountCents()));
+        batch.senders().computeIfPresent(command.fromAccount(), (no, from) -> from.withBalance(from.balanceCents() - command.amountCents()));
         // Deferred also when the receiver sends in this batch: the applier adds it later, adding it here would count it twice.
-        batch.credits().merge(toKey(command), command.amountCents(), Long::sum);
+        batch.credits().merge(command.toAccount(), command.amountCents(), Long::sum);
     }
 
     private Set<TransferKey> persist(List<TransferCommand> commands, List<TransferResult> results, BatchAccounts batch) {
@@ -152,21 +164,21 @@ public class LedgerService {
         if (decided.isEmpty()) {
             return Set.of();
         }
-        var inserted = transfers.insertAllIfAbsent(decided);
+        var inserted = transfers.insertAllIfAbsent(decided, TransferKind.CLIENT);
         // Posting it anyway would post it twice; the retry of the batch finds it recorded.
         for (var command : posted) {
-            if (!inserted.contains(key(command))) {
+            if (!inserted.contains(TransferKey.of(command))) {
                 throw new ConcurrentPostingException(command);
             }
         }
         var entries = new ArrayList<JournalEntry>(posted.size() * 2);
         for (var it : posted) {
-            entries.add(new JournalEntry(it.runId(), it.transferId(), it.fromAccount(), -it.amountCents()));
-            entries.add(new JournalEntry(it.runId(), it.transferId(), it.toAccount(), it.amountCents()));
+            entries.add(new JournalEntry(it.acceptedAt(), it.transferId(), it.fromAccount(), -it.amountCents()));
+            entries.add(new JournalEntry(it.acceptedAt(), it.transferId(), it.toAccount(), it.amountCents()));
         }
         journal.insertAll(entries);
-        accounts.updateBalances(keys(posted, LedgerService::fromKey).stream()
-            .map(key -> Objects.requireNonNull(batch.senders().get(key), "sender of a posted transfer"))
+        accounts.updateBalances(keys(posted, TransferCommand::fromAccount).stream()
+            .map(no -> Objects.requireNonNull(batch.senders().get(no), "sender of a posted transfer"))
             .toList());
         deferredCredits.insertAll(batch.credits());
         return inserted;
@@ -176,21 +188,5 @@ public class LedgerService {
         var keys = new LinkedHashSet<K>();
         commands.forEach(command -> keys.add(key.apply(command)));
         return keys;
-    }
-
-    private static AccountKey key(Account account) {
-        return new AccountKey(account.runId(), account.accountNo());
-    }
-
-    private static TransferKey key(TransferCommand command) {
-        return new TransferKey(command.runId(), command.transferId());
-    }
-
-    private static AccountKey fromKey(TransferCommand command) {
-        return new AccountKey(command.runId(), command.fromAccount());
-    }
-
-    private static AccountKey toKey(TransferCommand command) {
-        return new AccountKey(command.runId(), command.toAccount());
     }
 }

@@ -2,13 +2,11 @@ package com.ledgerlab.ledger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.ledgerlab.ledger.api.RunController;
+import com.ledgerlab.ledger.api.PeriodController;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +25,8 @@ import org.springframework.test.context.TestPropertySource;
         "spring.datasource.hikari.maximum-pool-size=1",
         // The outbox poll reads transfers: on the test's lock it would wait holding that one connection.
         "ledger.results.publish-interval=1h",
+        // Partition maintenance locks the table too.
+        "ledger.periods.maintenance-interval=1h",
     })
 class ReconciliationTimeoutTest extends IntegrationTest {
 
@@ -38,7 +38,6 @@ class ReconciliationTimeoutTest extends IntegrationTest {
 
     @Test
     void a_reconciliation_stuck_on_a_lock_answers_503_and_leaves_no_query_behind() throws SQLException {
-        var runId = openRun();
 
         try (var lockHolder = DriverManager.getConnection(database.getJdbcUrl(), database.getUsername(), database.getPassword())) {
             lockHolder.setAutoCommit(false);
@@ -48,10 +47,10 @@ class ReconciliationTimeoutTest extends IntegrationTest {
                 statement.execute("LOCK TABLE ledger.transfers IN ACCESS EXCLUSIVE MODE");
             }
             try {
-                var response = http.getForEntity("/internal/runs/" + runId + "/reconciliation", Map.class);
+                var response = http.getForEntity("/internal/periods/" + period.start() + "/reconciliation", Map.class);
 
                 assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-                assertThat(response.getBody().get("error")).isEqualTo(RunController.STATEMENT_TIMEOUT);
+                assertThat(response.getBody().get("error")).isEqualTo(PeriodController.STATEMENT_TIMEOUT);
                 assertThat(activeReconciliationQueries(lockHolder)).isZero();
             } finally {
                 lockHolder.rollback();
@@ -62,25 +61,16 @@ class ReconciliationTimeoutTest extends IntegrationTest {
     @Test
     @DisplayName("the statement timeout ends with the reconciliation's transaction")
     void the_statement_timeout_ends_with_the_reconciliations_transaction() {
-        var runId = openRun();
 
-        var response = http.getForEntity("/internal/runs/" + runId + "/reconciliation", Map.class);
+        var response = http.getForEntity("/internal/periods/" + period.start() + "/reconciliation", Map.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.sql("SHOW statement_timeout").query(String.class).single()).isEqualTo(SERVER_DEFAULT);
     }
 
-    private UUID openRun() {
-        var runId = UUID.randomUUID();
-        var body = Map.of("accountCount", 2, "openingBalanceCents", 100, "blockedAccounts", 0, "dailyLimitCents", 100);
-        assertThat(http.postForEntity("/internal/runs/" + runId + "/accounts", body, List.class).getStatusCode())
-            .isEqualTo(HttpStatus.CREATED);
-        return runId;
-    }
-
     private static int activeReconciliationQueries(Connection connection) throws SQLException {
         try (var statement = connection.prepareStatement(
-            "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%FROM transfers t%' AND pid <> pg_backend_pid()");
+            "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%FROM transfers%' AND pid <> pg_backend_pid()");
             var rows = statement.executeQuery()) {
             rows.next();
             return rows.getInt(1);

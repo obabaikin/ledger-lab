@@ -1,15 +1,13 @@
 package com.ledgerlab.ledger.persistence;
 
 import com.ledgerlab.ledger.domain.Account;
-import com.ledgerlab.ledger.domain.AccountKey;
+import com.ledgerlab.ledger.domain.AccountStatus;
+import com.ledgerlab.ledger.domain.Books;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -17,123 +15,111 @@ import org.springframework.stereotype.Repository;
 public class AccountRepository {
 
     private final JdbcClient jdbc;
-    private final NamedParameterJdbcTemplate batchJdbc;
 
-    public AccountRepository(JdbcClient jdbc, NamedParameterJdbcTemplate batchJdbc) {
+    public AccountRepository(JdbcClient jdbc) {
         this.jdbc = jdbc;
-        this.batchJdbc = batchJdbc;
     }
 
-    public void insertAll(List<Account> accounts) {
-        var rows = accounts.stream()
-            .map(it -> new MapSqlParameterSource()
-                .addValue("runId", it.runId())
-                .addValue("accountNo", it.accountNo())
-                .addValue("opening", it.openingBalanceCents())
-                .addValue("balance", it.balanceCents())
-                .addValue("status", it.status().name())
-                .addValue("dailyLimit", it.dailyLimitCents())
-                .addValue("dailySpent", it.dailySpentCents()))
-            .toArray(MapSqlParameterSource[]::new);
-        batchJdbc.batchUpdate(
+    /** Opens the accounts that do not exist yet; an existing one keeps its balance and status. */
+    public int openMissing(int firstAccountNo, int lastAccountNo, int firstBlockedAccountNo, long openingBalanceCents) {
+        return jdbc.sql(
             """
-            INSERT INTO accounts (run_id, account_no, opening_balance_cents, balance_cents, status, daily_limit_cents, daily_spent_cents)
-            VALUES (:runId, :accountNo, :opening, :balance, :status, :dailyLimit, :dailySpent)
-            """,
-            rows);
+            INSERT INTO accounts (account_no, opening_balance_cents, balance_cents, status)
+            SELECT no, :opening, :opening, CASE WHEN no >= :firstBlocked THEN :blocked ELSE :active END
+            FROM generate_series(:first, :last) AS no
+            ON CONFLICT (account_no) DO NOTHING
+            """)
+            .param("opening", openingBalanceCents)
+            .param("first", firstAccountNo)
+            .param("last", lastAccountNo)
+            .param("firstBlocked", firstBlockedAccountNo)
+            .param("blocked", AccountStatus.BLOCKED.name())
+            .param("active", AccountStatus.ACTIVE.name())
+            .update();
     }
 
-    public List<Account> findAll(UUID runId) {
-        return jdbc.sql("SELECT * FROM accounts WHERE run_id = :runId ORDER BY account_no")
-            .param("runId", runId)
-            .query(Account.class)
-            .list();
+    public List<Account> findAll() {
+        return jdbc.sql("SELECT * FROM accounts ORDER BY account_no").query(Account.class).list();
     }
 
     /**
      * FOR NO KEY UPDATE, the lock an UPDATE of the balance takes anyway: journal and deferred-credit rows take KEY SHARE
      * on the account through their foreign keys, and FOR UPDATE would wait for every open batch that credits it.
-     * One order for every caller, so a batch and the credit applier wait for each other instead of deadlocking.
+     * One order for every caller, so a batch, the credit applier and the pool wait for each other instead of deadlocking.
      */
-    public List<Account> lockAll(Set<AccountKey> keys) {
-        if (keys.isEmpty()) {
+    public List<Account> lockAll(Set<Integer> accountNos) {
+        if (accountNos.isEmpty()) {
             return List.of();
         }
-        return keyParams(
-            jdbc.sql(
-                """
-                SELECT * FROM accounts
-                WHERE (run_id, account_no) IN (SELECT unnest(CAST(:runIds AS uuid[])), unnest(CAST(:accountNos AS integer[])))
-                ORDER BY run_id, account_no
-                FOR NO KEY UPDATE
-                """),
-            keys)
+        return jdbc.sql(
+            """
+            SELECT * FROM accounts
+            WHERE account_no = ANY (CAST(:accountNos AS integer[]))
+            ORDER BY account_no
+            FOR NO KEY UPDATE
+            """)
+            .param("accountNos", numbers(accountNos))
             .query(Account.class)
             .list();
     }
 
-    public List<Account> findAll(Set<AccountKey> keys) {
-        if (keys.isEmpty()) {
+    public List<Account> findAll(Set<Integer> accountNos) {
+        if (accountNos.isEmpty()) {
             return List.of();
         }
-        return keyParams(
-            jdbc.sql(
-                """
-                SELECT * FROM accounts
-                WHERE (run_id, account_no) IN (SELECT unnest(CAST(:runIds AS uuid[])), unnest(CAST(:accountNos AS integer[])))
-                """),
-            keys)
+        return jdbc.sql("SELECT * FROM accounts WHERE account_no = ANY (CAST(:accountNos AS integer[]))")
+            .param("accountNos", numbers(accountNos))
             .query(Account.class)
             .list();
     }
 
-    public void addToBalances(Map<AccountKey, Long> amounts) {
+    public void addToBalances(Map<Integer, Long> amounts) {
         if (amounts.isEmpty()) {
             return;
         }
         // An UPDATE takes its rows in no set order; lockAll takes them in the order every caller uses.
         lockAll(amounts.keySet());
-        var keys = List.copyOf(amounts.keySet());
-        keyParams(
-            jdbc.sql(
-                """
-                UPDATE accounts a SET balance_cents = a.balance_cents + v.amount
-                FROM unnest(CAST(:runIds AS uuid[]), CAST(:accountNos AS integer[]), CAST(:amounts AS bigint[]))
-                    AS v(run_id, account_no, amount)
-                WHERE a.run_id = v.run_id AND a.account_no = v.account_no
-                """),
-            keys)
-            .param("amounts", keys.stream().map(key -> Objects.requireNonNull(amounts.get(key), "amount of a key of the same map")).toArray(Long[]::new))
+        var accountNos = List.copyOf(amounts.keySet());
+        jdbc.sql(
+            """
+            UPDATE accounts a SET balance_cents = a.balance_cents + v.amount
+            FROM unnest(CAST(:accountNos AS integer[]), CAST(:amounts AS bigint[])) AS v(account_no, amount)
+            WHERE a.account_no = v.account_no
+            """)
+            .param("accountNos", numbers(accountNos))
+            .param("amounts", accountNos.stream().map(no -> Objects.requireNonNull(amounts.get(no), "amount of a key of the same map")).toArray(Long[]::new))
             .update();
     }
 
-    public void updateBalances(List<Account> accounts) {
+    public void updateBalances(Collection<Account> accounts) {
         if (accounts.isEmpty()) {
             return;
         }
-        keyParams(
-            jdbc.sql(
-                """
-                UPDATE accounts a
-                SET balance_cents = v.balance, daily_spent_cents = v.spent
-                FROM unnest(
-                    CAST(:runIds AS uuid[]), CAST(:accountNos AS integer[]), CAST(:balances AS bigint[]), CAST(:spent AS bigint[])
-                ) AS v(run_id, account_no, balance, spent)
-                WHERE a.run_id = v.run_id AND a.account_no = v.account_no
-                """),
-            accounts.stream().map(it -> new AccountKey(it.runId(), it.accountNo())).toList())
+        jdbc.sql(
+            """
+            UPDATE accounts a SET balance_cents = v.balance
+            FROM unnest(CAST(:accountNos AS integer[]), CAST(:balances AS bigint[])) AS v(account_no, balance)
+            WHERE a.account_no = v.account_no
+            """)
+            .param("accountNos", accounts.stream().map(Account::accountNo).toArray(Integer[]::new))
             .param("balances", accounts.stream().map(Account::balanceCents).toArray(Long[]::new))
-            .param("spent", accounts.stream().map(Account::dailySpentCents).toArray(Long[]::new))
             .update();
     }
 
-    public int deleteRun(UUID runId) {
-        return jdbc.sql("DELETE FROM accounts WHERE run_id = :runId").param("runId", runId).update();
+    /** A credit is in the journal before it is in the balance, so the pending ones count as balance (ADR 0018). */
+    public Books books() {
+        return jdbc.sql(
+            """
+            SELECT count(*) AS accounts,
+                   coalesce(sum(opening_balance_cents), 0) AS opening_total,
+                   coalesce(sum(balance_cents), 0) + (SELECT coalesce(sum(amount_cents), 0) FROM deferred_credits) AS balance_total
+            FROM accounts
+            """)
+            .query((rs, rowNum) -> new Books(rs.getLong("accounts"), rs.getLong("opening_total"), rs.getLong("balance_total")))
+            .single();
     }
 
-    private static JdbcClient.StatementSpec keyParams(JdbcClient.StatementSpec statement, Collection<AccountKey> keys) {
-        return statement
-            .param("runIds", keys.stream().map(it -> it.runId().toString()).toArray(String[]::new))
-            .param("accountNos", keys.stream().map(AccountKey::accountNo).toArray(Integer[]::new));
+    private static Integer[] numbers(Collection<Integer> accountNos) {
+        return accountNos.toArray(Integer[]::new);
     }
 }

@@ -1,6 +1,6 @@
 package com.ledgerlab.gateway.kafka;
 
-import com.ledgerlab.common.TransferResultEvent;
+import com.ledgerlab.common.runs.TransferResultEvent;
 import com.ledgerlab.gateway.service.LedgerResult;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;

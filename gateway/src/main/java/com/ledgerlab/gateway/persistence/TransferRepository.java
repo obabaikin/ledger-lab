@@ -3,7 +3,7 @@ package com.ledgerlab.gateway.persistence;
 import static com.ledgerlab.gateway.domain.RejectReasons.rejectReasonOf;
 
 import com.ledgerlab.common.RejectReason;
-import com.ledgerlab.common.TransferCommand;
+import com.ledgerlab.common.runs.TransferCommand;
 import com.ledgerlab.gateway.domain.RunSummary;
 import com.ledgerlab.gateway.domain.StatementLine;
 import com.ledgerlab.gateway.domain.Transfer;

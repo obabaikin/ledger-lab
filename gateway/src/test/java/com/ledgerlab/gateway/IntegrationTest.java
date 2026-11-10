@@ -2,7 +2,7 @@ package com.ledgerlab.gateway;
 
 import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.common.TransferOutcome;
-import com.ledgerlab.common.TransferResultEvent;
+import com.ledgerlab.common.runs.TransferResultEvent;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;

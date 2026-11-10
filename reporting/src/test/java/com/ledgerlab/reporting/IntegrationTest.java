@@ -1,9 +1,9 @@
 package com.ledgerlab.reporting;
 
 import com.ledgerlab.common.RejectReason;
-import com.ledgerlab.common.TransferCommand;
+import com.ledgerlab.common.runs.TransferCommand;
 import com.ledgerlab.common.TransferOutcome;
-import com.ledgerlab.common.TransferResultEvent;
+import com.ledgerlab.common.runs.TransferResultEvent;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.boot.test.context.SpringBootTest;

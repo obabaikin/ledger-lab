@@ -1,6 +1,5 @@
 package com.ledgerlab.ledger.service;
 
-import com.ledgerlab.ledger.domain.AccountKey;
 import com.ledgerlab.ledger.persistence.AccountRepository;
 import com.ledgerlab.ledger.persistence.DeferredCreditRepository;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -42,8 +41,8 @@ public class DeferredCreditBatch {
         if (applied.isEmpty()) {
             return 0;
         }
-        var amounts = new LinkedHashMap<AccountKey, Long>();
-        applied.forEach(credit -> amounts.merge(credit.account(), credit.amountCents(), Long::sum));
+        var amounts = new LinkedHashMap<Integer, Long>();
+        applied.forEach(credit -> amounts.merge(credit.accountNo(), credit.amountCents(), Long::sum));
         accounts.addToBalances(amounts);
         applied.forEach(credit -> delay.record(credit.waited()));
         return applied.size();

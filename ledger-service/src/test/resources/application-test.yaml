@@ -12,6 +12,15 @@ ledger:
     send-timeout: 30s
   consumer:
     retry-backoff: 200ms
+  accounts:
+    count: 10
+    opening-balance-cents: 100000
+    blocked: 0
+  pool:
+    opening-balance-cents: 1000000
+    hot-accounts: 2
+    # The tests move the pool themselves.
+    tick-interval: 24h
 logging:
   level:
     org.apache.kafka: WARN

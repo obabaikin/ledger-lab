@@ -1,6 +1,8 @@
 package com.ledgerlab.ledger;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anySet;
@@ -34,21 +36,20 @@ class ConcurrentPostingGuardTest {
 
     @Test
     void a_transfer_someone_else_recorded_after_the_check_for_duplicates_is_not_posted_a_second_time() {
-        var runId = UUID.randomUUID();
-        var command = new TransferCommand(runId, UUID.randomUUID(), 1, 2, 100, Instant.now());
-        when(accounts.lockAll(anySet())).thenReturn(List.of(account(runId, 1)));
-        when(accounts.findAll(anySet())).thenReturn(List.of(account(runId, 2)));
+        var command = new TransferCommand(UUID.randomUUID(), 1, 2, 100, Instant.parse("2026-11-10T10:00:00Z"));
+        when(accounts.lockAll(anySet())).thenReturn(List.of(account(1)));
+        when(accounts.findAll(anySet())).thenReturn(List.of(account(2)));
         when(transfers.findRecorded(anySet())).thenReturn(Set.of());
-        when(transfers.insertAllIfAbsent(anyList())).thenReturn(Set.of());
+        when(transfers.insertAllIfAbsent(anyList(), any())).thenReturn(Set.of());
 
         assertThatThrownBy(() -> ledger.applyBatch(List.of(command))).isInstanceOf(ConcurrentPostingException.class);
 
         verify(journal, never()).insertAll(anyList());
-        verify(accounts, never()).updateBalances(anyList());
+        verify(accounts, never()).updateBalances(anyCollection());
         verify(deferredCredits, never()).insertAll(anyMap());
     }
 
-    private static Account account(UUID runId, int accountNo) {
-        return new Account(runId, accountNo, 1_000, 1_000, AccountStatus.ACTIVE, Long.MAX_VALUE / 2, 0);
+    private static Account account(int accountNo) {
+        return new Account(accountNo, 1_000, 1_000, AccountStatus.ACTIVE);
     }
 }

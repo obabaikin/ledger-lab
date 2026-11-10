@@ -40,16 +40,38 @@ ledger:
     retry-backoff: 500ms
     # Set per instance in Kubernetes (the StatefulSet pod name); unset, the consumer joins the group dynamically.
     instance-id: ${LEDGER_INSTANCE_ID:}
-  run-duplicates:
-    # Past the last scrape after the run, before a long-lived pod publishes every past run.
-    idle-retention: 10m
-    sweep-interval: 1m
+  accounts:
+    # The generator is told the same count; the last ones are blocked.
+    count: 100000
+    opening-balance-cents: 1000000
+    blocked: 100
+  periods:
+    # The same in every service: they cut time at the same instants.
+    length: 60m
+    # How long a period's transfers and journal are held after it ended; the partition is dropped then.
+    retention: 4h
+    partitions-ahead: 48h
+    maintenance-interval: 1m
+    drop-lock-timeout: 2s
+    snapshot-retention: 48h
+  pool:
+    opening-balance-cents: 10000000000
+    # Accounts 1..n receive a third of all payments; their surplus goes to the pool once per interval.
+    hot-accounts: 5
+    hot-sweep-interval: 60m
+    # Every account is brought back to its opening balance once per round.
+    round: 24h
+    tick-interval: 1s
+    max-batch: 100
   deferred-credits:
     apply-interval: 250ms
     batch-size: 1000
   reconciliation:
     # Per query, below control's 5 s call timeout: the database stops a query control has already given up on.
     statement-timeout: 4s
+    # The background check reads a whole period; nobody waits on a call for it.
+    check-timeout: 5m
+    example-limit: 20
   chaos:
     # On in the chart only: POST /actuator/crash halts the instance (control's chaos button).
     enabled: false
@@ -58,10 +80,6 @@ ledger:
 springdoc:
   # Otherwise every controller-local error handler is added to every operation as a possible answer.
   override-with-generic-response: false
-
-logging:
-  pattern:
-    correlation: "[run=%X{runId:-}] "
 
 management:
   endpoints:

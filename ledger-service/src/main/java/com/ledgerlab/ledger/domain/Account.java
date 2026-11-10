@@ -1,17 +1,16 @@
 package com.ledgerlab.ledger.domain;
 
-import java.util.UUID;
-
 public record Account(
-    UUID runId,
     int accountNo,
     long openingBalanceCents,
     long balanceCents,
-    AccountStatus status,
-    long dailyLimitCents,
-    long dailySpentCents
+    AccountStatus status
 ) {
-    public Account withBalanceAndDailySpent(long balanceCents, long dailySpentCents) {
-        return new Account(runId, accountNo, openingBalanceCents, balanceCents, status, dailyLimitCents, dailySpentCents);
+    /** The bank's own account behind cash pooling (ADR 0023); clients' numbers start at {@link #FIRST_CLIENT_ACCOUNT_NO}. */
+    public static final int POOL_ACCOUNT_NO = 0;
+    public static final int FIRST_CLIENT_ACCOUNT_NO = 1;
+
+    public Account withBalance(long balanceCents) {
+        return new Account(accountNo, openingBalanceCents, balanceCents, status);
     }
 }

@@ -5,21 +5,19 @@ import java.util.Objects;
 import java.util.UUID;
 
 public record TransferCommand(
-    UUID runId,
     UUID transferId,
     int fromAccount,
     int toAccount,
     long amountCents,
-    Instant createdAt
+    Instant acceptedAt
 ) {
     public TransferCommand {
-        Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(transferId, "transferId");
-        Objects.requireNonNull(createdAt, "createdAt");
+        Objects.requireNonNull(acceptedAt, "acceptedAt");
     }
 
-    /** Partition key: keeps all transfers of one sender in one partition and isolates runs. */
+    /** Partition key: keeps all transfers of one sender in one partition, so they are booked in the order sent. */
     public String partitionKey() {
-        return runId + ":" + fromAccount;
+        return String.valueOf(fromAccount);
     }
 }

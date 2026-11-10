@@ -3,7 +3,7 @@ package com.ledgerlab.gateway;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-import com.ledgerlab.common.TransferCommand;
+import com.ledgerlab.common.runs.TransferCommand;
 import com.ledgerlab.common.TransferOutcome;
 import com.ledgerlab.gateway.domain.TransferStatus;
 import com.ledgerlab.gateway.service.ResultWaiters;

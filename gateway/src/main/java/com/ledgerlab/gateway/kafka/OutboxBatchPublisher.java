@@ -1,6 +1,6 @@
 package com.ledgerlab.gateway.kafka;
 
-import com.ledgerlab.common.TransferCommand;
+import com.ledgerlab.common.runs.TransferCommand;
 import com.ledgerlab.gateway.GatewayProperties;
 import com.ledgerlab.gateway.persistence.TransferRepository;
 import java.util.concurrent.CompletableFuture;

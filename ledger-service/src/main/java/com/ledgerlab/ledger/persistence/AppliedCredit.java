@@ -1,7 +1,6 @@
 package com.ledgerlab.ledger.persistence;
 
-import com.ledgerlab.ledger.domain.AccountKey;
 import java.time.Duration;
 
-public record AppliedCredit(AccountKey account, long amountCents, Duration waited) {
+public record AppliedCredit(int accountNo, long amountCents, Duration waited) {
 }

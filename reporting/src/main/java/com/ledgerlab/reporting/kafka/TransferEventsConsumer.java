@@ -1,7 +1,7 @@
 package com.ledgerlab.reporting.kafka;
 
-import com.ledgerlab.common.TransferCommand;
-import com.ledgerlab.common.TransferResultEvent;
+import com.ledgerlab.common.runs.TransferCommand;
+import com.ledgerlab.common.runs.TransferResultEvent;
 import com.ledgerlab.reporting.persistence.AcceptedTransfer;
 import com.ledgerlab.reporting.persistence.TransferOutcomeRow;
 import com.ledgerlab.reporting.persistence.TransferStatsRepository;

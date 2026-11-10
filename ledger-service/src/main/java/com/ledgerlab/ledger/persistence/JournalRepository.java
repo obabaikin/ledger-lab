@@ -19,12 +19,12 @@ public class JournalRepository {
         }
         jdbc.sql(
             """
-            INSERT INTO journal_entries (run_id, transfer_id, account_no, amount_cents)
+            INSERT INTO journal_entries (accepted_at, transfer_id, account_no, amount_cents)
             SELECT * FROM unnest(
-                CAST(:runIds AS uuid[]), CAST(:transferIds AS uuid[]), CAST(:accountNos AS integer[]), CAST(:amounts AS bigint[])
+                CAST(:acceptedAts AS timestamptz[]), CAST(:transferIds AS uuid[]), CAST(:accountNos AS integer[]), CAST(:amounts AS bigint[])
             )
             """)
-            .param("runIds", entries.stream().map(it -> it.runId().toString()).toArray(String[]::new))
+            .param("acceptedAts", Sql.timestamptzArray(entries.stream().map(JournalEntry::acceptedAt).toList()))
             .param("transferIds", entries.stream().map(it -> it.transferId().toString()).toArray(String[]::new))
             .param("accountNos", entries.stream().map(JournalEntry::accountNo).toArray(Integer[]::new))
             .param("amounts", entries.stream().map(JournalEntry::amountCents).toArray(Long[]::new))

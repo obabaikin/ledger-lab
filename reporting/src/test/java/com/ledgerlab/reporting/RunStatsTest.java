@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
 import com.ledgerlab.common.RejectReason;
-import com.ledgerlab.common.TransferCommand;
-import com.ledgerlab.common.TransferResultEvent;
+import com.ledgerlab.common.runs.TransferCommand;
+import com.ledgerlab.common.runs.TransferResultEvent;
 import com.ledgerlab.reporting.domain.RunStats;
 import com.ledgerlab.reporting.domain.SecondStats;
 import com.ledgerlab.reporting.persistence.AcceptedTransfer;
