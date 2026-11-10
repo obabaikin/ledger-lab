@@ -96,7 +96,9 @@ accounts did not change.
 ## Limits measured on the server
 
 On one node with the whole bank and the load generator, the current version takes **about 1600 transfers per
-second** without a refusal, where the October version refused from 300–400 on; every run of both ends `BALANCED`.
+second** in steps of 30 seconds without a refusal, where the October version refused from 300–400 on; every such run
+of both ends `BALANCED`. Held for 5 minutes by day, the same server already refuses at 1300
+([comparison](docs/results/2026-11-10-kotlin-vs-java.md)).
 How it was measured, how the bottlenecks were found and what was tried and rejected:
 [optimizations](docs/results/2026-11-06-optimizations.md).
 
@@ -106,8 +108,11 @@ the bank fall behind; at most three runs at once, together at most 2000
 
 ## Stack
 
-Kotlin · Spring Boot 4 · Apache Kafka · PostgreSQL · Flyway · Testcontainers ·
+Java 25 · Spring Boot 4 · Apache Kafka · PostgreSQL · Flyway · Testcontainers ·
 Micrometer / Prometheus · Helm · k3s · cert-manager · Terraform (firewall, DNS); planned: Grafana
+
+Ported from Kotlin in v0.9.0 with the behaviour unchanged; the two versions
+[measured side by side](docs/results/2026-11-10-kotlin-vs-java.md).
 
 ## Modules
 
@@ -116,18 +121,18 @@ Micrometer / Prometheus · Helm · k3s · cert-manager · Terraform (firewall, D
 | `common` | The bank's internal Kafka messages, shared by the bank's services; no logic |
 | `ledger-service` | Double-entry ledger, Kafka consumer, reconciliation, internal API |
 | `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait |
-| `generator` | Load simulator acting as the bank's clients (coroutines, retries with the same key) |
+| `generator` | Load simulator acting as the bank's clients (virtual threads, retries with the same key) |
 | `reporting` | The bank's numbers per run, projected from its Kafka events, internal API |
 | `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI |
 
 ## Running locally
 
-Requirements: JDK 21, Docker.
+Requirements: JDK 25, Docker.
 
 ```bash
 docker compose up -d                      # Postgres (one schema per service), Kafka and its topics, Prometheus :9090
 ./gradlew test                            # integration tests with Testcontainers
-./gradlew check                           # tests plus dead-code checks: detekt, knip (compiler warnings fail every build)
+./gradlew check                           # tests plus dead-code checks: Error Prone, knip (compiler warnings fail every build)
 ./gradlew :ledger-service:bootRun         # :8080
 ./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
 ./gradlew :generator:bootRun              # :8082
@@ -162,7 +167,7 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
   else. Control and the generator check every call and field they use against the specs of the
   services they call ([ADR 0011](docs/adr/0011-contract-boundaries.md)).
 - **The page** has its own tests (Vitest).
-- **CI on every pull request:** the tests, dead-code checks (detekt, knip), compiler warnings as
+- **CI on every pull request:** the tests, dead-code and null checks (Error Prone, NullAway, knip), compiler warnings as
   errors, a secret scan of the whole history, Terraform validation and shellcheck. `main` only takes
   pull requests with green tests and a clean secret scan.
 - **The system as a whole** is checked by its own reconciliation: every run, crashes included, ends
@@ -234,11 +239,11 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Every run reconciles: the books, the bank's events and the client's journal agree | verdict `BALANCED` on each run | done |
 | Survives crashes mid-run | one hour at 300 TPS on the server, the ledger crashed twice, `BALANCED` | done |
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
-| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS in October ([results](docs/results/2026-10-23-server-baseline.md)), about 1600 with batched writes ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
+| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS in October ([results](docs/results/2026-10-23-server-baseline.md)), about 1600 in steps of 30 s with batched writes ([optimizations](docs/results/2026-11-06-optimizations.md)); runs of 5 minutes by day already refuse at 1300 ([comparison](docs/results/2026-11-10-kotlin-vs-java.md)) | done |
 | Access on request | a visitor enters an email and receives an invite link | done |
-| A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | planned |
+| A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | next |
 | Dashboards | Grafana: latency by segment, node, database | planned |
-| Writes in batches, overload shed at the edge | 1000–1600 TPS on the server without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | next |
+| Writes in batches, overload shed at the edge | 1000–1600 TPS on the server in steps of 30 s without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | done |
 | The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)) | done |
 | Gateway deploys without downtime | replaced during a 400 TPS run: no transfer lost or duplicated, the run `BALANCED` | done |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |

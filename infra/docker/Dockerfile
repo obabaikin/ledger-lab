@@ -1,10 +1,10 @@
 # One image per service from its boot jar. Build context: <module>/build/libs after ./gradlew bootJar.
-FROM eclipse-temurin:21-jre AS layers
+FROM eclipse-temurin:25-jre AS layers
 WORKDIR /layers
 COPY *.jar /jars/
 RUN java -Djarmode=tools -jar "$(ls /jars/*.jar | grep -v -- '-plain.jar$')" extract --layers --launcher --destination .
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 RUN useradd --system --uid 10001 app
 USER 10001
 WORKDIR /app

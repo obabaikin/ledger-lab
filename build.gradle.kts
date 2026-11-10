@@ -1,13 +1,10 @@
-import io.gitlab.arturbosch.detekt.extensions.DetektExtension
-import io.gitlab.arturbosch.detekt.getSupportedKotlinVersion
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import net.ltgt.gradle.errorprone.CheckSeverity
+import net.ltgt.gradle.errorprone.errorprone
 
 plugins {
-    alias(libs.plugins.kotlin.jvm) apply false
-    alias(libs.plugins.kotlin.spring) apply false
     alias(libs.plugins.spring.boot) apply false
     alias(libs.plugins.spring.dependency.management) apply false
-    alias(libs.plugins.detekt) apply false
+    alias(libs.plugins.errorprone) apply false
 }
 
 allprojects {
@@ -20,23 +17,28 @@ allprojects {
 }
 
 subprojects {
-    tasks.withType<KotlinCompile>().configureEach {
-        compilerOptions.allWarningsAsErrors = true
-    }
-
-    apply(plugin = "io.gitlab.arturbosch.detekt")
-    configure<DetektExtension> {
-        config.setFrom(rootProject.file("config/detekt.yml"))
-        buildUponDefaultConfig = false
-        ignoreFailures = false
-    }
-
-    // Spring's dependency management forces its Kotlin version onto every configuration, detekt's too,
-    // and detekt refuses to run on a Kotlin other than the one it was compiled with.
-    afterEvaluate {
-        configurations.matching { it.name == "detekt" }.configureEach {
-            resolutionStrategy.eachDependency {
-                if (requested.group == "org.jetbrains.kotlin") useVersion(getSupportedKotlinVersion())
+    plugins.withId("net.ltgt.errorprone") {
+        configure<JavaPluginExtension> {
+            toolchain.languageVersion = JavaLanguageVersion.of(25)
+        }
+        dependencies {
+            "errorprone"(rootProject.libs.errorprone.core)
+            "errorprone"(rootProject.libs.nullaway)
+        }
+        tasks.withType<JavaCompile>().configureEach {
+            options.encoding = "UTF-8"
+            options.compilerArgs.addAll(listOf("-parameters", "-Xlint:all,-serial", "-Werror"))
+            options.errorprone {
+                listOf("UnusedVariable", "UnusedMethod", "RemoveUnusedImports", "ReferenceEquality").forEach {
+                    check(it, CheckSeverity.ERROR)
+                }
+                // Test code hands null to what it tests and is filled in by frameworks: checked for the rest only.
+                if (name == "compileJava") {
+                    check("NullAway", CheckSeverity.ERROR)
+                    option("NullAway:OnlyNullMarked", "true")
+                } else {
+                    disable("NullAway")
+                }
             }
         }
     }

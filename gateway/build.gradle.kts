@@ -1,16 +1,8 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
-    alias(libs.plugins.kotlin.spring)
+    java
+    alias(libs.plugins.errorprone)
     alias(libs.plugins.spring.boot)
     alias(libs.plugins.spring.dependency.management)
-}
-
-kotlin {
-    jvmToolchain(21)
-    compilerOptions {
-        javaParameters = true
-        freeCompilerArgs.add("-Xjsr305=strict")
-    }
 }
 
 dependencies {
@@ -24,8 +16,6 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.flywaydb:flyway-database-postgresql")
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("tools.jackson.module:jackson-module-kotlin")
     implementation(libs.springdoc.webmvc.api)
     runtimeOnly("org.postgresql:postgresql")
 

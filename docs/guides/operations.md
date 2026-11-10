@@ -6,7 +6,7 @@ For the services on the host with Docker Compose, see the [README](../../README.
 ## Running in local Kubernetes
 
 The same system on k3s in Docker ([k3d](https://k3d.io)), on one node the size of the target server
-(12 GB: the bank, the generator, monitoring, k3s and the OS fit in it together). Requirements: JDK 21, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
+(12 GB: the bank, the generator, monitoring, k3s and the OS fit in it together). Requirements: JDK 25, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
 
 ```bash
 infra/k3d/up.sh     # cluster, the five images, the chart (infra/helm/ledger-lab); safe to run again
