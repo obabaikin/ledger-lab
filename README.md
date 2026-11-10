@@ -122,7 +122,7 @@ Micrometer / Prometheus · Helm · k3s · cert-manager · Terraform (firewall, D
 
 ## Running locally
 
-Requirements: JDK 21, Docker.
+Requirements: JDK 25, Docker.
 
 ```bash
 docker compose up -d                      # Postgres (one schema per service), Kafka and its topics, Prometheus :9090

@@ -125,7 +125,8 @@ class SimulationTest {
 
             var status = simulation.status();
             assertThat(midway).hasSize(2);
-            assertThat(status.requestedPerSecond()).hasSize(4);
+            // The last transfer is due just before the third second ends: a fourth slot exists only if its answer came after it.
+            assertThat(status.requestedPerSecond()).hasSizeBetween(3, 4);
             assertThat(status.requestedPerSecond().stream().mapToLong(Long::longValue).sum()).isEqualTo(status.requested());
             assertThat(status.requestedPerSecond().subList(0, 3)).allSatisfy(it -> assertThat(it).isBetween(150L, 250L));
         }

@@ -19,7 +19,7 @@ allprojects {
 subprojects {
     plugins.withId("net.ltgt.errorprone") {
         configure<JavaPluginExtension> {
-            toolchain.languageVersion = JavaLanguageVersion.of(21)
+            toolchain.languageVersion = JavaLanguageVersion.of(25)
         }
         dependencies {
             "errorprone"(rootProject.libs.errorprone.core)
