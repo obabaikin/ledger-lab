@@ -146,6 +146,16 @@ class SimulationApiTest {
     }
 
     @Test
+    void an_explicit_null_in_a_field_with_a_default_is_refused_as_a_bad_request() {
+        for (var field : List.of("blockedAccounts", "hotAccounts", "waitShare", "waitTimeoutSeconds")) {
+            var request = request(UUID.randomUUID(), 10, 1);
+            request.put(field, null);
+
+            assertThat(http.postForEntity(SIMULATIONS, request, String.class).getStatusCode()).as(field).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    @Test
     void serves_the_journal_of_a_run_by_page_and_by_transfer() {
         var runId = UUID.randomUUID();
         post(SIMULATIONS, request(runId, 50, 1));

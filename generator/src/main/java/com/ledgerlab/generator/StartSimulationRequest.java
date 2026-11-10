@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 public record StartSimulationRequest(
     @Schema(nullable = true)
@@ -41,10 +42,10 @@ public record StartSimulationRequest(
         int tps,
         int durationSeconds,
         int accountCount,
-        @Nullable Integer blockedAccounts,
-        @Nullable Integer hotAccounts,
-        @Nullable Double waitShare,
-        @Nullable Integer waitTimeoutSeconds
+        @JsonDeserialize(using = OmittedOrValue.OfInteger.class) @Nullable Integer blockedAccounts,
+        @JsonDeserialize(using = OmittedOrValue.OfInteger.class) @Nullable Integer hotAccounts,
+        @JsonDeserialize(using = OmittedOrValue.OfDouble.class) @Nullable Double waitShare,
+        @JsonDeserialize(using = OmittedOrValue.OfInteger.class) @Nullable Integer waitTimeoutSeconds
     ) {
         return new StartSimulationRequest(
             runId, tps, durationSeconds, accountCount,
