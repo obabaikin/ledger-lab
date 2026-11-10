@@ -1,6 +1,6 @@
-package com.ledgerlab.common
+package com.ledgerlab.common;
 
-enum class RejectReason {
+public enum RejectReason {
     INVALID_AMOUNT,
     SAME_ACCOUNT,
     UNKNOWN_ACCOUNT,

@@ -26,11 +26,11 @@ class ResultOutboxRepository(private val jdbc: JdbcClient) {
             .param("limit", limit)
             .query { rs, _ ->
                 TransferResultEvent(
-                    runId = rs.getObject("run_id", UUID::class.java),
-                    transferId = rs.getObject("transfer_id", UUID::class.java),
-                    outcome = TransferOutcome.valueOf(rs.getString("outcome")),
-                    rejectReason = rs.getString("reject_reason")?.let(RejectReason::valueOf),
-                    processedAt = rs.getObject("processed_at", Timestamp::class.java).toInstant(),
+                    rs.getObject("run_id", UUID::class.java),
+                    rs.getObject("transfer_id", UUID::class.java),
+                    TransferOutcome.valueOf(rs.getString("outcome")),
+                    rs.getString("reject_reason")?.let(RejectReason::valueOf),
+                    rs.getObject("processed_at", Timestamp::class.java).toInstant(),
                 )
             }
             .list()

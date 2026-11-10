@@ -73,12 +73,12 @@ class TransferRepository(private val jdbc: JdbcClient) {
             .param("limit", limit)
             .query { rs, _ ->
                 TransferCommand(
-                    runId = rs.getObject("run_id", UUID::class.java),
-                    transferId = rs.getObject("transfer_id", UUID::class.java),
-                    fromAccount = rs.getInt("from_account"),
-                    toAccount = rs.getInt("to_account"),
-                    amountCents = rs.getLong("amount_cents"),
-                    createdAt = rs.getObject("accepted_at", Timestamp::class.java).toInstant(),
+                    rs.getObject("run_id", UUID::class.java),
+                    rs.getObject("transfer_id", UUID::class.java),
+                    rs.getInt("from_account"),
+                    rs.getInt("to_account"),
+                    rs.getLong("amount_cents"),
+                    rs.getObject("accepted_at", Timestamp::class.java).toInstant(),
                 )
             }
             .list()

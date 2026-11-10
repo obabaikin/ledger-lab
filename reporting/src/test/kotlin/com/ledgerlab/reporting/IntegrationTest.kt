@@ -16,7 +16,7 @@ import java.util.UUID
 abstract class IntegrationTest {
 
     protected fun command(runId: UUID, amountCents: Long, acceptedAt: Instant, transferId: UUID = UUID.randomUUID()) =
-        TransferCommand(runId, transferId, fromAccount = 1, toAccount = 2, amountCents, acceptedAt)
+        TransferCommand(runId, transferId, 1, 2, amountCents, acceptedAt)
 
     protected fun posted(command: TransferCommand, processedAt: Instant) =
         TransferResultEvent(command.runId, command.transferId, TransferOutcome.POSTED, null, processedAt)

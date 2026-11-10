@@ -1,6 +1,6 @@
 package com.ledgerlab.gateway.service
 
-import com.ledgerlab.common.Observability.LATENCY_PERCENTILES
+import com.ledgerlab.common.Observability
 import com.ledgerlab.common.TransferOutcome
 import com.ledgerlab.gateway.domain.RunSummary
 import com.ledgerlab.gateway.domain.Transfer
@@ -44,7 +44,7 @@ class TransferService(
     private val repeated = Counter.builder("gateway.transfers").tag("outcome", "repeated").register(registry)
     private val latency = Timer.builder("gateway.transfer.latency")
         .description("accepted at the edge to result known")
-        .publishPercentiles(*LATENCY_PERCENTILES)
+        .publishPercentiles(*Observability.latencyPercentiles())
         .register(registry)
 
     /**
