@@ -36,8 +36,15 @@ val pageKnip by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class
     outputs.upToDateWhen { true }
 }
 
+val pageLint by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    dependsOn(pageTypes)
+    npmCommand = listOf("run", "lint")
+    inputs.files(pageSources, "openapi.json")
+    outputs.upToDateWhen { true }
+}
+
 tasks.check {
-    dependsOn(pageKnip)
+    dependsOn(pageKnip, pageLint)
 }
 
 val pageBuild by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {

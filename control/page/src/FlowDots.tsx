@@ -89,6 +89,8 @@ export function FlowDots({ wires, rates }: { wires: string[]; rates: number[] })
       cancelAnimationFrame(frame)
       dots.forEach((d) => d.el.remove())
     }
+    // The parent builds a new array on every render; the effect restarts only when the paths themselves change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wires.join()])
 
   return <g ref={layer} />
