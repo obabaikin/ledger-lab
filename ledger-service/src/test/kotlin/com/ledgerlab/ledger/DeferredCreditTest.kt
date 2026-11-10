@@ -13,6 +13,7 @@ import org.springframework.test.context.TestPropertySource
 import org.awaitility.Awaitility.await
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import javax.sql.DataSource
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -93,6 +94,34 @@ class DeferredCreditTest : IntegrationTest() {
     }
 
     @Test
+    fun `the applier and a batch taking the same accounts wait for each other instead of deadlocking`() {
+        val accounts = 200
+        val runId = openRun(accounts = accounts + 1, openingBalanceCents = 100_000)
+        val payer = accounts + 1
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            repeat(DEADLOCK_ROUNDS) {
+                // One by one: the applier takes credits in the order they were recorded, here against the order of the lock.
+                (accounts downTo 1).forEach { ledger.applyOne(transfer(runId, from = payer, to = it, amountCents = 1)) }
+                val start = CountDownLatch(1)
+                val applying = pool.submit { start.await(); applyAll() }
+                val posting = pool.submit(Callable { start.await(); ledger.applyBatch(List(accounts) { transfer(runId, from = it + 1, to = payer, amountCents = 1) }) })
+                start.countDown()
+
+                applying.get(30, TimeUnit.SECONDS)
+                assertThat(posting.get(30, TimeUnit.SECONDS)).containsOnly(TransferResult.Posted)
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+        applyAll()
+        assertThat(pendingCredits(runId)).isZero()
+        assertThat(runs.reconcile(runId).failedChecks).isEmpty()
+        // Thousands of results would keep the publisher and the readers of the results topic busy for the tests after this one.
+        runs.deleteRun(runId)
+    }
+
+    @Test
     fun `deleting a run deletes its pending credits`() {
         val runId = openRun()
         ledger.applyOne(transfer(runId, 2, 1, 100))
@@ -137,4 +166,8 @@ class DeferredCreditTest : IntegrationTest() {
     }
 
     private fun balances(runId: UUID) = runs.listAccounts(runId).associate { it.accountNo to it.balanceCents }
+
+    private companion object {
+        const val DEADLOCK_ROUNDS = 20
+    }
 }

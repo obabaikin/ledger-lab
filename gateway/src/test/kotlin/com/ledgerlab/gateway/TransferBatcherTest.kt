@@ -3,6 +3,7 @@ package com.ledgerlab.gateway
 import com.ledgerlab.gateway.domain.Transfer
 import com.ledgerlab.gateway.domain.TransferStatus
 import com.ledgerlab.gateway.service.AcceptTimeoutException
+import com.ledgerlab.gateway.service.GatewayStoppingException
 import com.ledgerlab.gateway.service.TransferBatcher
 import com.ledgerlab.gateway.service.TransferRequest
 import com.ledgerlab.gateway.service.TransferService
@@ -126,6 +127,30 @@ class TransferBatcherTest {
         firstHeld.await(5, TimeUnit.SECONDS)
 
         assertThatThrownBy { batcher.accept(request()) }.isInstanceOf(AcceptTimeoutException::class.java)
+    }
+
+    @Test
+    fun `requests still in the queue when the gateway stops are answered that it is stopping`() {
+        answering { requests -> requests.map { Result.success(it.row()) } }
+        batcher()
+        pool.submit<Transfer> { batcher.accept(request()) }
+        firstHeld.await(5, TimeUnit.SECONDS)
+        val queued = List(3) { pool.submit<Transfer> { batcher.accept(request()) } }
+        Thread.sleep(GATHER_MILLIS)
+
+        batcher.stop()
+
+        queued.forEach {
+            assertThatThrownBy { it.get(1, TimeUnit.SECONDS) }.hasCauseInstanceOf(GatewayStoppingException::class.java)
+        }
+    }
+
+    @Test
+    fun `a request arriving after the stop is refused at once`() {
+        answering { requests -> requests.map { Result.success(it.row()) } }
+        batcher().stop()
+
+        assertThatThrownBy { batcher.accept(request()) }.isInstanceOf(GatewayStoppingException::class.java)
     }
 
     private companion object {
