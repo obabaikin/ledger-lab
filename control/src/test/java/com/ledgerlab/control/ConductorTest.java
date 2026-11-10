@@ -612,6 +612,19 @@ class ConductorTest extends IntegrationTest {
     }
 
     @Test
+    @DisplayName("a report stored before notes and chaos existed is still read, with none of either")
+    void a_report_stored_before_notes_and_chaos_existed_is_still_read_with_none_of_either() {
+        var runId = draining();
+        bank(runId);
+        clientReconciles(runId);
+        conductor.tick();
+        jdbc.sql("UPDATE runs SET report = report - 'notes' - 'chaos' WHERE run_id = :id").param("id", runId).update();
+
+        assertThat((List<?>) reportOf(runId).get("notes")).isEmpty();
+        assertThat((List<?>) reportOf(runId).get("chaos")).isEmpty();
+    }
+
+    @Test
     @DisplayName("the report carries the transfers the gateway refused as busy, from the client reconciliation")
     void the_report_carries_the_transfers_the_gateway_refused_as_busy_from_the_client_reconciliation() {
         var runId = draining();

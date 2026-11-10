@@ -70,7 +70,12 @@ class WireContractTest {
             {"runId":"%s","transferId":"%s","outcome":null,"processedAt":"2026-10-11T10:00:00Z"}"""
             .formatted(UUID.randomUUID(), UUID.randomUUID());
 
+        var withoutAmount = """
+            {"runId":"%s","transferId":"%s","fromAccount":1,"toAccount":2,"createdAt":"2026-10-11T10:00:00Z"}"""
+            .formatted(UUID.randomUUID(), UUID.randomUUID());
+
         assertThatThrownBy(() -> mapper.readValue(command, TransferCommand.class)).isInstanceOf(JacksonException.class);
+        assertThatThrownBy(() -> mapper.readValue(withoutAmount, TransferCommand.class)).isInstanceOf(JacksonException.class);
         assertThatThrownBy(() -> mapper.readValue(event, TransferResultEvent.class)).isInstanceOf(JacksonException.class);
     }
 

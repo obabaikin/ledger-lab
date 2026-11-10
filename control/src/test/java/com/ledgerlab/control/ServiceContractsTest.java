@@ -1,6 +1,7 @@
 package com.ledgerlab.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ledgerlab.control.gateway.ClosedPeriod;
 import com.ledgerlab.control.gateway.GatewayApi;
@@ -25,19 +26,24 @@ import com.ledgerlab.control.reporting.SecondStats;
 import com.ledgerlab.control.reporting.StatsTotals;
 import java.io.File;
 import java.lang.reflect.RecordComponent;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Control's models of the ledger, gateway and generator against the specs those services serve (ADR 0011). */
 class ServiceContractsTest {
@@ -207,5 +213,71 @@ class ServiceContractsTest {
 
         var checks = names(ledger.schemaOf(ReconciliationReport.class).get("properties").get("failedChecks").get("items").get("enum"));
         assertThat(Arrays.stream(ReconciliationCheck.values()).map(Enum::name).toList()).containsExactlyInAnyOrderElementsOf(checks);
+    }
+
+    private static final List<Class<? extends Record>> ANSWERS = List.of(
+        RunSummary.class, ClosedPeriod.class, ReconciliationReport.class, RunStats.class, StatsTotals.class, SecondStats.class,
+        SimulationStatus.class, ClientReconciliationReport.class, ReconciliationBreaks.class, UnknownResolved.class, TransferIds.class);
+    private static final List<String> READ_WITH_A_DEFAULT = List.of("requestedPerSecond");
+
+    @Test
+    @DisplayName("an answer without a field control needs is unreadable, not read with nothing in the field")
+    void an_answer_without_a_field_control_needs_is_unreadable_not_read_with_nothing_in_the_field() throws Exception {
+        var mapper = new ObjectMapper();
+        for (var type : ANSWERS) {
+            for (var component : type.getRecordComponents()) {
+                if (component.getType().isPrimitive() || component.getAnnotatedType().isAnnotationPresent(Nullable.class)
+                    || READ_WITH_A_DEFAULT.contains(component.getName())) {
+                    continue;
+                }
+                ObjectNode answer = mapper.valueToTree(sampleOf(type));
+                answer.remove(component.getName());
+
+                assertThatThrownBy(() -> mapper.treeToValue(answer, type))
+                    .as(type.getSimpleName() + " without " + component.getName())
+                    .isInstanceOf(JacksonException.class);
+            }
+        }
+    }
+
+    private static Object sampleOf(Class<?> type) throws Exception {
+        if (type == UUID.class) {
+            return UUID.randomUUID();
+        }
+        if (type == Instant.class) {
+            return Instant.parse("2026-11-10T00:00:00Z");
+        }
+        if (type == String.class) {
+            return "text";
+        }
+        if (type == List.class) {
+            return List.of();
+        }
+        if (type == Map.class) {
+            return Map.of();
+        }
+        if (type == boolean.class) {
+            return false;
+        }
+        if (type == long.class) {
+            return 0L;
+        }
+        if (type == int.class) {
+            return 0;
+        }
+        if (type == Double.class) {
+            return 0.0;
+        }
+        if (type.isEnum()) {
+            return type.getEnumConstants()[0];
+        }
+        var components = type.getRecordComponents();
+        var types = new Class<?>[components.length];
+        var values = new Object[components.length];
+        for (var i = 0; i < components.length; i++) {
+            types[i] = components[i].getType();
+            values[i] = sampleOf(types[i]);
+        }
+        return type.getDeclaredConstructor(types).newInstance(values);
     }
 }
