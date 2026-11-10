@@ -12,6 +12,8 @@ gateway:
   close-lock-timeout: 1s
   warm-up:
     rounds: 20
+  periods:
+    key-cleanup-batch: 3
 logging:
   level:
     org.apache.kafka: WARN

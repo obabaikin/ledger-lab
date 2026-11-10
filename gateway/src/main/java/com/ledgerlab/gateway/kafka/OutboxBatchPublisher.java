@@ -1,6 +1,5 @@
 package com.ledgerlab.gateway.kafka;
 
-import com.ledgerlab.common.runs.TransferCommand;
 import com.ledgerlab.gateway.GatewayProperties;
 import com.ledgerlab.gateway.persistence.TransferRepository;
 import java.util.concurrent.CompletableFuture;
@@ -51,7 +50,7 @@ public class OutboxBatchPublisher {
             .map(command -> kafka.send(props.transfersTopic(), command.partitionKey(), objectMapper.writeValueAsString(command)))
             .toArray(CompletableFuture[]::new);
         CompletableFuture.allOf(sends).get(props.outbox().sendTimeout().toMillis(), TimeUnit.MILLISECONDS);
-        transfers.markPublished(commands.stream().map(TransferCommand::transferId).toList());
+        transfers.markPublished(commands);
         log.debug("Published {} transfer commands", commands.size());
         return commands.size();
     }

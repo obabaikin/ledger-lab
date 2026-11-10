@@ -1,7 +1,7 @@
 package com.ledgerlab.gateway.api;
 
 import com.ledgerlab.gateway.GatewayProperties;
-import com.ledgerlab.gateway.persistence.RunPeriodRepository;
+import com.ledgerlab.gateway.persistence.PeriodRepository;
 import com.ledgerlab.gateway.persistence.TransferRepository;
 import com.ledgerlab.gateway.service.TransferAdmission;
 import com.ledgerlab.gateway.service.TransferBatcher;
@@ -10,6 +10,7 @@ import com.ledgerlab.gateway.service.TransferService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validator;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
@@ -33,14 +34,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Runs the submission path before the gateway takes runs: a cold JIT answered the first seconds of a run after a
- * deploy with 503 busy. Every round is rolled back, so nothing reaches the transfers, the outbox or Kafka. The gateway
- * takes traffic after the short limit, so a deploy does not wait; control admits runs only once {@link #WARM} reads 1.
+ * Runs the submission path before the gateway takes traffic: a cold JIT answered the first seconds after a deploy
+ * with 503 busy. Every round is rolled back, so nothing reaches the transfers, the outbox or Kafka. The gateway takes
+ * traffic after the short limit, so a deploy does not wait; {@link #WARM} reads 1 once the rounds are over.
  */
 @Component
 public class TransferWarmUp implements ApplicationRunner {
 
-    /** 1 once the rounds are done or their limit passed; control reads it from Prometheus. */
+    /** 1 once the rounds are done or their limit passed. */
     public static final String WARM = "gateway.warm_up.complete";
     private static final int NOT_WARM = 0;
     private static final int WARM_VALUE = 1;
@@ -49,22 +50,24 @@ public class TransferWarmUp implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(TransferWarmUp.class);
 
     private final TransferRepository transfers;
-    private final RunPeriodRepository periods;
+    private final PeriodRepository periods;
     private final PlatformTransactionManager transactions;
     private final ObjectMapper objectMapper;
     private final Validator validator;
     private final ApplicationEventPublisher events;
     private final GatewayProperties props;
+    private final Clock clock;
     private final AtomicInteger warm = new AtomicInteger(NOT_WARM);
 
     public TransferWarmUp(
         TransferRepository transfers,
-        RunPeriodRepository periods,
+        PeriodRepository periods,
         PlatformTransactionManager transactions,
         ObjectMapper objectMapper,
         Validator validator,
         ApplicationEventPublisher events,
         GatewayProperties props,
+        Clock clock,
         MeterRegistry registry
     ) {
         this.transfers = transfers;
@@ -74,6 +77,7 @@ public class TransferWarmUp implements ApplicationRunner {
         this.validator = validator;
         this.events = events;
         this.props = props;
+        this.clock = clock;
         registry.gauge(WARM, warm);
     }
 
@@ -131,7 +135,7 @@ public class TransferWarmUp implements ApplicationRunner {
         }
     }
 
-    /** Warm also when the rounds failed or got stuck: runs must not wait for a gateway that will never get warmer. */
+    /** Warm also when the rounds failed or got stuck: such a gateway will never get warmer. */
     private void finish(ExecutorService executor) {
         warm.set(WARM_VALUE);
         executor.shutdownNow();
@@ -140,7 +144,7 @@ public class TransferWarmUp implements ApplicationRunner {
     private int rounds(long deadline) throws InterruptedException {
         // Instances of its own count into a registry nobody reads: the rounds are not transfers.
         var registry = new SimpleMeterRegistry();
-        var service = new TransferService(transfers, periods, registry);
+        var service = new TransferService(transfers, periods, props, clock, registry);
         var rolledBack = new TransactionTemplate(transactions);
         var batcher = new TransferBatcher(
             requests -> Objects.requireNonNull(
@@ -166,14 +170,13 @@ public class TransferWarmUp implements ApplicationRunner {
     }
 
     private void round(TransferBatcher batcher, TransferAdmission admission) throws InterruptedException {
-        var body = objectMapper.writeValueAsString(new SubmitTransferRequest(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 1));
+        var body = objectMapper.writeValueAsString(new SubmitTransferRequest(UUID.randomUUID(), 1, 2, 1));
         var request = objectMapper.readValue(body, SubmitTransferRequest.class);
         if (!validator.validate(request).isEmpty()) {
             throw new IllegalStateException("the warm-up request is invalid");
         }
         var transfer = admission.admit(() -> batcher.accept(new TransferRequest(
             Objects.requireNonNull(request.transferId(), "transferId of the warm-up request"),
-            Objects.requireNonNull(request.runId(), "runId of the warm-up request"),
             request.fromAccount(),
             request.toAccount(),
             request.amountCents())));

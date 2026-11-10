@@ -92,11 +92,12 @@ public class TransferBatcher {
 
     /** Returns after the commit, with the outcome a request of its own would have had. */
     public Transfer accept(TransferRequest request) throws InterruptedException {
-        if (stopping) {
-            throw new GatewayStoppingException();
-        }
         var pending = new Pending(request);
         queue.put(pending);
+        // After the put, not before: a stop that emptied the queue just before it would leave this request to its timeout.
+        if (stopping && queue.remove(pending)) {
+            throw new GatewayStoppingException();
+        }
         try {
             return pending.result().get(answerTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (ExecutionException e) {

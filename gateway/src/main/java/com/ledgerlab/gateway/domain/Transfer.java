@@ -7,7 +7,6 @@ import org.jspecify.annotations.Nullable;
 
 public record Transfer(
     UUID transferId,
-    UUID runId,
     int fromAccount,
     int toAccount,
     long amountCents,

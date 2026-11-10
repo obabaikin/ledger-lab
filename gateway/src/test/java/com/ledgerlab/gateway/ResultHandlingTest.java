@@ -11,6 +11,7 @@ import com.ledgerlab.gateway.service.ResultWaiters;
 import com.ledgerlab.gateway.service.TransferService;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -28,13 +29,12 @@ class ResultHandlingTest extends IntegrationTest {
     @Test
     void a_result_from_the_ledger_becomes_the_transfer_status() throws Exception {
         var transferId = UUID.randomUUID();
-        var runId = UUID.randomUUID();
-        submit(body(transferId, runId));
+        submit(body(transferId));
 
-        publishResult(runId, transferId, TransferOutcome.REJECTED, RejectReason.INSUFFICIENT_FUNDS);
+        publishResult(transferId, TransferOutcome.REJECTED, RejectReason.INSUFFICIENT_FUNDS);
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
-            var response = get("/v1/transfers/" + transferId);
+            var response = status(transferId);
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody().get("status")).isEqualTo(TransferStatus.REJECTED.name());
             assertThat(response.getBody().get("rejectReason")).isEqualTo(RejectReason.INSUFFICIENT_FUNDS.name());
@@ -45,12 +45,11 @@ class ResultHandlingTest extends IntegrationTest {
     void a_waiting_request_is_answered_with_the_status_the_recorder_committed() throws Exception {
         var readsBefore = registry.summary("gateway.wait.reads").count();
         var transferId = UUID.randomUUID();
-        var runId = UUID.randomUUID();
         try (var pool = Executors.newSingleThreadExecutor()) {
-            var pending = pool.submit(() -> submit(body(transferId, runId), "PT5S"));
+            var pending = pool.submit(() -> submit(body(transferId), "PT5S"));
             await().atMost(Duration.ofSeconds(10)).until(() -> waiters.size() > 0);
 
-            publishResult(runId, transferId, TransferOutcome.POSTED);
+            publishResult(transferId, TransferOutcome.POSTED);
 
             var response = pending.get();
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -66,17 +65,16 @@ class ResultHandlingTest extends IntegrationTest {
         throws Exception {
         var readsBefore = registry.summary("gateway.wait.reads").totalAmount();
         var transferId = UUID.randomUUID();
-        var runId = UUID.randomUUID();
         try (var pool = Executors.newSingleThreadExecutor()) {
-            var pending = pool.submit(() -> submit(body(transferId, runId), "PT5S"));
+            var pending = pool.submit(() -> submit(body(transferId), "PT5S"));
             await().atMost(Duration.ofSeconds(10)).until(() -> waiters.size() > 0);
 
             // Wake the request directly, bypassing Kafka, so the recorder never writes this result.
-            waiters.complete(new LedgerResult(runId, transferId, TransferOutcome.POSTED, null));
+            waiters.complete(new LedgerResult(transferId, TransferOutcome.POSTED, null, storedAcceptedAt(transferId)));
 
             var answer = pending.get();
             assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-            var stored = get("/v1/transfers/" + transferId);
+            var stored = status(transferId);
             assertThat(stored.getBody().get("status")).isIn(TransferStatus.ACCEPTED.name(), TransferStatus.PUBLISHED.name());
             assertThat(stored.getBody().get("resultedAt")).isNull();
             assertThat(registry.summary("gateway.wait.reads").totalAmount() - readsBefore).isEqualTo(props.waitRead().maxReads());
@@ -86,16 +84,15 @@ class ResultHandlingTest extends IntegrationTest {
     @Test
     void two_requests_waiting_for_the_same_transfer_are_both_answered() throws Exception {
         var transferId = UUID.randomUUID();
-        var runId = UUID.randomUUID();
         try (var pool = Executors.newFixedThreadPool(2)) {
-            var first = pool.submit(() -> submit(body(transferId, runId), "PT0.5S"));
-            var second = pool.submit(() -> submit(body(transferId, runId), "PT5S"));
+            var first = pool.submit(() -> submit(body(transferId), "PT0.5S"));
+            var second = pool.submit(() -> submit(body(transferId), "PT5S"));
             await().atMost(Duration.ofSeconds(10)).until(() -> waiters.size() == 2);
 
             assertThat(first.get().getStatusCode()).isEqualTo(HttpStatus.ACCEPTED); // the short wait times out first
             await().atMost(Duration.ofSeconds(5)).until(() -> waiters.size() == 1);
 
-            publishResult(runId, transferId, TransferOutcome.POSTED);
+            publishResult(transferId, TransferOutcome.POSTED);
 
             var response = second.get();
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -117,12 +114,11 @@ class ResultHandlingTest extends IntegrationTest {
     @Test
     void a_repeated_submission_after_the_result_returns_the_final_state_immediately() throws Exception {
         var transferId = UUID.randomUUID();
-        var runId = UUID.randomUUID();
-        var request = body(transferId, runId);
+        var request = body(transferId);
         submit(request);
-        publishResult(runId, transferId, TransferOutcome.POSTED);
+        publishResult(transferId, TransferOutcome.POSTED);
         await().atMost(Duration.ofSeconds(30)).until(() ->
-            TransferStatus.POSTED.name().equals(get("/v1/transfers/" + transferId).getBody().get("status")));
+            TransferStatus.POSTED.name().equals(status(transferId).getBody().get("status")));
 
         var again = submit(request, "PT5S");
 
@@ -133,32 +129,31 @@ class ResultHandlingTest extends IntegrationTest {
     @Test
     void a_result_that_arrives_before_the_outbox_mark_does_not_get_downgraded() throws Exception {
         var transferId = UUID.randomUUID();
-        var runId = UUID.randomUUID();
-        submit(body(transferId, runId));
+        submit(body(transferId));
 
-        publishResult(runId, transferId, TransferOutcome.POSTED);
+        publishResult(transferId, TransferOutcome.POSTED);
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
-            assertThat(get("/v1/transfers/" + transferId).getBody().get("status")).isEqualTo(TransferStatus.POSTED.name()));
+            assertThat(status(transferId).getBody().get("status")).isEqualTo(TransferStatus.POSTED.name()));
         Thread.sleep(300); // give the outbox publisher time to run after the result
-        assertThat(get("/v1/transfers/" + transferId).getBody().get("status")).isEqualTo(TransferStatus.POSTED.name());
+        assertThat(status(transferId).getBody().get("status")).isEqualTo(TransferStatus.POSTED.name());
     }
 
     @Test
     void a_poll_of_results_is_recorded_in_one_update_and_a_final_status_is_never_overwritten() {
-        var runId = UUID.randomUUID();
         var posted = UUID.randomUUID();
         var rejected = UUID.randomUUID();
         var unknown = UUID.randomUUID();
-        submit(body(posted, runId));
-        submit(body(rejected, runId));
+        submit(body(posted));
+        submit(body(rejected));
 
         service.recordResults(
             List.of(
-                new LedgerResult(runId, posted, TransferOutcome.POSTED, null),
-                new LedgerResult(runId, rejected, TransferOutcome.REJECTED, RejectReason.BLOCKED_ACCOUNT.name()),
-                new LedgerResult(runId, unknown, TransferOutcome.POSTED, null)));
-        service.recordResults(List.of(new LedgerResult(runId, posted, TransferOutcome.REJECTED, RejectReason.INSUFFICIENT_FUNDS.name())));
+                new LedgerResult(posted, TransferOutcome.POSTED, null, storedAcceptedAt(posted)),
+                new LedgerResult(rejected, TransferOutcome.REJECTED, RejectReason.BLOCKED_ACCOUNT.name(), storedAcceptedAt(rejected)),
+                new LedgerResult(unknown, TransferOutcome.POSTED, null, Instant.now())));
+        service.recordResults(
+            List.of(new LedgerResult(posted, TransferOutcome.REJECTED, RejectReason.INSUFFICIENT_FUNDS.name(), storedAcceptedAt(posted))));
 
         assertThat(service.find(posted).status()).isEqualTo(TransferStatus.POSTED);
         assertThat(service.find(posted).rejectReason()).isNull();

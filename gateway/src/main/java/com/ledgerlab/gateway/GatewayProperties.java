@@ -13,16 +13,17 @@ public record GatewayProperties(
     Duration maxWait,
     WaitRead waitRead,
     Duration retryAfter,
-    // How long closing a period waits for inserts in flight; meanwhile new submissions of the run wait too.
+    // How long closing a period waits for inserts in flight; meanwhile new submissions wait too.
     Duration closeLockTimeout,
     Inflight inflight,
     Admission admission,
     Accept accept,
-    WarmUp warmUp
+    WarmUp warmUp,
+    Periods periods
 ) {
     /**
      * Up to {@link #rounds} rounds of the submission path. The gateway takes traffic after at most {@link #duration}; the rounds go
-     * on behind it for at most {@link #maxDuration}, and only then does it report itself warm (control admits runs after that).
+     * on behind it for at most {@link #maxDuration}, and only then does it report itself warm.
      */
     public record WarmUp(int rounds, Duration duration, Duration maxDuration) {
     }
@@ -47,5 +48,26 @@ public record GatewayProperties(
     }
 
     public record Consumer(Duration retryBackoff) {
+    }
+
+    /**
+     * Transfers are held for {@link #retention} after their period ended, and a repeated key gets the first answer for as
+     * long (ADR 0022). Keys older than that are deleted every {@link #keyCleanupInterval}, {@link #keyCleanupBatch} per statement.
+     */
+    public record Periods(
+        Duration length,
+        Duration retention,
+        Duration partitionsAhead,
+        Duration maintenanceInterval,
+        Duration lockTimeout,
+        Duration keyCleanupInterval,
+        int keyCleanupBatch
+    ) {
+        /** Partitions are named to the minute of their period's start. */
+        public Periods {
+            if (length.compareTo(Duration.ofMinutes(1)) < 0 || !length.equals(Duration.ofMinutes(length.toMinutes()))) {
+                throw new IllegalArgumentException("gateway.periods.length must be whole minutes, at least one");
+            }
+        }
     }
 }

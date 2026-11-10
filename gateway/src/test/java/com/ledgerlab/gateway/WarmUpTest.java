@@ -2,17 +2,19 @@ package com.ledgerlab.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 
 import com.ledgerlab.gateway.api.TransferWarmUp;
-import com.ledgerlab.gateway.persistence.RunPeriodRepository;
+import com.ledgerlab.gateway.persistence.PeriodRepository;
 import com.ledgerlab.gateway.persistence.TransferRepository;
 import com.ledgerlab.gateway.service.TransferBatcher;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validator;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -41,7 +43,8 @@ class WarmUpTest extends IntegrationTest {
     @Autowired JdbcClient jdbc;
     @Autowired MeterRegistry registry;
     @Autowired TransferRepository transfers;
-    @Autowired RunPeriodRepository periods;
+    @Autowired PeriodRepository periods;
+    @Autowired Clock clock;
     @Autowired PlatformTransactionManager transactions;
     @Autowired Validator validator;
     @Autowired ApplicationEventPublisher events;
@@ -53,8 +56,8 @@ class WarmUpTest extends IntegrationTest {
     private record OwnWarmUp(TransferWarmUp warmUp, MeterRegistry registry) {
     }
 
-    private long transferRows() {
-        return jdbc.sql("SELECT count(*) FROM transfers").query(Long.class).single();
+    private long rows() {
+        return jdbc.sql("SELECT (SELECT count(*) FROM transfers) + (SELECT count(*) FROM transfer_keys)").query(Long.class).single();
     }
 
     private double accepted() {
@@ -93,15 +96,15 @@ class WarmUpTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("the warm-up writes no transfer and counts none")
-    void the_warm_up_writes_no_transfer_and_counts_none() throws InterruptedException {
-        var rows = transferRows();
+    @DisplayName("the warm-up writes no transfer and no key and counts none")
+    void the_warm_up_writes_no_transfer_and_no_key_and_counts_none() throws InterruptedException {
+        var rows = rows();
         var counted = accepted();
 
         warmUp.warmUp();
         awaitWarm(registry);
 
-        assertThat(transferRows()).isEqualTo(rows);
+        assertThat(rows()).isEqualTo(rows);
         assertThat(accepted()).isEqualTo(counted);
     }
 
@@ -112,9 +115,9 @@ class WarmUpTest extends IntegrationTest {
         doAnswer(call -> {
             pause.run();
             return real.answer(call);
-        }).when(stubbed).insertAllIfAbsent(anyList());
+        }).when(stubbed).insertAllIfAbsent(anyList(), any());
         var ownRegistry = new SimpleMeterRegistry();
-        return new OwnWarmUp(new TransferWarmUp(stubbed, periods, transactions, objectMapper, validator, events, props, ownRegistry), ownRegistry);
+        return new OwnWarmUp(new TransferWarmUp(stubbed, periods, transactions, objectMapper, validator, events, props, clock, ownRegistry), ownRegistry);
     }
 
     @Test
@@ -143,8 +146,8 @@ class WarmUpTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("a round stuck on the database holds back neither the traffic nor, past the long limit, the runs")
-    void a_round_stuck_on_the_database_holds_back_neither_the_traffic_nor_past_the_long_limit_the_runs(CapturedOutput output)
+    @DisplayName("a round stuck on the database does not hold back the traffic, and past the long limit the gateway reports itself warm")
+    void a_round_stuck_on_the_database_does_not_hold_back_the_traffic_and_past_the_long_limit_the_gateway_reports_itself_warm(CapturedOutput output)
         throws InterruptedException {
         var stuck = new CountDownLatch(1);
         var stuckWarmUp = warmUpWithInsertAfter(stuck::await);

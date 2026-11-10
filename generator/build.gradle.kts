@@ -22,7 +22,9 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     // The bank's published API: the generator's model of it is checked against this file, not against the bank's classes.
-    val bankSpec = rootProject.file("gateway/openapi.json")
+    // The gateway already serves periods; the generator still talks to the bank of runs and is checked against that
+    // bank's spec until it moves to periods itself.
+    val bankSpec = file("src/test/runs-specs/bank.json")
     inputs.file(bankSpec).withPropertyName("bankSpec")
     systemProperty("bank.spec", bankSpec.path)
     val spec = file("openapi.json")

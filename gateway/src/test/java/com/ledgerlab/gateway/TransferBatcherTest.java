@@ -63,13 +63,13 @@ class TransferBatcherTest {
     }
 
     private static TransferRequest request() {
-        return new TransferRequest(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100);
+        return new TransferRequest(UUID.randomUUID(), 1, 2, 100);
     }
 
     private static List<AcceptOutcome> allAccepted(List<TransferRequest> requests) {
         return requests.stream()
             .<AcceptOutcome>map(it -> new AcceptOutcome.Accepted(new Transfer(
-                it.transferId(), it.runId(), it.fromAccount(), it.toAccount(), it.amountCents(), TransferStatus.ACCEPTED, null, Instant.now(), null)))
+                it.transferId(), it.fromAccount(), it.toAccount(), it.amountCents(), TransferStatus.ACCEPTED, null, Instant.now(), null)))
             .toList();
     }
 
@@ -187,10 +187,12 @@ class TransferBatcherTest {
     }
 
     @Test
-    void a_request_arriving_after_the_stop_is_refused_at_once() throws Exception {
+    @DisplayName("a request arriving after the stop began is refused as stopping, not left to its timeout")
+    void a_request_arriving_after_the_stop_began_is_refused_as_stopping_not_left_to_its_timeout() throws Exception {
         answering(TransferBatcherTest::allAccepted);
-        batcher().stop();
+        batcher(Duration.ofMillis(500)).stop();
 
         assertThatThrownBy(() -> batcher.accept(request())).isInstanceOf(GatewayStoppingException.class);
+        assertThat(calls).isEmpty();
     }
 }

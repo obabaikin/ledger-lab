@@ -17,26 +17,28 @@
             "format" : "date-time",
             "type" : "string"
           },
-          "runId" : {
-            "format" : "uuid",
+          "entryCount" : {
+            "description" : "Transfers accepted in the period, any status.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "periodStart" : {
+            "format" : "date-time",
             "type" : "string"
           }
         },
+        "required" : [ "entryCount" ],
         "type" : "object"
       },
-      "RunSummary" : {
+      "PeriodSummary" : {
         "properties" : {
           "accepted" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "latencyP50Ms" : {
-            "format" : "double",
-            "type" : [ "number", "null" ]
-          },
-          "latencyP99Ms" : {
-            "format" : "double",
-            "type" : [ "number", "null" ]
+          "periodStart" : {
+            "format" : "date-time",
+            "type" : "string"
           },
           "posted" : {
             "format" : "int64",
@@ -56,55 +58,29 @@
               "type" : "integer"
             },
             "type" : "object"
-          },
-          "runId" : {
-            "format" : "uuid",
-            "type" : "string"
           }
         },
+        "required" : [ "accepted", "posted", "published", "rejected" ],
         "type" : "object"
       }
     }
   },
   "info" : {
-    "description" : "Run summary, period close and run deletion, for control.",
+    "description" : "Period summary and period close, for control.",
     "title" : "Ledger Lab gateway internal API",
-    "version" : "1"
+    "version" : "2"
   },
   "openapi" : "3.1.0",
   "paths" : {
-    "/internal/runs/{runId}" : {
-      "delete" : {
-        "operationId" : "delete",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "204" : {
-            "description" : "Deleted"
-          },
-          "404" : {
-            "description" : "Unknown run"
-          }
-        },
-        "tags" : [ "run-controller" ]
-      }
-    },
-    "/internal/runs/{runId}/close" : {
+    "/internal/periods/{periodStart}/close" : {
       "post" : {
         "operationId" : "close",
         "parameters" : [ {
           "in" : "path",
-          "name" : "runId",
+          "name" : "periodStart",
           "required" : true,
           "schema" : {
-            "format" : "uuid",
+            "format" : "date-time",
             "type" : "string"
           }
         } ],
@@ -117,7 +93,17 @@
                 }
               }
             },
-            "description" : "Closed; a repeat returns the same closedAt"
+            "description" : "Closed; a repeat returns the same answer"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not a period, not ended yet, or older than the gateway keeps"
           },
           "503" : {
             "content" : {
@@ -127,21 +113,22 @@
                 }
               }
             },
-            "description" : "Transfers of the run kept the lock past the timeout"
+            "description" : "Inserts in flight kept the lock past the timeout; ask again"
           }
         },
-        "tags" : [ "run-controller" ]
+        "summary" : "Close an ended period: fix the set of its transfers",
+        "tags" : [ "period-controller" ]
       }
     },
-    "/internal/runs/{runId}/summary" : {
+    "/internal/periods/{periodStart}/summary" : {
       "get" : {
         "operationId" : "summary",
         "parameters" : [ {
           "in" : "path",
-          "name" : "runId",
+          "name" : "periodStart",
           "required" : true,
           "schema" : {
-            "format" : "uuid",
+            "format" : "date-time",
             "type" : "string"
           }
         } ],
@@ -150,14 +137,25 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/RunSummary"
+                  "$ref" : "#/components/schemas/PeriodSummary"
                 }
               }
             },
-            "description" : "The run's counts; an unknown run has zeros"
+            "description" : "Counted now"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not a period, not begun yet, or older than the gateway keeps"
           }
         },
-        "tags" : [ "run-controller" ]
+        "summary" : "Transfers accepted in the period, by status",
+        "tags" : [ "period-controller" ]
       }
     }
   }

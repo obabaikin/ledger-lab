@@ -1,10 +1,10 @@
 package com.ledgerlab.gateway.service;
 
-import java.util.UUID;
+import java.time.Instant;
 
 public class PeriodNotClosedException extends RuntimeException {
 
-    public PeriodNotClosedException(UUID runId) {
-        super("The period of run " + runId + " is not closed");
+    public PeriodNotClosedException(Instant periodStart) {
+        super("The period from " + periodStart + " is not closed");
     }
 }

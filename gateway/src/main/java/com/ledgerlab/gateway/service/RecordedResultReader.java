@@ -2,11 +2,10 @@ package com.ledgerlab.gateway.service;
 
 import com.ledgerlab.gateway.GatewayProperties;
 import com.ledgerlab.gateway.domain.Transfer;
+import com.ledgerlab.gateway.persistence.TransferKey;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
-import java.util.UUID;
-import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
@@ -35,15 +34,17 @@ public class RecordedResultReader {
     }
 
     /** The row once it is final, or as it stands after the last read or when {@code deadlineNanos} (of {@link System#nanoTime}) passes. */
-    public @Nullable Transfer readFinal(UUID transferId, long deadlineNanos) throws InterruptedException {
+    public Transfer readFinal(Transfer accepted, long deadlineNanos) throws InterruptedException {
+        var key = TransferKey.of(accepted);
         var pause = firstPause;
         var count = 0;
         while (true) {
             var left = Duration.ofNanos(Math.max(deadlineNanos - System.nanoTime(), 0));
             Thread.sleep(pause.compareTo(left) <= 0 ? pause : left);
-            var row = service.find(transferId);
+            var found = service.find(key);
+            var row = found != null ? found : accepted;
             count++;
-            if (row == null || row.status().isFinal() || count == maxReads || System.nanoTime() >= deadlineNanos) {
+            if (found == null || row.status().isFinal() || count == maxReads || System.nanoTime() >= deadlineNanos) {
                 reads.record(count);
                 return row;
             }

@@ -1,24 +1,240 @@
 {
-  "openapi" : "3.1.0",
-  "info" : {
-    "title" : "Ledger Lab bank API",
-    "description" : "Transfers and the statement of a closed period.",
-    "version" : "1"
+  "components" : {
+    "schemas" : {
+      "ApiError" : {
+        "description" : "Body of an error answer.",
+        "properties" : {
+          "error" : {
+            "description" : "Names the case; the status code tells it apart.",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Statement" : {
+        "description" : "One page of a closed period's statement.",
+        "properties" : {
+          "closedAt" : {
+            "description" : "When the period was closed; every transfer accepted in it had been written by then.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "entryCount" : {
+            "description" : "Lines in the whole statement, any status; the same on every page.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/StatementLine"
+            },
+            "type" : "array"
+          },
+          "next" : {
+            "description" : "Pass as `after` for the next page; null on the last page.",
+            "type" : [ "string", "null" ]
+          },
+          "periodStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "entryCount" ],
+        "type" : "object"
+      },
+      "StatementLine" : {
+        "description" : "A transfer the bank accepted in the period.",
+        "properties" : {
+          "acceptedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "amountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "fromAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "rejectReason" : {
+            "description" : "Set when status is REJECTED; null if the reason is newer than this API version.",
+            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
+            "type" : [ "string", "null" ]
+          },
+          "resultedAt" : {
+            "description" : "When the final status was recorded; null while not final.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "description" : "A transfer's state at the bank; POSTED and REJECTED are final.",
+            "enum" : [ "ACCEPTED", "PUBLISHED", "POSTED", "REJECTED" ],
+            "type" : "string"
+          },
+          "toAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "transferId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "SubmitTransferRequest" : {
+        "description" : "A transfer to submit.",
+        "properties" : {
+          "amountCents" : {
+            "format" : "int64",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "fromAccount" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "toAccount" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "transferId" : {
+            "description" : "Idempotency key: a repeat with the same body within the idempotency window gets the same transfer.",
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "amountCents", "fromAccount", "toAccount", "transferId" ],
+        "type" : "object"
+      },
+      "TransferResponse" : {
+        "description" : "A transfer as the bank sees it now.",
+        "properties" : {
+          "acceptedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "rejectReason" : {
+            "description" : "Set when status is REJECTED; null if the reason is newer than this API version.",
+            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
+            "type" : [ "string", "null" ]
+          },
+          "resultedAt" : {
+            "description" : "When the final status was recorded; null while not final.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "description" : "A transfer's state at the bank; POSTED and REJECTED are final.",
+            "enum" : [ "ACCEPTED", "PUBLISHED", "POSTED", "REJECTED" ],
+            "type" : "string"
+          },
+          "transferId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      }
+    }
   },
+  "info" : {
+    "description" : "Transfers and the statement of a closed period. Periods are PT1H long, on a grid from the epoch. A transfer and its key are kept for PT4H (the idempotency window): after that the transfer is no longer found, and the same key is taken as a new transfer.",
+    "title" : "Ledger Lab bank API",
+    "version" : "2"
+  },
+  "openapi" : "3.1.0",
   "paths" : {
-    "/v1/transfers" : {
-      "post" : {
-        "tags" : [ "transfer-controller" ],
-        "summary" : "Submit a transfer",
-        "operationId" : "submit",
+    "/v2/periods/{periodStart}/statement" : {
+      "get" : {
+        "operationId" : "statement",
         "parameters" : [ {
-          "name" : "wait",
+          "description" : "Start of the period, an ISO-8601 instant on the bank's grid of periods",
+          "in" : "path",
+          "name" : "periodStart",
+          "required" : true,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }, {
+          "description" : "The `next` of the previous page; omit for the first page",
           "in" : "query",
-          "description" : "ISO-8601 duration to wait for the final status, capped by the bank",
+          "name" : "after",
           "required" : false,
           "schema" : {
-            "type" : "string",
-            "format" : "duration"
+            "type" : "string"
+          }
+        }, {
+          "description" : "Page size, 1 to 1000, default 100",
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Statement"
+                }
+              }
+            },
+            "description" : "The page"
+          },
+          "400" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Invalid limit, or `after` is not the `next` of a page of this period"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not a period, not begun yet, or older than the bank keeps transfers"
+          },
+          "409" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The period is not closed yet"
+          }
+        },
+        "summary" : "A page of a closed period's statement: the transfers accepted in it, in the order accepted",
+        "tags" : [ "statement-controller" ]
+      }
+    },
+    "/v2/transfers" : {
+      "post" : {
+        "operationId" : "submit",
+        "parameters" : [ {
+          "description" : "ISO-8601 duration to wait for the final status, capped by the bank",
+          "in" : "query",
+          "name" : "wait",
+          "required" : false,
+          "schema" : {
+            "format" : "duration",
+            "type" : "string"
           }
         } ],
         "requestBody" : {
@@ -33,317 +249,92 @@
         },
         "responses" : {
           "200" : {
-            "description" : "Final status",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TransferResponse"
                 }
               }
-            }
+            },
+            "description" : "Final status"
           },
           "202" : {
-            "description" : "Accepted, not final yet; Retry-After says when to ask again",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TransferResponse"
                 }
               }
-            }
+            },
+            "description" : "Accepted, not final yet; Retry-After says when to ask again"
           },
           "400" : {
             "description" : "Invalid body"
           },
-          "409" : {
-            "description" : "The run's period is closed",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
           "422" : {
-            "description" : "The key was used with a different body",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description" : "The key was used with a different body within the idempotency window"
           },
           "503" : {
-            "description" : "With error \"busy\": too many transfers in progress, this one was not taken; retry with the same key after Retry-After. Any other 5xx leaves the transfer unknown.",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description" : "With error \"busy\" (too many transfers in progress) or \"stopping\" (this instance is shutting down): the transfer was not taken; retry with the same key after Retry-After. Any other 5xx leaves the transfer unknown."
           }
-        }
+        },
+        "summary" : "Submit a transfer",
+        "tags" : [ "transfer-controller" ]
       }
     },
-    "/v1/transfers/{transferId}" : {
+    "/v2/transfers/{transferId}" : {
       "get" : {
-        "tags" : [ "transfer-controller" ],
-        "summary" : "A transfer's current status",
         "operationId" : "status",
         "parameters" : [ {
-          "name" : "transferId",
           "in" : "path",
+          "name" : "transferId",
           "required" : true,
           "schema" : {
-            "type" : "string",
-            "format" : "uuid"
+            "format" : "uuid",
+            "type" : "string"
           }
         } ],
         "responses" : {
           "200" : {
-            "description" : "Final status",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TransferResponse"
                 }
               }
-            }
+            },
+            "description" : "Final status"
           },
           "202" : {
-            "description" : "Not final yet; Retry-After says when to ask again",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TransferResponse"
                 }
               }
-            }
+            },
+            "description" : "Not final yet; Retry-After says when to ask again"
           },
           "404" : {
-            "description" : "Unknown transfer"
-          }
-        }
-      }
-    },
-    "/v1/runs/{runId}/statement" : {
-      "get" : {
-        "tags" : [ "statement-controller" ],
-        "summary" : "A page of the closed period's statement",
-        "operationId" : "statement",
-        "parameters" : [ {
-          "name" : "runId",
-          "in" : "path",
-          "required" : true,
-          "schema" : {
-            "type" : "string",
-            "format" : "uuid"
-          }
-        }, {
-          "name" : "after",
-          "in" : "query",
-          "description" : "The `next` of the previous page; omit for the first page",
-          "required" : false,
-          "schema" : {
-            "type" : "string",
-            "format" : "uuid"
-          }
-        }, {
-          "name" : "limit",
-          "in" : "query",
-          "description" : "Page size, 1 to 1000, default 100",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int32"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "description" : "The page",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/Statement"
-                }
-              }
-            }
-          },
-          "400" : {
-            "description" : "Invalid limit, or `after` is not a transfer of the run",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409" : {
-            "description" : "The period is not closed yet",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
-  "components" : {
-    "schemas" : {
-      "SubmitTransferRequest" : {
-        "type" : "object",
-        "description" : "A transfer to submit.",
-        "properties" : {
-          "transferId" : {
-            "type" : [ "string", "null" ],
-            "format" : "uuid",
-            "description" : "Idempotency key: a repeat with the same body gets the same transfer."
-          },
-          "runId" : {
-            "type" : [ "string", "null" ],
-            "format" : "uuid"
-          },
-          "fromAccount" : {
-            "type" : "integer",
-            "format" : "int32",
-            "minimum" : 1
-          },
-          "toAccount" : {
-            "type" : "integer",
-            "format" : "int32",
-            "minimum" : 1
-          },
-          "amountCents" : {
-            "type" : "integer",
-            "format" : "int64",
-            "minimum" : 1
+            "description" : "Not accepted, or accepted longer ago than the idempotency window"
           }
         },
-        "required" : [ "amountCents", "fromAccount", "runId", "toAccount", "transferId" ]
-      },
-      "ApiError" : {
-        "type" : "object",
-        "description" : "Body of an error answer.",
-        "properties" : {
-          "error" : {
-            "type" : "string",
-            "description" : "Names the case; the status code tells it apart."
-          }
-        }
-      },
-      "TransferResponse" : {
-        "type" : "object",
-        "description" : "A transfer as the bank sees it now.",
-        "properties" : {
-          "transferId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "runId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "status" : {
-            "type" : "string",
-            "description" : "A transfer's state at the bank; POSTED and REJECTED are final.",
-            "enum" : [ "ACCEPTED", "PUBLISHED", "POSTED", "REJECTED" ]
-          },
-          "rejectReason" : {
-            "type" : [ "string", "null" ],
-            "description" : "Set when status is REJECTED; null if the reason is newer than this API version.",
-            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ]
-          },
-          "acceptedAt" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "resultedAt" : {
-            "type" : [ "string", "null" ],
-            "format" : "date-time",
-            "description" : "When the final status was recorded; null while not final."
-          }
-        }
-      },
-      "Statement" : {
-        "type" : "object",
-        "description" : "One page of a closed period's statement.",
-        "properties" : {
-          "runId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "closedAt" : {
-            "type" : "string",
-            "format" : "date-time",
-            "description" : "When the period was closed; no transfer of the run is accepted after it."
-          },
-          "entryCount" : {
-            "type" : "integer",
-            "format" : "int64",
-            "description" : "Lines in the whole statement, any status; the same on every page."
-          },
-          "items" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/StatementLine"
-            }
-          },
-          "next" : {
-            "type" : [ "string", "null" ],
-            "format" : "uuid",
-            "description" : "Pass as `after` for the next page; null on the last page."
-          }
-        },
-        "required" : [ "entryCount" ]
-      },
-      "StatementLine" : {
-        "type" : "object",
-        "description" : "A transfer the bank accepted in the closed period.",
-        "properties" : {
-          "transferId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "fromAccount" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "toAccount" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "amountCents" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "status" : {
-            "type" : "string",
-            "description" : "A transfer's state at the bank; POSTED and REJECTED are final.",
-            "enum" : [ "ACCEPTED", "PUBLISHED", "POSTED", "REJECTED" ]
-          },
-          "rejectReason" : {
-            "type" : [ "string", "null" ],
-            "description" : "Set when status is REJECTED; null if the reason is newer than this API version.",
-            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ]
-          },
-          "acceptedAt" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "resultedAt" : {
-            "type" : [ "string", "null" ],
-            "format" : "date-time",
-            "description" : "When the final status was recorded; null while not final."
-          }
-        }
+        "summary" : "A transfer's current status",
+        "tags" : [ "transfer-controller" ]
       }
     }
   }

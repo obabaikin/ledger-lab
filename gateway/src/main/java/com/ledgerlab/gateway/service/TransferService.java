@@ -1,16 +1,18 @@
 package com.ledgerlab.gateway.service;
 
 import com.ledgerlab.common.Observability;
-import com.ledgerlab.gateway.domain.RunSummary;
+import com.ledgerlab.gateway.GatewayProperties;
 import com.ledgerlab.gateway.domain.Transfer;
-import com.ledgerlab.gateway.persistence.RunPeriodRepository;
+import com.ledgerlab.gateway.persistence.PeriodRepository;
+import com.ledgerlab.gateway.persistence.TransferKey;
 import com.ledgerlab.gateway.persistence.TransferRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -28,14 +30,18 @@ import org.springframework.transaction.annotation.Transactional;
 public class TransferService {
 
     private final TransferRepository transfers;
-    private final RunPeriodRepository periods;
+    private final PeriodRepository periods;
+    private final Duration idempotencyWindow;
+    private final Clock clock;
     private final Counter accepted;
     private final Counter repeated;
     private final Timer latency;
 
-    public TransferService(TransferRepository transfers, RunPeriodRepository periods, MeterRegistry registry) {
+    public TransferService(TransferRepository transfers, PeriodRepository periods, GatewayProperties props, Clock clock, MeterRegistry registry) {
         this.transfers = transfers;
         this.periods = periods;
+        this.idempotencyWindow = props.periods().retention();
+        this.clock = clock;
         this.accepted = Counter.builder("gateway.transfers").tag("outcome", "accepted").register(registry);
         this.repeated = Counter.builder("gateway.transfers").tag("outcome", "repeated").register(registry);
         this.latency = Timer.builder("gateway.transfer.latency")
@@ -46,24 +52,17 @@ public class TransferService {
 
     /**
      * One transaction and one insert for many requests; each gets, in the same order, the outcome it would have had
-     * alone: its row, or {@link PeriodClosedException} / {@link IdempotencyConflictException}. The responses go out after the
-     * commit, before Kafka is involved.
+     * alone: its row, or {@link IdempotencyConflictException}. The responses go out after the commit, before Kafka is
+     * involved.
      */
     @Transactional
     public List<AcceptOutcome> acceptAll(List<TransferRequest> requests) {
-        // One order for every batch: a close waiting between two shared locks cannot close a cycle.
-        requests.stream().map(TransferRequest::runId).distinct().sorted(Comparator.comparing(UUID::toString)).forEach(periods::lockShared);
-        // A separate statement after the locks: its snapshot must see a close that committed while we waited.
-        var runIds = new LinkedHashSet<UUID>();
-        requests.forEach(it -> runIds.add(it.runId()));
-        var closed = periods.closedAmong(runIds);
+        periods.lockAccepting();
+        // One instant for the insert and the lookup: a key is inside the window for both or for neither.
+        var keysSince = keysSince();
         var inserting = new LinkedHashMap<UUID, TransferRequest>();
-        for (var request : requests) {
-            if (!closed.contains(request.runId())) {
-                inserting.putIfAbsent(request.transferId(), request);
-            }
-        }
-        var inserted = byTransferId(transfers.insertAllIfAbsent(List.copyOf(inserting.values())));
+        requests.forEach(request -> inserting.putIfAbsent(request.transferId(), request));
+        var inserted = byTransferId(transfers.insertAllIfAbsent(List.copyOf(inserting.values()), keysSince));
         accepted.increment(inserted.size());
         var notInserted = new LinkedHashSet<UUID>();
         for (var request : requests) {
@@ -71,14 +70,14 @@ public class TransferService {
                 notInserted.add(request.transferId());
             }
         }
-        var existing = byTransferId(transfers.findAll(notInserted));
+        var existing = byTransferId(transfers.findAll(notInserted, keysSince));
         var answeredAsInserted = new HashSet<UUID>();
         var outcomes = new ArrayList<AcceptOutcome>(requests.size());
         for (var request : requests) {
             try {
                 var row = inserted.get(request.transferId());
                 outcomes.add(new AcceptOutcome.Accepted(
-                    outcomeOf(request, row, request.equals(inserting.get(request.transferId())), existing, closed, answeredAsInserted)));
+                    outcomeOf(request, row, request.equals(inserting.get(request.transferId())), existing, answeredAsInserted)));
             } catch (RuntimeException e) {
                 outcomes.add(new AcceptOutcome.Refused(e));
             }
@@ -91,7 +90,6 @@ public class TransferService {
         @Nullable Transfer row,
         boolean isTheInsertedRequest,
         Map<UUID, Transfer> existing,
-        Set<UUID> closed,
         Set<UUID> answeredAsInserted
     ) {
         if (row != null && isTheInsertedRequest && answeredAsInserted.add(request.transferId())) {
@@ -103,9 +101,6 @@ public class TransferService {
         var found = existing.get(request.transferId());
         if (found != null) {
             return repeat(found, request);
-        }
-        if (closed.contains(request.runId())) {
-            throw new PeriodClosedException(request.runId());
         }
         throw new IllegalStateException("Transfer " + request.transferId() + " was neither inserted nor found");
     }
@@ -135,24 +130,21 @@ public class TransferService {
             Duration.between(applied.acceptedAt(), Objects.requireNonNull(applied.resultedAt(), "resultedAt of an applied result"))));
     }
 
+    /** By the key alone, as a client asks; a transfer older than the idempotency window is not found. */
     public @Nullable Transfer find(UUID transferId) {
-        return transfers.find(transferId);
+        return transfers.find(transferId, keysSince());
     }
 
-    @Transactional(readOnly = true)
-    public RunSummary summarize(UUID runId) {
-        return transfers.summarize(runId);
+    public @Nullable Transfer find(TransferKey key) {
+        return transfers.find(key);
     }
 
-    /** The period goes with the run; the answer reflects the transfers only. */
-    @Transactional
-    public boolean deleteRun(UUID runId) {
-        periods.delete(runId);
-        return transfers.deleteRun(runId) > 0;
+    private Instant keysSince() {
+        return clock.instant().minus(idempotencyWindow);
     }
 
     private static boolean matches(Transfer transfer, TransferRequest request) {
-        return transfer.runId().equals(request.runId()) && transfer.fromAccount() == request.fromAccount()
+        return transfer.fromAccount() == request.fromAccount()
             && transfer.toAccount() == request.toAccount() && transfer.amountCents() == request.amountCents();
     }
 }
