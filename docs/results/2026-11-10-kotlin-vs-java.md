@@ -4,6 +4,11 @@ The whole project was ported from Kotlin to Java without changing its behaviour:
 configuration and tests. It was ported to Java 21 first and measured against the Kotlin version, then moved to Java 25
 and measured against both.
 
+**The question.** When the project started, Kotlin's main advantages over Java were coroutines, data classes and
+sealed hierarchies. Java 21–25 has virtual threads, records and sealed types. The port was done to find out what the
+difference is worth now, by measurement: the same API, schema, configuration and tests, one change at a time, both
+versions measured side by side on the same server.
+
 **In short:** under load the three versions cannot be told apart. What decides a run at the limit is the server — a
 shared VPS whose disk and CPU vary through the day — not the language of the services. A first night series seemed to
 show Java doing worse; runs taken in turn under the same conditions did not confirm it.
