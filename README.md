@@ -96,7 +96,9 @@ accounts did not change.
 ## Limits measured on the server
 
 On one node with the whole bank and the load generator, the current version takes **about 1600 transfers per
-second** without a refusal, where the October version refused from 300–400 on; every run of both ends `BALANCED`.
+second** in steps of 30 seconds without a refusal, where the October version refused from 300–400 on; every such run
+of both ends `BALANCED`. Held for 5 minutes by day, the same server already refuses at 1300
+([comparison](docs/results/2026-11-10-kotlin-vs-java.md)).
 How it was measured, how the bottlenecks were found and what was tried and rejected:
 [optimizations](docs/results/2026-11-06-optimizations.md).
 
