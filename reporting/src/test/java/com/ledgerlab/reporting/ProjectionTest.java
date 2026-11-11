@@ -84,8 +84,11 @@ class ProjectionTest extends IntegrationTest {
         send(command);
         kafka.send(props.resultsTopic(), command.transferId().toString(), objectMapper.writeValueAsString(event)).get();
 
-        await().atMost(TIMEOUT).untilAsserted(() ->
-            assertThat(statsAt(now).rejectionsByReason()).containsExactly(entry(UNKNOWN_REASON, 1L)));
+        // Both events, so neither is still on its way when the next test empties the bank.
+        await().atMost(TIMEOUT).untilAsserted(() -> {
+            assertThat(statsAt(now).rejectionsByReason()).containsExactly(entry(UNKNOWN_REASON, 1L));
+            assertThat(statsAt(now).commandsSeen()).isEqualTo(1);
+        });
     }
 
     @Test

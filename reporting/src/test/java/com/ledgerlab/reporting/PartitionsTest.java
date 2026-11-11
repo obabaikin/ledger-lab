@@ -1,7 +1,9 @@
 package com.ledgerlab.reporting;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
+import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.reporting.domain.Period;
 import com.ledgerlab.reporting.persistence.PartitionRepository;
 import com.ledgerlab.reporting.service.Partitions;
@@ -10,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.TestPropertySource;
@@ -93,13 +96,41 @@ class PartitionsTest extends IntegrationTest {
     @Test
     void the_numbers_of_a_period_go_with_its_partition_and_the_next_period_keeps_its_own() {
         var oldest = periodOf(now.minus(props.periods().retention()));
-        store(command(100, oldest.end().minusSeconds(1)), command(100, oldest.end()));
+        var inOldest = command(100, oldest.end().minusSeconds(1));
+        var inNext = command(100, oldest.end());
+        store(inOldest, inNext);
+        store(rejected(inOldest, RejectReason.BLOCKED_ACCOUNT, oldest.end()), rejected(inNext, RejectReason.BLOCKED_ACCOUNT, oldest.end()));
         assertThat(seconds.sum(oldest).accepted()).isEqualTo(1);
 
-        partitions.maintain(oldest.end().plus(props.periods().retention()));
+        // Partway through a period, as maintenance always runs: the oldest period still held keeps all its seconds.
+        partitions.maintain(oldest.end().plus(props.periods().retention()).plus(props.periods().length().dividedBy(2)));
 
         assertThat(seconds.sum(oldest).accepted()).isZero();
+        assertThat(seconds.sum(oldest).rejectionsByReason()).isEmpty();
         assertThat(seconds.sum(oldest.next()).accepted()).isEqualTo(1);
+        assertThat(seconds.sum(oldest.next()).rejectionsByReason()).containsExactly(entry(RejectReason.BLOCKED_ACCOUNT.name(), 1L));
+    }
+
+    @Test
+    @DisplayName("an event read after its partition was dropped is kept outside the partitions only until the next maintenance")
+    void an_event_read_after_its_partition_was_dropped_is_kept_outside_the_partitions_only_until_the_next_maintenance() {
+        var oldest = periodOf(now.minus(props.periods().retention()));
+        var tooLate = command(100, oldest.start().minusSeconds(1));
+        var held = command(100, oldest.start());
+        var beyondEveryPartition = command(100, now.plus(props.periods().partitionsAhead()).plus(Duration.ofDays(30)));
+        store(tooLate, held, beyondEveryPartition);
+        assertThat(defaultPartitionRows()).isEqualTo(2);
+
+        partitions.maintain(now);
+
+        assertThat(defaultPartitionRows()).isEqualTo(1);
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isEqualTo(1);
+        assertThat(seconds.sum(oldest.previous()).accepted()).isZero();
+        assertThat(seconds.sum(oldest).accepted()).isEqualTo(1);
+    }
+
+    private long defaultPartitionRows() {
+        return jdbcTemplate.queryForObject("SELECT count(*) FROM " + PartitionRepository.DEFAULT_PARTITION, Long.class);
     }
 
     @Test

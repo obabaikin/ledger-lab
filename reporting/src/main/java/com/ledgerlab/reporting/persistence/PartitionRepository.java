@@ -75,6 +75,11 @@ public class PartitionRepository {
         jdbc.sql("SET LOCAL lock_timeout = '" + lockTimeout.toMillis() + "ms'").update();
     }
 
+    /** An event read later than the retention finds its partition dropped; nothing else would ever remove its row. */
+    public void deleteUnpartitionedBefore(Instant periodStart) {
+        jdbc.sql("DELETE FROM " + DEFAULT_PARTITION + " WHERE accepted_at < :start").param("start", Sql.timestamptz(periodStart)).update();
+    }
+
     public long rowsOutsidePartitions() {
         return jdbc.sql("SELECT count(*) FROM " + DEFAULT_PARTITION).query(Long.class).single();
     }

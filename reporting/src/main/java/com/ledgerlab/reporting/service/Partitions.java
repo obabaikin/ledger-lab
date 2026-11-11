@@ -57,7 +57,7 @@ public class Partitions implements InitializingBean {
         this.clock = clock;
         this.tx = tx;
         this.failures = Counter.builder(FAILURES_METRIC)
-            .description("Partitions that could not be created or dropped; tried again at the next maintenance")
+            .description("Partitions that could not be created or dropped and expired rows that could not be deleted; tried again at the next maintenance")
             .register(registry);
         Gauge.builder(AHEAD_METRIC, ahead, AtomicLong::get)
             .description("Partitions for periods that have not begun; at 0 new rows go to the default partition")
@@ -108,7 +108,20 @@ public class Partitions implements InitializingBean {
                 attempt("drop", start, () -> partitions.drop(start, props.lockTimeout()));
             }
         }
-        seconds.deleteBefore(Period.containing(horizon, props.length()).start());
+        deleteOlderThan(Period.containing(horizon, props.length()).start());
+    }
+
+    /** In one transaction: a period's numbers are read whole or not at all. */
+    private void deleteOlderThan(Instant oldestHeld) {
+        try {
+            tx.executeWithoutResult(status -> {
+                seconds.deleteBefore(oldestHeld);
+                partitions.deleteUnpartitionedBefore(oldestHeld);
+            });
+        } catch (DataAccessException e) {
+            failures.increment();
+            log.warn("Could not delete the numbers and the rows outside partitions from before {}", oldestHeld, e);
+        }
     }
 
     private void attempt(String action, Instant periodStart, Runnable change) {
