@@ -45,6 +45,11 @@ public class PeriodConductor {
     private final DatabaseClock clock;
     private final ControlProperties.Periods props;
     private final ControlProperties.Reporting reportingProps;
+    /**
+     * The period this instance of control is settling. One it finds half settled was left by an instance before it: its
+     * limits start again, as the time control was down says nothing about the bank.
+     */
+    private volatile @Nullable Instant settling;
 
     public PeriodConductor(
         PeriodRepository periods,
@@ -99,6 +104,12 @@ public class PeriodConductor {
             if (period == null) {
                 return;
             }
+            if (period.state() != PeriodState.OPEN && !period.start().equals(settling)) {
+                periods.restartLimits(period.start(), now);
+                settling = period.start();
+                period = Objects.requireNonNull(periods.find(period.start()), "the period just read");
+                log.info("Period {}: taken over in {}, its limits start again", period.start(), period.state());
+            }
             switch (period.state()) {
                 case OPEN -> open(period, now);
                 case CLOSING -> close(period, now);
@@ -121,6 +132,7 @@ public class PeriodConductor {
             failed(period, PeriodFailure.DETAILS_EXPIRED, null, now, "the bank keeps a period's transfers for " + props.detailsRetention());
             return;
         }
+        settling = period.start();
         if (periods.markClosing(period.start(), now) == 1) {
             close(Objects.requireNonNull(periods.find(period.start()), "the period just marked"), now);
         }

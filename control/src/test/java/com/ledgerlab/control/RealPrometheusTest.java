@@ -2,7 +2,6 @@ package com.ledgerlab.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.ledgerlab.control.periods.PeriodConductor;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -23,7 +22,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -59,8 +57,6 @@ class RealPrometheusTest extends IntegrationTest {
     static final FakeExporter killedExporter = new FakeExporter(List.of(KILLED_LEDGER));
     static final FakeExporter gatewayExporter = new FakeExporter(List.of(GATEWAY));
     static final FakeExporter secondGateway = new FakeExporter(List.of(GATEWAY));
-
-    @Autowired PeriodConductor conductor;
 
     private record Target(String job, List<Integer> ports) {
     }

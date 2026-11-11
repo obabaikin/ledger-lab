@@ -170,6 +170,20 @@ class AvailabilityTest extends IntegrationTest {
         assertThat(slo.measuredMinutes()).isEqualTo(60 + 58 + 3);
     }
 
+    @Test
+    @DisplayName("the 30 days start on the hour: the hour they begin in counts whole, the hour before it does not")
+    void the_30_days_start_on_the_hour_the_hour_they_begin_in_counts_whole_the_hour_before_it_does_not() {
+        var now = clock.now();
+        var windowStart = now.minus(Duration.ofDays(30));
+        hour(windowStart, 60, 5);
+        hour(windowStart.minus(Duration.ofHours(1)), 60, 20);
+
+        var slo = availability.slo(now);
+
+        assertThat(slo.badMinutes()).isEqualTo(5);
+        assertThat(slo.measuredMinutes()).isEqualTo(60);
+    }
+
     private void hour(Instant within, int measured, int bad) {
         jdbc.sql(
             """

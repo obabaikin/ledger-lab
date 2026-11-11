@@ -125,6 +125,17 @@ public class PeriodRepository {
             .update();
     }
 
+    public int restartLimits(Instant start, Instant now) {
+        return jdbc.sql(
+            """
+            UPDATE periods SET closing_started_at = :now, drain_progress_at = CASE WHEN drain_progress_at IS NOT NULL THEN CAST(:now AS timestamptz) END
+            WHERE period_start = :start
+            """)
+            .param("now", Timestamp.from(now))
+            .param("start", Timestamp.from(start))
+            .update();
+    }
+
     public int markClosed(Instant start, Instant closedAt, long entryCount) {
         return jdbc.sql(
             """

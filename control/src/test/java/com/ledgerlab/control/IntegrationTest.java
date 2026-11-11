@@ -3,6 +3,7 @@ package com.ledgerlab.control;
 import static com.ledgerlab.control.Fixtures.mapOf;
 
 import com.ledgerlab.control.bank.BankLive;
+import com.ledgerlab.control.periods.PeriodConductor;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,7 @@ abstract class IntegrationTest {
     @Autowired ObjectMapper objectMapper;
     @Autowired ControlProperties props;
     @Autowired BankLive bankLive;
+    @Autowired PeriodConductor conductor;
 
     static final StubService ledger = new StubService();
     static final StubService gateway = new StubService();
@@ -96,6 +98,7 @@ abstract class IntegrationTest {
         ledgerInstances.forEach(StubService::reset);
         // The live numbers are kept between ticks; a test must not start with those an earlier test read.
         ReflectionTestUtils.setField(bankLive, "snapshot", ReflectionTestUtils.getField(BankLive.Snapshot.class, "EMPTY"));
+        ReflectionTestUtils.setField(conductor, "settling", null);
     }
 
     protected String invite() {

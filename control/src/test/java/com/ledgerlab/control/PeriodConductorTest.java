@@ -185,6 +185,48 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
+    @DisplayName("a period control left half settled when it went down is settled after the restart, with its limit started again")
+    void a_period_control_left_half_settled_when_it_went_down_is_settled_after_the_restart_with_its_limit_started_again() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED, REJECTED, REASONS, null));
+        conductor.tick(closingTimeOf(PERIOD));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+
+        controlRestarts();
+        var back = closingTimeOf(PERIOD).plus(DRAIN_TIMEOUT).plusSeconds(60);
+        conductor.tick(back);
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+
+        conductor.tick(back.plus(DRAIN_TIMEOUT).minusSeconds(1));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD));
+        conductor.tick(back.plus(DRAIN_TIMEOUT).minusSeconds(1));
+        assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
+    }
+
+    @Test
+    @DisplayName("a drain that did not move while control was down is given its minute again after the restart")
+    void a_drain_that_did_not_move_while_control_was_down_is_given_its_minute_again_after_the_restart() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 10, REJECTED, REASONS));
+        var closing = closingTimeOf(PERIOD);
+        conductor.tick(closing);
+        conductor.tick(closing.plusSeconds(1));
+
+        controlRestarts();
+        var back = closing.plusSeconds(300);
+        conductor.tick(back);
+        conductor.tick(back.plus(DRAIN_STALL_TIMEOUT).minusSeconds(1));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+
+        conductor.tick(back.plus(DRAIN_STALL_TIMEOUT));
+        assertThat(periodView(PERIOD).get("failure")).isEqualTo("DRAIN_STALLED");
+    }
+
+    @Test
     @DisplayName("a period older than the bank keeps its transfers fails at once, without a call to the bank")
     void a_period_older_than_the_bank_keeps_its_transfers_fails_at_once_without_a_call_to_the_bank() {
         bankStartedIn(PERIOD);
