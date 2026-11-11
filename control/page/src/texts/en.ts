@@ -133,6 +133,7 @@ export const en = {
     latency: 'Time gateway - ledger, ms',
     crashed: 'ledger crashed',
     noData: 'Monitoring has no data for these hours.',
+    unavailable: 'The charts could not be read; retrying.',
     series: {
       ACCEPTED_PER_SECOND: 'accepted by the gateway',
       POSTED_PER_SECOND: 'booked by the ledger',
@@ -184,6 +185,7 @@ export const en = {
       DETAILS_EXPIRED: 'The details of the period were deleted before it could be checked.',
     },
     loading: 'Reading the report…',
+    unavailable: 'The periods could not be read; retrying.',
     notRead: 'Could not read the report; close the period and open it again.',
   },
   report: {

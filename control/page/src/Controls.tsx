@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiFailure, type SessionView } from './api/client'
-import { count, hoursMinutes, MS_PER_SECOND } from './format'
+import { clock, count, MS_PER_SECOND } from './format'
 import { nextReadyAt, waitShown } from './readyCountdown'
 import { t } from './texts'
 
@@ -12,6 +12,8 @@ const LOAD_RUNNING = 'load-running'
 const LOAD_USED_RECENTLY = 'load-used-recently'
 const INVALID_LOAD = 'invalid-load'
 const GENERATOR_DID_NOT_ANSWER = 'generator-did-not-answer'
+/** Retry-After missing from a 429: the shortest wait the page can name. */
+const UNKNOWN_WAIT_SECONDS = 1
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now())
@@ -52,7 +54,7 @@ function useWait(serverSeconds: number, now: number, readAgain: () => void) {
 
 function loadRefusal(e: unknown): string {
   if (!(e instanceof ApiFailure)) return t.controls.controlDidNotAnswer
-  const wait = e.retryAfterSeconds ?? 1
+  const wait = e.retryAfterSeconds ?? UNKNOWN_WAIT_SECONDS
   if (e.status === FORBIDDEN) return t.controls.inviteNotValid
   if (e.error === LOAD_RUNNING) return t.controls.load[LOAD_RUNNING](wait)
   if (e.error === LOAD_USED_RECENTLY) return t.controls.load[LOAD_USED_RECENTLY](wait)
@@ -64,7 +66,7 @@ function loadRefusal(e: unknown): string {
 function chaosRefusal(e: unknown): string {
   if (!(e instanceof ApiFailure)) return t.controls.controlDidNotAnswer
   if (e.status === FORBIDDEN) return t.controls.inviteNotValid
-  if (e.status === TOO_MANY) return t.controls.chaos.usedRecently(e.retryAfterSeconds ?? 1)
+  if (e.status === TOO_MANY) return t.controls.chaos.usedRecently(e.retryAfterSeconds ?? UNKNOWN_WAIT_SECONDS)
   if (e.status === NOT_IMPLEMENTED) return t.controls.chaos.off
   if (e.status === UNAVAILABLE) return t.controls.chaos.noLedgerAnswered
   return t.controls.chaos.other(e.status)
@@ -74,28 +76,29 @@ export function Controls(props: { sessionId: string; session: SessionView; onCha
   const { session } = props
   const [tps, setTps] = useState(session.defaultLoadTps)
   const [seconds, setSeconds] = useState(session.defaultLoadSeconds)
-  const [sending, setSending] = useState(false)
+  const [raising, setRaising] = useState(false)
+  const [crashing, setCrashing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const now = useNow()
   const loadWait = useWait(session.loadReadyInSeconds, now, props.onChanged)
   const chaosWait = useWait(session.chaosReadyInSeconds, now, props.onChanged)
 
   const raise = async () => {
-    setSending(true)
+    setRaising(true)
     try {
       const pulse = await api.load(props.sessionId, { tps, seconds })
-      setMessage(t.controls.raised(count(pulse.tps), hoursMinutes(pulse.until)))
+      setMessage(t.controls.raised(count(pulse.tps), clock(pulse.until)))
     } catch (e) {
       if (e instanceof ApiFailure && e.status === TOO_MANY && e.retryAfterSeconds !== null) loadWait.refused(e.retryAfterSeconds)
       setMessage(loadRefusal(e))
     } finally {
-      setSending(false)
+      setRaising(false)
     }
     props.onChanged()
   }
 
   const crash = async () => {
-    setSending(true)
+    setCrashing(true)
     try {
       const crashed = await api.chaos(props.sessionId)
       props.onCrashed(crashed.at)
@@ -104,12 +107,11 @@ export function Controls(props: { sessionId: string; session: SessionView; onCha
       if (e instanceof ApiFailure && e.status === TOO_MANY && e.retryAfterSeconds !== null) chaosWait.refused(e.retryAfterSeconds)
       setMessage(chaosRefusal(e))
     } finally {
-      setSending(false)
+      setCrashing(false)
     }
     props.onChanged()
   }
 
-  const closed = !session.inviteValid || sending
 
   return (
     <section className="card">
@@ -128,12 +130,12 @@ export function Controls(props: { sessionId: string; session: SessionView; onCha
             </option>
           ))}
         </select>
-        <button type="button" className="primary" disabled={closed || loadWait.seconds !== null} onClick={raise}>
+        <button type="button" className="primary" disabled={!session.inviteValid || raising || loadWait.seconds !== null} onClick={raise}>
           {t.controls.raise}
           {loadWait.seconds !== null && <small className="why chaosWait">{t.controls.availableIn(loadWait.seconds)}</small>}
         </button>
         {session.chaosAvailable && (
-          <button type="button" className="danger" disabled={closed || chaosWait.seconds !== null} onClick={crash}>
+          <button type="button" className="danger" disabled={!session.inviteValid || crashing || chaosWait.seconds !== null} onClick={crash}>
             {t.controls.crash}
             {chaosWait.seconds !== null && <small className="why chaosWait">{t.controls.availableIn(chaosWait.seconds)}</small>}
           </button>

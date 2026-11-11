@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { BankView } from './api/client'
 import { Diagram, PodLegend } from './Diagram'
-import { clock, count, euros, hoursMinutes, shown } from './format'
+import { clock, count, dayAndMonth, euros, hoursMinutes, shown } from './format'
 import { bankCounters } from './shownCounts'
 import { useSmoothed } from './smooth'
 import { t } from './texts'
@@ -66,7 +66,7 @@ export function LiveScheme(props: { bank: BankView; rates: number[] | undefined;
           {clients.pulse
             ? t.bank.pulse(count(clients.pulse.tps), clock(clients.pulse.until), count(clients.baseTps))
             : t.bank.clientsSending(count(clients.targetTps))}
-          {clients.since && <> {t.bank.gaveUp(count(clients.gaveUp), hoursMinutes(clients.since))}</>}
+          {clients.since && <> {t.bank.gaveUp(count(clients.gaveUp), `${dayAndMonth(clients.since)}, ${hoursMinutes(clients.since)}`)}</>}
         </p>
       )}
       {lastCrash && (

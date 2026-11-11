@@ -4,7 +4,7 @@ import type { BankView, PeriodReport, PeriodView, SeriesView, SessionView } from
 export type Answer = { status: number; body?: unknown; headers?: Record<string, string> }
 type Call = { method: string; path: string; body: unknown }
 
-export function fakeControl(answers: Record<string, Answer | (() => Answer)>) {
+export function fakeControl(answers: Record<string, Answer | (() => Answer | Promise<Answer>)>) {
   const calls: Call[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const method = init?.method ?? 'GET'
@@ -12,7 +12,7 @@ export function fakeControl(answers: Record<string, Answer | (() => Answer)>) {
     calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined })
     const found = answers[`${method} ${path}`]
     if (found === undefined) throw new TypeError('Failed to fetch')
-    const answer = typeof found === 'function' ? found() : found
+    const answer = typeof found === 'function' ? await found() : found
     return new Response(answer.body === undefined ? null : JSON.stringify(answer.body), {
       status: answer.status,
       headers: { ...(answer.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...answer.headers },

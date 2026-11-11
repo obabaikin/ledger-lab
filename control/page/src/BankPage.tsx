@@ -44,6 +44,8 @@ export function BankPage(props: { controls?: ReactNode; top?: ReactNode; after?:
   const [bankLost, setBankLost] = useState(false)
   const [periods, setPeriods] = useState<PeriodView[] | null>(null)
   const [series, setSeries] = useState<SeriesView | null>(null)
+  const [periodsLost, setPeriodsLost] = useState(false)
+  const [seriesLost, setSeriesLost] = useState(false)
   const previous = useRef<Snapshot | null>(null)
 
   const pollBank = useCallback(async () => {
@@ -66,8 +68,22 @@ export function BankPage(props: { controls?: ReactNode; top?: ReactNode; after?:
     }
   }, [])
 
-  const pollPeriods = useCallback(async () => setPeriods((await api.periods()).periods), [])
-  const pollSeries = useCallback(async () => setSeries(await api.series()), [])
+  const pollPeriods = useCallback(async () => {
+    try {
+      setPeriods((await api.periods()).periods)
+      setPeriodsLost(false)
+    } catch {
+      setPeriodsLost(true)
+    }
+  }, [])
+  const pollSeries = useCallback(async () => {
+    try {
+      setSeries(await api.series())
+      setSeriesLost(false)
+    } catch {
+      setSeriesLost(true)
+    }
+  }, [])
 
   usePolling(pollBank, BANK_POLL_MS, true)
   usePolling(pollPeriods, PERIODS_POLL_MS, true)
@@ -99,9 +115,10 @@ export function BankPage(props: { controls?: ReactNode; top?: ReactNode; after?:
             </p>
             <LiveScheme bank={bank} rates={rates ?? undefined} intervalMs={BANK_POLL_MS} />
           </section>
+          {seriesLost && <p className="hint">{t.charts.unavailable}</p>}
           <Charts view={series} chaos={bank.chaos.recent} />
           <Availability bank={bank} />
-          <Periods bank={bank} periods={periods} />
+          <Periods bank={bank} periods={periods} lost={periodsLost} />
         </>
       )}
       {props.after}

@@ -21,7 +21,7 @@ function Failed({ period }: { period: PeriodView }) {
   )
 }
 
-export function Periods({ bank, periods }: { bank: BankView; periods: PeriodView[] | null }) {
+export function Periods({ bank, periods, lost }: { bank: BankView; periods: PeriodView[] | null; lost: boolean }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [read, setRead] = useState<Read | null>(null)
   const listedState = periods?.find((p) => p.start === selected)?.state
@@ -44,6 +44,7 @@ export function Periods({ bank, periods }: { bank: BankView; periods: PeriodView
   return (
     <section className="card periods" aria-label={t.periods.heading}>
       <h3>{t.periods.heading}</h3>
+      {lost && <p className="hint">{t.periods.unavailable}</p>}
       <p className="hint" data-testid="current-period">
         {periods !== null && periods.length === 0
           ? t.periods.firstCloses(hoursMinutes(currentPeriod.closesAt))

@@ -9,7 +9,7 @@ const SESSION = `/api/sessions/${SESSION_ID}`
 const PERIODS = '/api/bank/periods?limit=10'
 const PERIOD = `/api/bank/periods/${encodeURIComponent(PERIOD_START)}`
 
-type Answers = Record<string, Answer | (() => Answer)>
+type Answers = Record<string, Answer | (() => Answer | Promise<Answer>)>
 
 function control(extra: Answers = {}) {
   return fakeControl({
@@ -66,7 +66,7 @@ describe('the open page', () => {
 
     const since = hoursMinutes('2026-11-11T07:15:00Z')
     expect(await screen.findByTestId('clients-note')).toHaveTextContent(en.bank.clientsSince(since))
-    expect(screen.getByTestId('clients')).toHaveTextContent(en.bank.gaveUp('3', since))
+    expect(screen.getByTestId('clients')).toHaveTextContent(en.bank.gaveUp('3', `${dayAndMonth('2026-11-11T07:15:00Z')}, ${since}`))
   })
 
   it('shows every visitor a raised load and the last crash of the ledger', async () => {
@@ -115,7 +115,7 @@ describe('the open page', () => {
 
   it('keeps the last numbers and says the connection is lost when a poll gets a 502 from the proxy', async () => {
     let up = true
-    control({ 'GET /api/bank': () => (up ? { status: 200, body: bank() } : { status: 502 }) })
+    control({ 'GET /api/bank': () => (up ? { status: 200, body: bank() } : { status: 502, body: { error: 'bad gateway' } }) })
     renderAt('/')
     await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
 
@@ -123,6 +123,14 @@ describe('the open page', () => {
 
     expect(await screen.findByText(en.connection.lost, {}, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted')
+  })
+
+  it('says when the charts or the periods could not be read, instead of leaving them out', async () => {
+    control({ 'GET /api/bank/series': { status: 502 }, [`GET ${PERIODS}`]: { status: 502 } })
+    renderAt('/')
+
+    expect(await screen.findByText(en.charts.unavailable)).toBeInTheDocument()
+    expect(await screen.findByText(en.periods.unavailable)).toBeInTheDocument()
   })
 
   it('says the first period closes at its time while none is over', async () => {
@@ -193,7 +201,7 @@ describe('session page', () => {
     fireEvent.change(screen.getByRole('combobox', { name: en.controls.secondsLabel }), { target: { value: '30' } })
     fireEvent.click(button)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(en.controls.raised('2,000', hoursMinutes(until)))
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.controls.raised('2,000', clock(until)))
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ tps: 2000, seconds: 30 })
   })
 
@@ -233,6 +241,16 @@ describe('session page', () => {
     const sessionReads = calls.filter((c) => c.path === SESSION).length
     await waitFor(() => expect(calls.filter((c) => c.path === SESSION).length).toBeGreaterThan(sessionReads), { timeout: 3500 })
     await waitFor(() => expect(button).toBeEnabled())
+  })
+
+  it('keeps the crash button free while the load waits for its answer', async () => {
+    control({ [`POST ${SESSION}/load`]: () => new Promise<Answer>(() => {}) })
+    renderAt(`/s/${SESSION_ID}`)
+
+    fireEvent.click(await raise())
+
+    await waitFor(() => expect(screen.getByRole('button', { name: new RegExp(en.controls.raise) })).toBeDisabled())
+    expect(await crash()).toBeEnabled()
   })
 
   it('crashes the ledger and says the bank goes on', async () => {
