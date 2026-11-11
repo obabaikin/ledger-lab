@@ -84,12 +84,12 @@ tasks.test {
     systemProperty("openapi.actualDir", layout.buildDirectory.get().asFile.path)
     // Control knows the services only through their specs (ADR 0011), not through their classes.
     val specs = mapOf(
-        // The ledger and the gateway already serve periods; control still calls the bank of runs and is checked against
+        // The ledger, the gateway and reporting already serve periods; control still calls the bank of runs and is checked against
         // the specs of those services until it moves to periods itself.
         "ledger.spec" to file("src/test/runs-specs/ledger.json"),
         "gateway.spec" to file("src/test/runs-specs/gateway.json"),
         "generator.spec" to rootProject.file("generator/openapi.json"),
-        "reporting.spec" to rootProject.file("reporting/openapi.json"),
+        "reporting.spec" to file("src/test/runs-specs/reporting.json"),
     )
     inputs.files(specs.values).withPropertyName("serviceSpecs")
     specs.forEach { (property, file) -> systemProperty(property, file.path) }

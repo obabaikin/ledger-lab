@@ -32,6 +32,15 @@ reporting:
   results-topic: transfer-results
   consumer:
     retry-backoff: 500ms
+  periods:
+    # The same in every service: they cut time at the same instants.
+    length: 60m
+    # How long a period's numbers and the rows of its transfers are held after it ended.
+    retention: 4h
+    partitions-ahead: 48h
+    maintenance-interval: 1m
+    # Creating or dropping a partition holds up the consumers while it waits for the table.
+    lock-timeout: 2s
 
 springdoc:
   override-with-generic-response: false

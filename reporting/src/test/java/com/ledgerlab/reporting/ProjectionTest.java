@@ -1,16 +1,19 @@
 package com.ledgerlab.reporting;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 import static org.awaitility.Awaitility.await;
 
 import com.ledgerlab.common.RejectReason;
-import com.ledgerlab.common.runs.TransferCommand;
-import com.ledgerlab.common.runs.TransferResultEvent;
-import com.ledgerlab.reporting.persistence.RunStatsRepository;
+import com.ledgerlab.common.TransferCommand;
+import com.ledgerlab.common.TransferResultEvent;
+import com.ledgerlab.reporting.domain.Period;
+import com.ledgerlab.reporting.domain.PeriodStats;
+import com.ledgerlab.reporting.kafka.BankLatency;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,52 +30,54 @@ class ProjectionTest extends IntegrationTest {
 
     @Autowired KafkaTemplate<String, String> kafka;
     @Autowired ObjectMapper objectMapper;
-    @Autowired RunStatsRepository stats;
-    @Autowired ReportingProperties props;
+    @Autowired MeterRegistry registry;
 
     @Test
     @DisplayName("commands and results from both topics, some delivered twice and results first, add up once")
     void commands_and_results_from_both_topics_some_delivered_twice_and_results_first_add_up_once() throws Exception {
-        var runId = UUID.randomUUID();
         var now = Instant.now();
-        var commands = Stream.generate(() -> command(runId, 10, now)).limit(30).toList();
+        var latencyCountBefore = registry.get(BankLatency.METRIC).timer().count();
+        var commands = Stream.generate(() -> command(10, now)).limit(30).toList();
         var results = new ArrayList<TransferResultEvent>();
         for (var i = 0; i < commands.size(); i++) {
             var c = commands.get(i);
-            results.add(i % 3 == 0 ? rejected(c, RejectReason.DAILY_LIMIT_EXCEEDED, now.plusMillis(50)) : posted(c, now.plusMillis(50)));
+            results.add(i % 3 == 0 ? rejected(c, RejectReason.INSUFFICIENT_FUNDS, now.plusMillis(50)) : posted(c, now.plusMillis(50)));
         }
 
-        for (var result : results.subList(0, 10)) {
-            send(result);
-        }
-        for (var command : commands) {
-            send(command);
-        }
+        // The repeats go first: the last event of every partition is one the numbers below wait for, so nothing of
+        // this test is still on its way when the next one empties the bank.
         for (var command : commands.subList(0, 5)) {
             send(command);
         }
-        for (var result : results.subList(10, results.size())) {
+        for (var result : results.subList(0, 10)) {
             send(result);
         }
         for (var result : results.subList(0, 5)) {
             send(result);
         }
+        for (var command : commands) {
+            send(command);
+        }
+        for (var result : results.subList(10, results.size())) {
+            send(result);
+        }
 
         await().atMost(TIMEOUT).untilAsserted(() -> {
-            var totals = stats.snapshot(runId).totals();
-            assertThat(totals.accepted()).isEqualTo(30);
-            assertThat(totals.posted()).isEqualTo(20);
-            assertThat(totals.rejected()).isEqualTo(10);
-            assertThat(totals.inFlight()).isZero();
-            assertThat(totals.postedAmountCents()).isEqualTo(200);
-            assertThat(totals.rejectedByReason()).containsOnlyKeys(RejectReason.DAILY_LIMIT_EXCEEDED.name());
+            var stats = statsAt(now);
+            assertThat(stats.accepted()).isEqualTo(30);
+            assertThat(stats.commandsSeen()).isEqualTo(30);
+            assertThat(stats.posted()).isEqualTo(20);
+            assertThat(stats.rejected()).isEqualTo(10);
+            assertThat(stats.postedAmountCents()).isEqualTo(200);
+            assertThat(stats.rejectionsByReason()).containsExactly(entry(RejectReason.INSUFFICIENT_FUNDS.name(), 10L));
         });
+        assertThat(registry.get(BankLatency.METRIC).timer().count() - latencyCountBefore).isGreaterThanOrEqualTo(30);
     }
 
     @Test
     void a_reject_reason_this_service_does_not_know_is_kept_as_sent() throws Exception {
-        var runId = UUID.randomUUID();
-        var command = command(runId, 10, Instant.now());
+        var now = Instant.now();
+        var command = command(10, now);
         var event = objectMapper.<ObjectNode>valueToTree(rejected(command, RejectReason.BLOCKED_ACCOUNT, Instant.now()))
             .put(REJECT_REASON_FIELD, UNKNOWN_REASON);
 
@@ -80,31 +85,35 @@ class ProjectionTest extends IntegrationTest {
         kafka.send(props.resultsTopic(), command.transferId().toString(), objectMapper.writeValueAsString(event)).get();
 
         await().atMost(TIMEOUT).untilAsserted(() ->
-            assertThat(stats.snapshot(runId).totals().rejectedByReason()).containsEntry(UNKNOWN_REASON, 1L));
+            assertThat(statsAt(now).rejectionsByReason()).containsExactly(entry(UNKNOWN_REASON, 1L)));
     }
 
     @Test
     void an_unreadable_event_is_skipped_and_the_ones_after_it_are_stored() throws Exception {
-        var runId = UUID.randomUUID();
-        var command = command(runId, 10, Instant.now());
+        var now = Instant.now();
+        var command = command(10, now);
 
         kafka.send(props.transfersTopic(), command.partitionKey(), "not json").get();
         send(command);
 
-        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(stats.snapshot(runId).totals().accepted()).isEqualTo(1));
+        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(statsAt(now).accepted()).isEqualTo(1));
     }
 
     @Test
     void an_event_without_a_required_field_is_skipped_and_the_ones_after_it_are_stored() throws Exception {
-        var runId = UUID.randomUUID();
-        var command = command(runId, 10, Instant.now());
-        var withoutTransferId = objectMapper.<ObjectNode>valueToTree(command(runId, 10, Instant.now()));
+        var now = Instant.now();
+        var command = command(10, now);
+        var withoutTransferId = objectMapper.<ObjectNode>valueToTree(command(10, now));
         withoutTransferId.remove("transferId");
 
         kafka.send(props.transfersTopic(), command.partitionKey(), objectMapper.writeValueAsString(withoutTransferId)).get();
         send(command);
 
-        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(stats.snapshot(runId).totals().accepted()).isEqualTo(1));
+        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(statsAt(now).accepted()).isEqualTo(1));
+    }
+
+    private PeriodStats statsAt(Instant acceptedAt) {
+        return seconds.sum(Period.containing(acceptedAt, props.periods().length()));
     }
 
     private void send(TransferCommand command) throws Exception {

@@ -59,7 +59,7 @@
           },
           "rejectReason" : {
             "description" : "Set when status is REJECTED; null if the reason is newer than this API version.",
-            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
+            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS" ],
             "type" : [ "string", "null" ]
           },
           "resultedAt" : {
@@ -119,7 +119,7 @@
           },
           "rejectReason" : {
             "description" : "Set when status is REJECTED; null if the reason is newer than this API version.",
-            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
+            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS" ],
             "type" : [ "string", "null" ]
           },
           "resultedAt" : {

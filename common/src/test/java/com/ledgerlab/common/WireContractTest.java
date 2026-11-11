@@ -45,7 +45,7 @@ class WireContractTest {
     void outcomes_and_reject_reasons_travel_by_these_names() {
         assertThat(Arrays.stream(TransferOutcome.values()).map(Enum::name)).containsExactly("POSTED", "REJECTED");
         assertThat(Arrays.stream(RejectReason.values()).map(Enum::name)).containsExactly(
-            "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED");
+            "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS");
     }
 
     @Test
