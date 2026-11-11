@@ -9,7 +9,8 @@ gateway:
     retry-backoff: 200ms
   max-wait: 5s
   retry-after: 1s
-  close-lock-timeout: 1s
+  # Above the waits of the tests that hold a close behind a lock, so a slow machine does not turn them into the timeout.
+  close-lock-timeout: 3s
   warm-up:
     rounds: 20
   periods:

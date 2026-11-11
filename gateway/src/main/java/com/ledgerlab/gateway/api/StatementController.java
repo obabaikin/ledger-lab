@@ -2,6 +2,7 @@ package com.ledgerlab.gateway.api;
 
 import com.ledgerlab.gateway.domain.Statement;
 import com.ledgerlab.gateway.domain.StatementCursor;
+import com.ledgerlab.gateway.service.ForeignCursorException;
 import com.ledgerlab.gateway.service.PeriodNotClosedException;
 import com.ledgerlab.gateway.service.PeriodService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -55,8 +56,12 @@ public class StatementController {
         if (pageSize < 1 || pageSize > MAX_PAGE) {
             throw new InvalidStatementQueryException(GatewayErrors.INVALID_LIMIT, "limit must be between 1 and " + MAX_PAGE + ", got " + pageSize);
         }
+        return periods.statement(periodStart, after == null ? null : cursorOf(after), pageSize);
+    }
+
+    private static StatementCursor cursorOf(String after) {
         try {
-            return periods.statement(periodStart, after == null ? null : StatementCursor.parse(after), pageSize);
+            return StatementCursor.parse(after);
         } catch (IllegalArgumentException e) {
             throw new InvalidStatementQueryException(GatewayErrors.INVALID_CURSOR, String.valueOf(e.getMessage()));
         }
@@ -66,6 +71,13 @@ public class StatementController {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ApiError notClosed() {
         return new ApiError(GatewayErrors.PERIOD_NOT_CLOSED);
+    }
+
+    @ExceptionHandler(ForeignCursorException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiError foreignCursor(ForeignCursorException e) {
+        log.info("Statement query refused: {}", e.getMessage());
+        return new ApiError(GatewayErrors.INVALID_CURSOR);
     }
 
     @ExceptionHandler(InvalidStatementQueryException.class)

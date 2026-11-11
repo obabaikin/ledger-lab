@@ -66,7 +66,7 @@ public class PeriodService {
             throw new PeriodNotClosedException(periodStart);
         }
         if (after != null && !period.contains(after.acceptedAt())) {
-            throw new IllegalArgumentException("The cursor is not of the period from " + periodStart);
+            throw new ForeignCursorException(periodStart);
         }
         var rows = transfers.statementPage(period, after, limit + 1);
         var items = rows.size() > limit ? rows.subList(0, limit) : rows;

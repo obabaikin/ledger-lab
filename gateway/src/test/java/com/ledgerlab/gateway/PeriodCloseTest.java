@@ -152,6 +152,27 @@ class PeriodCloseTest extends IntegrationTest {
     }
 
     @Test
+    void two_closes_of_one_period_at_the_same_time_both_get_the_one_answer() throws Exception {
+        var period = lastEndedPeriod();
+        acceptedAt(period.start());
+        try (var insert = dataSource.getConnection()) {
+            insert.setAutoCommit(false);
+            holdAcceptLockShared(insert);
+            var waitingBefore = waitingAdvisoryLocks();
+
+            var first = CompletableFuture.supplyAsync(() -> close(period));
+            var second = CompletableFuture.supplyAsync(() -> close(period));
+            await().atMost(Duration.ofMillis(800)).until(() -> waitingAdvisoryLocks() == waitingBefore + 2);
+            insert.commit();
+
+            assertThat(first.get().getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(second.get().getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(second.get().getBody()).isEqualTo(first.get().getBody()).containsEntry("entryCount", 1);
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM periods", Long.class)).isEqualTo(1);
+    }
+
+    @Test
     void close_gives_up_with_503_when_an_insert_in_flight_outlasts_the_lock_timeout_and_succeeds_when_asked_again() throws SQLException {
         var period = lastEndedPeriod();
         try (var insert = dataSource.getConnection()) {
