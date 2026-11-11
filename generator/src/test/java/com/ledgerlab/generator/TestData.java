@@ -1,5 +1,6 @@
 package com.ledgerlab.generator;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -13,41 +14,88 @@ final class TestData {
     private TestData() {
     }
 
-    static GeneratorProperties properties(String url) {
-        return properties(url, 3, Duration.ofMillis(50));
+    /** The generator's settings for a test, each with a default a test may change. */
+    static final class Settings {
+        private final String url;
+        private int maxAttempts = 3;
+        private Duration retryBackoff = Duration.ofMillis(50);
+        private int maxInFlight = 500;
+        private int tps = 100;
+        private double waitShare = 0.0;
+        private List<Duration> duplicateDelays = List.of();
+
+        private Settings(String url) {
+            this.url = url;
+        }
+
+        Settings maxAttempts(int attempts) {
+            this.maxAttempts = attempts;
+            return this;
+        }
+
+        Settings retryBackoff(Duration backoff) {
+            this.retryBackoff = backoff;
+            return this;
+        }
+
+        Settings maxInFlight(int requests) {
+            this.maxInFlight = requests;
+            return this;
+        }
+
+        Settings tps(int tps) {
+            this.tps = tps;
+            return this;
+        }
+
+        Settings waitShare(double share) {
+            this.waitShare = share;
+            return this;
+        }
+
+        /** Every transfer is sent twice, the second time after one of these delays. */
+        Settings duplicates(Duration... delays) {
+            this.duplicateDelays = List.of(delays);
+            return this;
+        }
+
+        GeneratorProperties build() {
+            return new GeneratorProperties(
+                url, Duration.ofSeconds(2), Duration.ofSeconds(10), maxAttempts, retryBackoff, maxInFlight,
+                new GeneratorProperties.Load(true, tps, 2_000, Duration.ofMinutes(10), waitShare, Duration.ofSeconds(1), Duration.ofHours(48)),
+                new GeneratorProperties.Accounts(20, 2, 3),
+                new GeneratorProperties.Journal(500, Duration.ofMillis(5)),
+                new GeneratorProperties.Periods(Duration.ofHours(1), Duration.ofHours(4), Duration.ofHours(48), Duration.ofMinutes(1), Duration.ofSeconds(2)),
+                new GeneratorProperties.Reconciliation(Duration.ofSeconds(60), 20, 16),
+                new ProfileProperties(duplicateDelays.isEmpty() ? 0.0 : 1.0, duplicateDelays, INVALID_SHARE, INVALID_SHARE));
+        }
+
+        GatewayClient client(MeterRegistry registry) {
+            return new GatewayClient(build(), new ObjectMapper(), registry);
+        }
+
+        GatewayClient client() {
+            return client(new SimpleMeterRegistry());
+        }
     }
 
-    static GeneratorProperties properties(String url, int maxAttempts, Duration retryBackoff) {
-        return properties(url, maxAttempts, retryBackoff, new JournalProperties(Duration.ofMinutes(10), 300_000));
-    }
-
-    static GeneratorProperties properties(String url, int maxAttempts, Duration retryBackoff, JournalProperties journal) {
-        return new GeneratorProperties(
-            url, Duration.ofSeconds(2), Duration.ofSeconds(10), maxAttempts, retryBackoff, 500,
-            Duration.ofSeconds(30), Duration.ofHours(1), journal, new ProfileProperties(0.0, List.of(), INVALID_SHARE, INVALID_SHARE));
+    static Settings settings(String url) {
+        return new Settings(url);
     }
 
     static GatewayClient client(String url) {
-        return client(url, 3, Duration.ofMillis(50));
-    }
-
-    static GatewayClient client(String url, int maxAttempts, Duration retryBackoff) {
-        return new GatewayClient(properties(url, maxAttempts, retryBackoff), new ObjectMapper(), new SimpleMeterRegistry());
+        return settings(url).client();
     }
 
     static LoadProfile profile(int accountCount, int blockedAccounts, int hotAccounts) {
-        return new LoadProfile(UUID.randomUUID(), accountCount, blockedAccounts, hotAccounts, INVALID_SHARE, INVALID_SHARE);
+        return new LoadProfile(accountCount, blockedAccounts, hotAccounts, INVALID_SHARE, INVALID_SHARE);
     }
 
     static LoadProfile seededProfile(int accountCount, int blockedAccounts, int hotAccounts, double hotShare, long seed) {
-        return new LoadProfile(UUID.randomUUID(), accountCount, blockedAccounts, hotAccounts, hotShare, INVALID_SHARE, INVALID_SHARE, seed);
+        return new LoadProfile(accountCount, blockedAccounts, hotAccounts, hotShare, INVALID_SHARE, INVALID_SHARE, seed);
     }
 
     static PlannedTransfer transfer() {
-        return new PlannedTransfer(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100);
-    }
-
-    static JournalFilter anyEntry() {
-        return new JournalFilter(null, null, null);
+        return new PlannedTransfer(UUID.randomUUID(), 1, 2, 100);
     }
 }

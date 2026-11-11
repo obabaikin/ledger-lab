@@ -56,13 +56,27 @@ class BankContractTest {
     }
 
     @Test
-    @DisplayName("the spec names the busy refusal of a submission, which the generator counts as not taken")
-    void the_spec_names_the_busy_refusal_of_a_submission_which_the_generator_counts_as_not_taken() {
-        var busy = operation(GatewayApi.TRANSFERS_PATH, "post").get("responses")
+    @DisplayName("the spec names the busy and the stopping refusal of a submission, which the generator counts as not taken")
+    void the_spec_names_the_busy_and_the_stopping_refusal_of_a_submission_which_the_generator_counts_as_not_taken() {
+        var refusal = operation(GatewayApi.TRANSFERS_PATH, "post").get("responses")
             .get(Integer.toString(HttpStatus.SERVICE_UNAVAILABLE.value()));
 
-        assertThat(busy).as("503 of POST " + GatewayApi.TRANSFERS_PATH).isNotNull();
-        assertThat(busy.get("description").asString()).contains("\"" + GatewayApi.BUSY_ERROR + "\"");
+        assertThat(refusal).as("503 of POST " + GatewayApi.TRANSFERS_PATH).isNotNull();
+        assertThat(refusal.get("description").asString())
+            .contains("\"" + GatewayApi.BUSY_ERROR + "\"", "\"" + GatewayApi.STOPPING_ERROR + "\"");
+    }
+
+    @Test
+    @DisplayName("the path the generator asks about a transfer is in the spec, with the answer for one the bank does not have")
+    void the_path_the_generator_asks_about_a_transfer_is_in_the_spec_with_the_answer_for_one_the_bank_does_not_have() {
+        var status = operation(GatewayApi.TRANSFER_PATH, "get");
+
+        assertThat(status.get("responses").propertyNames()).contains(Integer.toString(HttpStatus.NOT_FOUND.value()));
+    }
+
+    @Test
+    void the_statements_cursor_is_a_string_the_generator_hands_back_as_it_came() {
+        assertThat(names(schemaOf(Statement.class).get("properties").get("next").get("type"))).contains("string");
     }
 
     @Test

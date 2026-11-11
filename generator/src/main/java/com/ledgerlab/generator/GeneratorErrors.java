@@ -1,9 +1,9 @@
 package com.ledgerlab.generator;
 
-/** Error texts of the generator's API that callers may match on. */
 public final class GeneratorErrors {
-    public static final String RUN_STILL_ACTIVE = "run still active";
-    public static final String PERIOD_NOT_CLOSED = "period not closed";
+
+    public static final String UNKNOWN_PERIOD = "unknown-period";
+    public static final String INVALID_PULSE = "invalid-pulse";
 
     private GeneratorErrors() {
     }

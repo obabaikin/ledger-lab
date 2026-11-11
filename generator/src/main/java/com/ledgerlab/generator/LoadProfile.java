@@ -12,8 +12,9 @@ import org.jspecify.annotations.Nullable;
 public final class LoadProfile {
 
     /**
-     * Amount that no account can cover, to provoke INSUFFICIENT_FUNDS: 10 000 000 EUR, above a 1 000 000 EUR opening
-     * balance plus what a merchant collects in an hour at 300 TPS (about 615 000 EUR), so it is never posted.
+     * Amount that no account can cover, to provoke INSUFFICIENT_FUNDS: 10 000 000 EUR, above a 10 000 EUR opening
+     * balance plus what a merchant collects at 400 TPS in the hour before the pool takes it back (about 860 000 EUR),
+     * so it is never posted.
      */
     public static final long OVERSIZED_AMOUNT_CENTS = 1_000_000_000L;
     public static final double DEFAULT_HOT_SHARE = 0.3;
@@ -23,7 +24,6 @@ public final class LoadProfile {
     private static final long MAX_AMOUNT_CENTS = 2_000L;
     private static final double MAX_INVALID_SHARE = 0.5;
 
-    private final UUID runId;
     private final int accountCount;
     // The last blockedAccounts account numbers are blocked (ledger convention).
     private final int blockedAccounts;
@@ -36,12 +36,11 @@ public final class LoadProfile {
     private final long blockedPpm;
     private long count = 0L;
 
-    public LoadProfile(UUID runId, int accountCount, int blockedAccounts, int hotAccounts, double oversizedShare, double blockedShare) {
-        this(runId, accountCount, blockedAccounts, hotAccounts, DEFAULT_HOT_SHARE, oversizedShare, blockedShare, System.nanoTime());
+    public LoadProfile(int accountCount, int blockedAccounts, int hotAccounts, double oversizedShare, double blockedShare) {
+        this(accountCount, blockedAccounts, hotAccounts, DEFAULT_HOT_SHARE, oversizedShare, blockedShare, System.nanoTime());
     }
 
     public LoadProfile(
-        UUID runId,
         int accountCount,
         int blockedAccounts,
         int hotAccounts,
@@ -50,7 +49,6 @@ public final class LoadProfile {
         double blockedShare,
         long seed
     ) {
-        this.runId = runId;
         this.accountCount = accountCount;
         this.blockedAccounts = blockedAccounts;
         this.hotAccounts = hotAccounts;
@@ -88,7 +86,7 @@ public final class LoadProfile {
             to = anyActiveBut(from);
         }
         var amount = picked(n, oversizedPpm, 0) ? OVERSIZED_AMOUNT_CENTS : random.nextLong(MIN_AMOUNT_CENTS, MAX_AMOUNT_CENTS + 1);
-        return new PlannedTransfer(runId, UUID.randomUUID(), from, to, amount);
+        return new PlannedTransfer(UUID.randomUUID(), from, to, amount);
     }
 
     /** Integer arithmetic, so that exactly floor(n * share) of the first n transfers are picked. */

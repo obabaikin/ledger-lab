@@ -10,11 +10,14 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -23,11 +26,13 @@ import java.util.function.BooleanSupplier;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
@@ -53,18 +58,23 @@ public class GatewayClient {
     private final ObjectReader responseReader;
     private final ObjectReader statementReader;
 
+    @Autowired
     public GatewayClient(GeneratorProperties props, ObjectMapper objectMapper, MeterRegistry registry) {
+        // Its default executor is an unbounded pool of platform threads, one per answer being handled: when the bank
+        // answered slowly, hundreds of them outgrew the container's memory outside the heap.
+        this(props, objectMapper, registry, HttpClient.newBuilder()
+            .connectTimeout(props.connectTimeout())
+            .executor(Executors.newVirtualThreadPerTaskExecutor())
+            .build());
+    }
+
+    GatewayClient(GeneratorProperties props, ObjectMapper objectMapper, MeterRegistry registry, HttpClient http) {
         this.props = props;
+        this.http = http;
         this.objectMapper = objectMapper;
         this.unreadable = Counter.builder(UNREADABLE_METRIC)
             .description("2xx answers with a value this client does not know; the status code still decided the outcome, and a statement line is not compared")
             .register(registry);
-        // Its default executor is an unbounded pool of platform threads, one per answer being handled: when the bank
-        // answered slowly, hundreds of them outgrew the container's memory outside the heap.
-        this.http = HttpClient.newBuilder()
-            .connectTimeout(props.connectTimeout())
-            .executor(Executors.newVirtualThreadPerTaskExecutor())
-            .build();
         // A gateway one version ahead may send a status or reason this client does not know; the code still decides the outcome.
         this.responseReader = objectMapper.readerFor(TransferResponse.class)
             .with(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL);
@@ -72,37 +82,61 @@ public class GatewayClient {
             .with(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL);
     }
 
-    public Statement statement(UUID runId, @Nullable UUID after) {
+    public Statement statement(Instant periodStart, @Nullable String after) {
         var query = "?" + GatewayApi.LIMIT_PARAM + "=" + GatewayApi.STATEMENT_MAX_PAGE
-            + (after == null ? "" : "&" + GatewayApi.AFTER_PARAM + "=" + after);
-        var request = HttpRequest.newBuilder(URI.create(props.gatewayUrl() + GatewayApi.statementPath(runId) + query))
-            .timeout(props.requestTimeout())
-            .GET()
-            .build();
-        HttpResponse<String> response;
-        try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofString());
-        } catch (IOException e) {
-            throw new GatewayUnavailableException("No answer from the gateway to the statement of run " + runId, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new GatewayUnavailableException("Interrupted while reading the statement of run " + runId, e);
-        }
+            + (after == null ? "" : "&" + GatewayApi.AFTER_PARAM + "=" + URLEncoder.encode(after, StandardCharsets.UTF_8));
+        var what = "the statement of the period from " + periodStart;
+        var response = get(GatewayApi.statementPath(periodStart) + query, what);
         var code = HttpStatusCode.valueOf(response.statusCode());
         if (code.is2xxSuccessful()) {
             var page = readStatement(response.body());
             if (page == null) {
-                throw new BadGatewayAnswerException("Unreadable statement page of run " + runId);
+                throw new BadGatewayAnswerException("Unreadable page of " + what);
             }
             return page;
         }
         if (code.isSameCodeAs(HttpStatus.CONFLICT)) {
-            throw new PeriodNotClosedException();
+            throw new PeriodNotClosedException("The bank has not closed the period from " + periodStart);
         }
-        if (code.is5xxServerError()) {
-            throw new GatewayUnavailableException("The gateway answered " + code.value() + " to the statement of run " + runId);
+        throw unexpected(code, what);
+    }
+
+    /** The transfer as the bank has it now, or null if the bank does not have it. */
+    public @Nullable TransferResponse transfer(UUID transferId) {
+        var what = "transfer " + transferId;
+        var response = get(GatewayApi.transferPath(transferId), what);
+        var code = HttpStatusCode.valueOf(response.statusCode());
+        if (code.is2xxSuccessful()) {
+            var transfer = read(response.body(), true);
+            if (transfer == null) {
+                throw new BadGatewayAnswerException("Unreadable answer about " + what);
+            }
+            return transfer;
         }
-        throw new BadGatewayAnswerException("The gateway answered " + code.value() + " to the statement of run " + runId);
+        if (code.isSameCodeAs(HttpStatus.NOT_FOUND)) {
+            return null;
+        }
+        throw unexpected(code, what);
+    }
+
+    private HttpResponse<String> get(String pathAndQuery, String what) {
+        var request = HttpRequest.newBuilder(URI.create(props.gatewayUrl() + pathAndQuery))
+            .timeout(props.requestTimeout())
+            .GET()
+            .build();
+        try {
+            return http.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException e) {
+            throw new GatewayUnavailableException("No answer from the gateway about " + what, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new GatewayUnavailableException("Interrupted while asking the gateway about " + what, e);
+        }
+    }
+
+    private static RuntimeException unexpected(HttpStatusCode code, String what) {
+        var message = "The gateway answered " + code.value() + " about " + what;
+        return code.is5xxServerError() ? new GatewayUnavailableException(message) : new BadGatewayAnswerException(message);
     }
 
     private @Nullable Statement readStatement(String body) {
@@ -113,7 +147,7 @@ public class GatewayClient {
         Statement page;
         try {
             page = statementReader.readValue(tree);
-        } catch (Throwable e) {
+        } catch (JacksonException e) {
             return null;
         }
         if (page == null) {
@@ -145,7 +179,7 @@ public class GatewayClient {
         throws InterruptedException {
         var url = props.gatewayUrl() + GatewayApi.TRANSFERS_PATH + (wait == null ? "" : "?" + GatewayApi.WAIT_PARAM + "=" + wait);
         var payload = objectMapper.writeValueAsString(new SubmitTransferRequest(
-            transfer.transferId(), transfer.runId(), transfer.fromAccount(), transfer.toAccount(), transfer.amountCents()));
+            transfer.transferId(), transfer.fromAccount(), transfer.toAccount(), transfer.amountCents()));
         var request = HttpRequest.newBuilder(URI.create(url))
             .timeout((wait == null ? Duration.ZERO : wait).plus(props.requestTimeout()))
             .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -159,58 +193,86 @@ public class GatewayClient {
         while (true) {
             attempt++;
             var sendStarted = System.nanoTime();
-            // Stays NO_RESPONSE if something unexpected is thrown: the request may have left by then.
-            var sendResult = SendResult.NO_RESPONSE;
             HttpResponse<String> response = null;
+            ResponseKind kind;
             try {
                 response = http.send(request, HttpResponse.BodyHandlers.ofString());
-                sendResult = SendResult.RESPONSE;
+                kind = kindOf(response);
+            } catch (ConnectException | HttpConnectTimeoutException e) {
+                kind = ResponseKind.NOT_CONNECTED;
             } catch (IOException e) {
-                // Without a connection the request never left; any other I/O error may come after the gateway committed.
-                if (e instanceof ConnectException || e instanceof HttpConnectTimeoutException) {
-                    sendResult = SendResult.NOT_CONNECTED;
-                } else {
-                    mayHaveArrived = true;
+                kind = isSendError(e) ? ResponseKind.SEND_ERROR : ResponseKind.NO_RESPONSE;
+                if (kind == ResponseKind.SEND_ERROR) {
+                    log.warn("Transfer {} could not be sent", transfer.transferId(), e);
                 }
             } catch (InterruptedException e) {
-                sendResult = SendResult.CANCELLED;
+                sends.record(attempt, sendStarted, System.nanoTime(), ResponseKind.CANCELLED, false);
                 throw e;
-            } finally {
-                sends.record(attempt, sendStarted, System.nanoTime(), sendResult, response == null ? null : response.statusCode());
             }
+            sends.record(attempt, sendStarted, System.nanoTime(), kind, response != null && response.statusCode() == HttpStatus.OK.value());
             var elapsed = Duration.ofNanos(System.nanoTime() - started);
-            var code = response == null ? null : HttpStatusCode.valueOf(response.statusCode());
-            if (response != null && code != null && !code.is5xxServerError()) {
-                var body = read(response.body(), code.is2xxSuccessful());
+            if (response != null && (kind == ResponseKind.ACCEPTED || kind == ResponseKind.INVALID)) {
+                var acknowledged = kind == ResponseKind.ACCEPTED;
+                var body = read(response.body(), acknowledged);
                 return new SubmissionResult(
                     body == null ? null : body.status(),
                     body == null ? null : body.rejectReason(),
+                    body == null ? null : body.acceptedAt(),
                     attempt,
-                    code.is2xxSuccessful() ? SubmissionOutcome.ACKNOWLEDGED : SubmissionOutcome.FAILED,
+                    acknowledged ? SubmissionOutcome.ACKNOWLEDGED : SubmissionOutcome.FAILED,
                     elapsed,
                     refusals);
             }
-            var busy = response != null && code != null && code.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE) && isBusy(response.body());
-            if (busy) {
+            var notTaken = kind == ResponseKind.BUSY || kind == ResponseKind.STOPPING;
+            if (kind == ResponseKind.BUSY) {
                 refusals++;
-            } else if (response != null) {
+            } else if (!notTaken && kind != ResponseKind.NOT_CONNECTED) {
                 mayHaveArrived = true;
             }
             var givenUp = new SubmissionResult(
-                null, null, attempt,
+                null, null, null, attempt,
                 mayHaveArrived ? SubmissionOutcome.UNKNOWN : SubmissionOutcome.FAILED,
                 elapsed,
                 refusals);
             // Checked before the backoff so a stop does not wait for it, and after it because the
             // stop may come while this request is sleeping.
-            if (attempt >= props.maxAttempts() || !canRetry.getAsBoolean()) {
+            if (kind == ResponseKind.SEND_ERROR || attempt >= props.maxAttempts() || !canRetry.getAsBoolean()) {
                 return givenUp;
             }
-            Thread.sleep(Math.max(backoff(attempt), busy ? retryAfterMillis(response) : 0));
+            Thread.sleep(Math.max(backoff(attempt), notTaken ? retryAfterMillis(response) : 0));
             if (!canRetry.getAsBoolean()) {
                 return givenUp;
             }
         }
+    }
+
+    private ResponseKind kindOf(HttpResponse<String> response) {
+        var code = HttpStatusCode.valueOf(response.statusCode());
+        if (code.is2xxSuccessful()) {
+            return ResponseKind.ACCEPTED;
+        }
+        if (!code.is5xxServerError()) {
+            return ResponseKind.INVALID;
+        }
+        if (code.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE)) {
+            var error = errorOf(response.body());
+            if (GatewayApi.BUSY_ERROR.equals(error)) {
+                return ResponseKind.BUSY;
+            }
+            if (GatewayApi.STOPPING_ERROR.equals(error)) {
+                return ResponseKind.STOPPING;
+            }
+        }
+        return ResponseKind.SERVER_ERROR;
+    }
+
+    /**
+     * The HTTP client hands on anything thrown while it sends as an IOException around it. An I/O failure may pass on a
+     * retry; an error in the client itself will not, and the request may have left before it.
+     */
+    private static boolean isSendError(IOException e) {
+        var cause = e.getCause();
+        return cause != null && !(cause instanceof IOException);
     }
 
     private @Nullable TransferResponse read(String body, boolean acknowledged) {
@@ -219,7 +281,7 @@ public class GatewayClient {
         if (tree != null) {
             try {
                 response = responseReader.readValue(tree);
-            } catch (Throwable e) {
+            } catch (JacksonException e) {
                 response = null;
             }
         }
@@ -234,16 +296,17 @@ public class GatewayClient {
     private @Nullable JsonNode readTree(String body) {
         try {
             return objectMapper.readTree(body);
-        } catch (Throwable e) {
+        } catch (JacksonException e) {
             return null;
         }
     }
 
-    private boolean isBusy(String body) {
+    private @Nullable String errorOf(String body) {
         try {
-            return GatewayApi.BUSY_ERROR.equals(objectMapper.readValue(body, ApiError.class).error());
-        } catch (Throwable e) {
-            return false;
+            var error = objectMapper.readValue(body, ApiError.class);
+            return error == null ? null : error.error();
+        } catch (JacksonException e) {
+            return null;
         }
     }
 

@@ -17,7 +17,7 @@ class OutcomeRuleTest {
     }
 
     private static SubmissionResult result(SubmissionOutcome outcome, TransferStatus status, RejectReason rejectReason) {
-        return new SubmissionResult(status, rejectReason, 1, outcome, Duration.ZERO, 0);
+        return new SubmissionResult(status, rejectReason, null, 1, outcome, Duration.ZERO, 0);
     }
 
     private final SubmissionResult accepted = result(SubmissionOutcome.ACKNOWLEDGED, TransferStatus.ACCEPTED, null);

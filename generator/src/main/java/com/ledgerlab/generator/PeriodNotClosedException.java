@@ -1,8 +1,8 @@
 package com.ledgerlab.generator;
 
-public class PeriodNotClosedException extends ConflictException {
+public class PeriodNotClosedException extends RuntimeException {
 
-    public PeriodNotClosedException() {
-        super(GeneratorErrors.PERIOD_NOT_CLOSED);
+    public PeriodNotClosedException(String message) {
+        super(message);
     }
 }

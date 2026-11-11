@@ -6,5 +6,4 @@ public enum RejectReason {
     UNKNOWN_ACCOUNT,
     BLOCKED_ACCOUNT,
     INSUFFICIENT_FUNDS,
-    DAILY_LIMIT_EXCEEDED,
 }

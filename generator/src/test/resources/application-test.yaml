@@ -1,0 +1,6 @@
+generator:
+  load:
+    # The tests of the API and of the journal want no clients of their own; a test that needs a load builds one.
+    enabled: false
+  journal:
+    flush-interval: 5ms

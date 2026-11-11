@@ -18,8 +18,8 @@ public class OpenApiConfig {
     public OpenAPI generatorApi() {
         return new OpenAPI().info(new Info()
             .title("Ledger Lab generator internal API")
-            .version("1")
-            .description("Load runs, the client journal and client reconciliation, for control."));
+            .version("2")
+            .description("The clients' load, their answers by minute and the client reconciliation of a period, for control."));
     }
 
     /** A nullable object is written as "the object or null"; a reference with a type beside it is not valid OpenAPI 3.1. */
