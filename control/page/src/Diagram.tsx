@@ -1,7 +1,8 @@
 import type { PodView } from './api/client'
 import { FlowDots } from './FlowDots'
-import { count, shown } from './format'
+import { count, hoursMinutes, shown } from './format'
 import { inFlight } from './shownCounts'
+import { t } from './texts'
 import { useNarrow } from './useNarrow'
 
 export const REPOSITORY_URL = 'https://github.com/obabaikin/ledger-lab'
@@ -9,21 +10,20 @@ const CODE_URL = `${REPOSITORY_URL}/tree/main/`
 
 export type DiagramNumbers = {
   requested: number | null
+  /** When the clients' own counts start: the generator counts from its start, not the bank's. */
+  clientsSince: string | null
   accepted: number | null
   posted: number | null
   rejected: number | null
-  ledgerDuplicatesAtLeast: number | null
-  duplicatesSent: number | null
   refused: number | null
 }
 
 export const NO_NUMBERS: DiagramNumbers = {
   requested: null,
+  clientsSince: null,
   accepted: null,
   posted: null,
   rejected: null,
-  ledgerDuplicatesAtLeast: null,
-  duplicatesSent: null,
   refused: null,
 }
 
@@ -181,8 +181,6 @@ export function Diagram(props: {
   numbers: DiagramNumbers | null
   pods: PodView[] | null | undefined
   rates?: number[]
-  /** The ledger's look where no pods tell it, as in the illustration. */
-  ledgerLook?: 'dead' | 'recovering' | null
 }) {
   const { pods, rates } = props
   const numbers = props.numbers ?? NO_NUMBERS
@@ -193,20 +191,16 @@ export function Diagram(props: {
   const consuming = ledgerPods?.filter((p) => podState(p) === 'consuming').length
   const ledgerClass =
     ledgerPods == null || ledgerPods.length === 0
-      ? (props.ledgerLook ?? '')
+      ? ''
       : consuming === 0
         ? 'dead'
         : consuming! < ledgerPods.length
           ? 'degraded'
           : ''
-  const lines: Record<string, [string, string, string]> = bare ? {} : {
-    clients: [`${shown(requested)} sent`, 'their own count', numbers.duplicatesSent ? `↺ ${count(numbers.duplicatesSent)} pressed twice` : ''],
-    gateway: [`${shown(accepted)} accepted`, numbers.refused === null ? '' : `${count(numbers.refused)} refused (503)`, ''],
-    ledger: [
-      `${shown(posted)} booked`,
-      ledgerPods ? `${consuming} of ${ledgerPods.length} consuming` : '',
-      numbers.ledgerDuplicatesAtLeast ? `↺ ≥ ${count(numbers.ledgerDuplicatesAtLeast)} redelivered, skipped` : '',
-    ],
+  const lines: Record<string, [string, string]> = bare ? {} : {
+    clients: [`${shown(requested)} sent`, numbers.clientsSince === null ? 'their own count' : t.bank.clientsSince(hoursMinutes(numbers.clientsSince))],
+    gateway: [`${shown(accepted)} accepted`, numbers.refused === null ? '' : `${count(numbers.refused)} refused (503)`],
+    ledger: [`${shown(posted)} booked`, ledgerPods ? `${consuming} of ${ledgerPods.length} consuming` : ''],
   }
   const layout = useNarrow() ? UPRIGHT : ACROSS
   const { labels, arrows } = layout
@@ -239,7 +233,7 @@ export function Diagram(props: {
         const node = NODES[key]
         const [x, y, w, h] = layout.boxes[key]
         const cx = x + w / 2
-        const [num, note, repeats] = lines[key] ?? ['', '', '']
+        const [num, note] = lines[key] ?? ['', '']
         return (
           <a key={key} className={`node ${key === 'ledger' ? ledgerClass : ''}`} href={CODE_URL + node.code} target="_blank" rel="noopener">
             <title>{`${node.title}: open the code on GitHub`}</title>
@@ -266,9 +260,6 @@ export function Diagram(props: {
                 </text>
                 <text className={key === 'gateway' && (numbers.refused ?? 0) > 0 ? 'sub busy' : 'sub'} x={cx} y={y + 73} textAnchor="middle" data-testid={`${key}-note`}>
                   {note}
-                </text>
-                <text className="repeats" x={cx} y={y + 89} textAnchor="middle">
-                  {repeats}
                 </text>
               </>
             )}

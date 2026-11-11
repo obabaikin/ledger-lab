@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { api } from './api/client'
-import { BuildInfo } from './BuildInfo'
-import { CrashIllustration } from './CrashIllustration'
-import { Hero } from './Hero'
+import { BankPage } from './BankPage'
 import { InviteForm } from './InviteForm'
 import { t } from './texts'
 
@@ -30,20 +28,19 @@ export function Landing() {
   if (token !== null && !inviteRefused) return <main aria-busy="true" />
 
   return (
-    <main>
-      <Hero />
-      <section className="card">
-        {inviteRefused && (
+    <BankPage
+      top={
+        inviteRefused && (
           <p role="alert" className="hint">
             {t.landing.inviteRefused}
           </p>
-        )}
-        <InviteForm />
-      </section>
-      <section className="card">
-        <CrashIllustration />
-      </section>
-      <BuildInfo />
-    </main>
+        )
+      }
+      after={
+        <section className="card">
+          <InviteForm />
+        </section>
+      }
+    />
   )
 }

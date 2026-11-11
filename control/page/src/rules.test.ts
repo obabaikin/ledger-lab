@@ -1,43 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { NO_DATA, shown } from './format'
-import { booksFinal, PHASES, phaseOf } from './phase'
-import { inFlight, liveCounters, shownAccepted } from './shownCounts'
-import { crashBands, segments } from './Charts'
+import { age } from './BankPage'
+import { crashBands, segments, seriesPoints } from './Charts'
 import { podState, podStates } from './Diagram'
-import { between } from './smooth'
-import { otherRunInProgress, runToShow } from './selectRun'
-import { run } from './test/fakeControl'
 import { flowRates, stopLedgerWires } from './FlowDots'
-import { fullBankSeconds, fullClientSeconds } from './fullSeconds'
-import { chaosWaitShown, nextChaosReadyAt } from './chaosReady'
-
-describe('phases', () => {
-  it.each([
-    ['QUEUED', 'Queued'],
-    ['CREATED', 'Queued'],
-    ['RUNNING', 'Clients sending'],
-    ['DRAINING', 'Bank finishing'],
-    ['RECONCILED', 'Verdict'],
-    ['FAILED', 'Verdict'],
-    ['EXPIRED', 'Verdict'],
-  ] as const)('a run %s is in %s', (state, phase) => {
-    expect(PHASES[phaseOf({ state })]).toBe(phase)
-  })
-
-  it('mark the books final only once control saw them final', () => {
-    expect(booksFinal({ state: 'DRAINING', booksFinalAt: null })).toBe(false)
-    expect(booksFinal({ state: 'DRAINING', booksFinalAt: '2026-10-15T10:00:00Z' })).toBe(true)
-  })
-})
+import { NO_DATA, shown } from './format'
+import { nextReadyAt, waitShown } from './readyCountdown'
+import { bankCounters, inFlight, shownAccepted } from './shownCounts'
+import { between } from './smooth'
+import { bank, series } from './test/fakeControl'
 
 describe('live counts', () => {
-  const live = (changes: Record<string, unknown> = {}) =>
-    ({
-      stats: { at: '2026-10-15T10:00:05Z', totals: { accepted: 1000, posted: 990, rejected: 5, postedAmountCents: 99_000 }, series: [] },
-      clients: { requested: 1100 },
-      ...changes,
-    }) as never
-
   it('take in flight from one snapshot and never below 0', () => {
     expect(inFlight({ accepted: 1000, posted: 990, rejected: 5 })).toBe(5)
     expect(inFlight({ accepted: 990, posted: 990, rejected: 5 })).toBe(0)
@@ -48,8 +20,8 @@ describe('live counts', () => {
     expect(shownAccepted({ accepted: 1000, posted: 990, rejected: 5 })).toBe(1000)
   })
 
-  it('are unknown as a whole without a projection snapshot', () => {
-    expect(liveCounters(live({ stats: null }))).toBeNull()
+  it("leave the clients' counts unknown until the generator answered, the bank's known", () => {
+    expect(bankCounters(bank({ clients: null }))).toMatchObject({ accepted: 1000, requested: null, refused: null })
   })
 })
 
@@ -85,62 +57,42 @@ describe('numbers on screen', () => {
   })
 })
 
-describe('chaos countdown', () => {
+describe('countdown of a button', () => {
   const NOW = 1_000_000
 
   it('is not stretched by the server rounding up each second', () => {
-    let at = nextChaosReadyAt(0, 60, NOW)
-    for (let t = 1; t < 60; t++) at = nextChaosReadyAt(at, 60 - t + 1, NOW + t * 1000 + 300)
+    let at = nextReadyAt(0, 60, NOW)
+    for (let t = 1; t < 60; t++) at = nextReadyAt(at, 60 - t + 1, NOW + t * 1000 + 300)
     expect(at).toBe(NOW + 60_000)
   })
 
   it('ends when the server says ready', () => {
-    expect(nextChaosReadyAt(NOW + 5_000, 0, NOW)).toBe(0)
+    expect(nextReadyAt(NOW + 5_000, 0, NOW)).toBe(0)
   })
 
   it('moves to a later deadline, as after a crash from another session', () => {
-    expect(nextChaosReadyAt(NOW + 5_000, 60, NOW)).toBe(NOW + 60_000)
+    expect(nextReadyAt(NOW + 5_000, 60, NOW)).toBe(NOW + 60_000)
   })
 })
 
-describe('crash button', () => {
+describe('button wait', () => {
   const NOW = 1_000_000
 
   it('stays on 1 s while the server has not said ready, though the page counted down', () => {
-    expect(chaosWaitShown(1, NOW - 500, NOW)).toBe(1)
+    expect(waitShown(1, NOW - 500, 0, NOW)).toBe(1)
   })
 
   it('shows the button only once the server says ready', () => {
-    expect(chaosWaitShown(0, NOW + 5_000, NOW)).toBeNull()
+    expect(waitShown(0, NOW + 5_000, 0, NOW)).toBeNull()
   })
 
   it('counts down by the page between the server answers', () => {
-    expect(chaosWaitShown(60, NOW + 42_300, NOW)).toBe(43)
-  })
-})
-
-describe('transfers per second', () => {
-  const second = (iso: string, accepted: number) =>
-    ({ second: iso, accepted, posted: accepted, rejected: 0, postedAmountCents: 0, bankP50Ms: null, bankP99Ms: null })
-  const series = [second('2026-10-15T10:00:00Z', 1000), second('2026-10-15T10:00:01Z', 1000), second('2026-10-15T10:00:02Z', 410)]
-
-  it('leaves out the second still running at the snapshot', () => {
-    expect(fullBankSeconds(series, Date.parse('2026-10-15T10:00:02.600Z'), null).map((s) => s.accepted)).toEqual([1000, 1000])
+    expect(waitShown(60, NOW + 42_300, 0, NOW)).toBe(43)
   })
 
-  it("leaves out the second in which the clients' window closed", () => {
-    const ended = fullBankSeconds(series, Date.parse('2026-10-15T10:00:09Z'), Date.parse('2026-10-15T10:00:02.410Z'))
-    expect(ended.map((s) => s.accepted)).toEqual([1000, 1000])
-  })
-
-  it('keeps a whole second with 0, as when the ledger is down', () => {
-    const down = [second('2026-10-15T10:00:00Z', 1000), second('2026-10-15T10:00:01Z', 0)]
-    expect(fullBankSeconds(down, Date.parse('2026-10-15T10:00:05Z'), null).map((s) => s.accepted)).toEqual([1000, 0])
-  })
-
-  it("leaves out the clients' second being counted and the slot past the duration", () => {
-    expect(fullClientSeconds([1000, 1000, 365], 30, true)).toEqual([1000, 1000])
-    expect(fullClientSeconds([1000, 1000, 1000, 0], 3, false)).toEqual([1000, 1000, 1000])
+  it('holds a refusal until its Retry-After, though the session says ready', () => {
+    expect(waitShown(0, 0, NOW + 4_200, NOW)).toBe(5)
+    expect(waitShown(0, 0, NOW - 1, NOW)).toBeNull()
   })
 })
 
@@ -151,23 +103,28 @@ describe('latency line', () => {
 
 })
 
-describe('crash band', () => {
-  // Run 1eaad4d9 of 2026-10-16: crash at 7.963 s; a point sits at the end of its second.
-  const booked: [number, number][] = [[6, 495], [7, 507], [8, 488], [9, 87], [10, 0], [11, 0], [12, 0], [13, 0], [14, 0], [15, 0], [16, 16], [17, 330]]
-  const crash = { offsetMs: 7963, instances: ['ledger-0', 'ledger-1', 'ledger-2'] }
-
-  it('lasts until the ledger books again, past the bookings it still made while going down', () => {
-    expect(crashBands([crash], booked, 32)).toEqual([[7.963, 16]])
+describe('charts', () => {
+  it('place each value at its instant from the start of the range', () => {
+    expect(seriesPoints(series(), 'ACCEPTED_PER_SECOND')).toEqual([[0, 400], [15, 410], [30, null]])
   })
 
-  it('lasts to the end when the ledger has not booked again yet', () => {
-    expect(crashBands([crash], booked.slice(0, 8), 32)).toEqual([[7.963, 32]])
+  it('draw nothing for a series monitoring did not send', () => {
+    expect(seriesPoints({ ...series(), series: [] }, 'POSTED_PER_SECOND')).toEqual([])
   })
 
-  it('is one second wide when the ledger never stopped booking', () => {
-    const [[from, to]] = crashBands([crash], [[8, 500], [9, 480], [10, 510]], 32) as [[number, number]]
-    expect(from).toBe(7.963)
-    expect(to).toBeCloseTo(8.963)
+  it('mark a crash within the range one step wide, and leave out one outside it', () => {
+    const at = (iso: string) => ({ at: iso, instances: ['ledger-0'] })
+    expect(crashBands([at('2026-11-11T10:00:20Z'), at('2026-11-11T09:59:00Z')], series())).toEqual([[20, 30]])
+  })
+})
+
+describe('age of the bank', () => {
+  const MINUTE = 60_000
+
+  it('is in minutes for the first hour, hours and minutes for the first day, then days and hours', () => {
+    expect(age(0, 42 * MINUTE)).toBe('42 min')
+    expect(age(0, 125 * MINUTE)).toBe('2 h 5 min')
+    expect(age(0, (3 * 24 * 60 + 61) * MINUTE)).toBe('3 d 1 h')
   })
 })
 
@@ -223,50 +180,5 @@ describe('dots after a crash', () => {
 
   it('run as measured without a crash', () => {
     expect(stopLedgerWires(rates, null, 4_500)).toEqual(rates)
-  })
-})
-
-describe('run shown', () => {
-  const queued = run({ runId: 'q2', state: 'QUEUED' })
-  const queuedEarlier = run({ runId: 'q1', state: 'QUEUED' })
-  const running = run({ runId: 'r', state: 'RUNNING' })
-  const done = run({ runId: 'd', state: 'RECONCILED' })
-
-  it('is the one running now, not a newer one still queued', () => {
-    expect(runToShow([queued, queuedEarlier, running, done], null)?.runId).toBe('r')
-  })
-
-  it('is the newest when nothing is running', () => {
-    expect(runToShow([queued, done], null)?.runId).toBe('q2')
-  })
-
-  it('is the one the viewer picked', () => {
-    expect(runToShow([queued, running, done], 'd')?.runId).toBe('d')
-  })
-
-  it('is the oldest of two in progress, the one that started first', () => {
-    const draining = run({ runId: 'dr', state: 'DRAINING' })
-    expect(runToShow([running, draining], null)?.runId).toBe('dr')
-  })
-})
-
-describe('link to the run in progress', () => {
-  const running = run({ runId: 'r', state: 'RUNNING' })
-  const done = run({ runId: 'd', state: 'RECONCILED' })
-
-  it('shows while the viewer looks at another run', () => {
-    expect(otherRunInProgress([running, done], done)?.runId).toBe('r')
-  })
-
-  it('hides while the viewer looks at the run in progress', () => {
-    expect(otherRunInProgress([running, done], running)).toBeNull()
-  })
-
-  it('hides while a run only waits in the queue', () => {
-    expect(otherRunInProgress([run({ runId: 'q', state: 'QUEUED' }), done], done)).toBeNull()
-  })
-
-  it('hides when nothing is in progress', () => {
-    expect(otherRunInProgress([done], done)).toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import type { LiveView } from './api/client'
+import type { BankView } from './api/client'
 
 type BankCounts = { accepted: number; posted: number; rejected: number }
 
@@ -14,16 +14,16 @@ export function inFlight(t: BankCounts): number {
   return Math.max(0, t.accepted - t.posted - t.rejected)
 }
 
-type LiveCounters = { accepted: number; posted: number; rejected: number; movedCents: number; requested: number | null }
+export type BankCounters = { accepted: number; posted: number; rejected: number; movedCents: number; requested: number | null; refused: number | null }
 
-export function liveCounters(live: LiveView | null): LiveCounters | null {
-  if (!live?.stats) return null
-  const t = live.stats.totals
+export function bankCounters(bank: BankView): BankCounters {
+  const t = bank.totals
   return {
     accepted: shownAccepted(t),
     posted: t.posted,
     rejected: t.rejected,
     movedCents: t.postedAmountCents,
-    requested: live.clients?.requested ?? null,
+    requested: bank.clients?.requested ?? null,
+    refused: bank.clients?.refused ?? null,
   }
 }

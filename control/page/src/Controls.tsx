@@ -1,26 +1,17 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { chaosWaitShown, nextChaosReadyAt } from './chaosReady'
-import { api, ApiFailure, type RunView, type SessionView } from './api/client'
-import { MS_PER_SECOND } from './format'
-import { newRequestId } from './requestId'
+import { useEffect, useRef, useState } from 'react'
+import { api, ApiFailure, type SessionView } from './api/client'
+import { count, hoursMinutes, MS_PER_SECOND } from './format'
+import { nextReadyAt, waitShown } from './readyCountdown'
+import { t } from './texts'
 
-const SECONDS_PER_MINUTE = 60
-export const RUN_NOT_FINISHED = 'Your run is not finished yet'
-export const NO_RANDOM_ID = 'Not started: the browser gave no random id.'
-const CRASH_LABEL = '⚡ Crash the ledger (all)'
-const BUSY_ERROR = 'busy'
-
-function refusal(e: unknown): string {
-  if (!(e instanceof ApiFailure)) return 'Control did not answer. Press Start again: the same run is not started twice.'
-  if (e.status === 429 && e.retryAfterSeconds !== null) {
-    return `The invite's runs for this hour are used up. Next run possible in ${Math.ceil(e.retryAfterSeconds / SECONDS_PER_MINUTE)} min.`
-  }
-  if (e.status === 429) return 'The queue is full. Try again in a few minutes.'
-  if (e.status === 503 && e.error === BUSY_ERROR) return 'Control is busy with other starts. Press Start again in a moment.'
-  if (e.status === 409) return `${RUN_NOT_FINISHED}.`
-  if (e.status === 403) return 'The invite has expired. Runs of this session can still be read.'
-  return `Not started: ${e.error}.`
-}
+const TOO_MANY = 429
+const FORBIDDEN = 403
+const NOT_IMPLEMENTED = 501
+const UNAVAILABLE = 503
+const LOAD_RUNNING = 'load-running'
+const LOAD_USED_RECENTLY = 'load-used-recently'
+const INVALID_LOAD = 'invalid-load'
+const GENERATOR_DID_NOT_ANSWER = 'generator-did-not-answer'
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now())
@@ -31,122 +22,123 @@ function useNow() {
   return now
 }
 
-export function Controls(props: {
-  sessionId: string
-  session: SessionView
-  selected: RunView | null
-  unfinished: boolean
-  onChanged: (run?: RunView) => void
-  onCrashed: (at: string) => void
-}) {
-  const { session, selected } = props
-  const [tps, setTps] = useState(session.defaultTps)
-  const [durationSeconds, setDurationSeconds] = useState(session.durationOptions.at(-1) ?? 0)
+/** A button's wait: the server's seconds from the session, and a refusal's Retry-After, after which the session is read again. */
+function useWait(serverSeconds: number, now: number, readAgain: () => void) {
+  const [ready, setReady] = useState(() => {
+    const at = Date.now()
+    return { at, readyAt: nextReadyAt(0, serverSeconds, at) }
+  })
+  const [refusal, setRefusal] = useState({ at: 0, until: 0 })
+  const latestReadAgain = useRef(readAgain)
+  latestReadAgain.current = readAgain
+  useEffect(() => {
+    const at = Date.now()
+    setReady((last) => ({ at, readyAt: nextReadyAt(last.readyAt, serverSeconds, at) }))
+  }, [serverSeconds])
+  useEffect(() => {
+    if (refusal.until === 0) return
+    const timer = setTimeout(() => latestReadAgain.current(), Math.max(0, refusal.until - Date.now()))
+    return () => clearTimeout(timer)
+  }, [refusal])
+  return {
+    // The clock ticks once a second, so it may be older than the last deadline; counted from it, 2 s would show as 3.
+    seconds: waitShown(serverSeconds, ready.readyAt, refusal.until, Math.max(now, ready.at, refusal.at)),
+    refused: (retryAfterSeconds: number) => {
+      const at = Date.now()
+      setRefusal({ at, until: at + retryAfterSeconds * MS_PER_SECOND })
+    },
+  }
+}
+
+function loadRefusal(e: unknown): string {
+  if (!(e instanceof ApiFailure)) return t.controls.controlDidNotAnswer
+  const wait = e.retryAfterSeconds ?? 1
+  if (e.status === FORBIDDEN) return t.controls.inviteNotValid
+  if (e.error === LOAD_RUNNING) return t.controls.load[LOAD_RUNNING](wait)
+  if (e.error === LOAD_USED_RECENTLY) return t.controls.load[LOAD_USED_RECENTLY](wait)
+  if (e.error === INVALID_LOAD) return t.controls.load[INVALID_LOAD]
+  if (e.error === GENERATOR_DID_NOT_ANSWER) return t.controls.load[GENERATOR_DID_NOT_ANSWER]
+  return t.controls.load.other(e.status)
+}
+
+function chaosRefusal(e: unknown): string {
+  if (!(e instanceof ApiFailure)) return t.controls.controlDidNotAnswer
+  if (e.status === FORBIDDEN) return t.controls.inviteNotValid
+  if (e.status === TOO_MANY) return t.controls.chaos.usedRecently(e.retryAfterSeconds ?? 1)
+  if (e.status === NOT_IMPLEMENTED) return t.controls.chaos.off
+  if (e.status === UNAVAILABLE) return t.controls.chaos.noLedgerAnswered
+  return t.controls.chaos.other(e.status)
+}
+
+export function Controls(props: { sessionId: string; session: SessionView; onChanged: () => void; onCrashed: (at: string) => void }) {
+  const { session } = props
+  const [tps, setTps] = useState(session.defaultLoadTps)
+  const [seconds, setSeconds] = useState(session.defaultLoadSeconds)
   const [sending, setSending] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const [chaosReadyAt, setChaosReadyAt] = useState(0)
-  const [serverWaitSeconds, setServerWaitSeconds] = useState(session.chaosReadyInSeconds)
-  // Kept until control answers, so a repeat after a lost answer is the same request, not a second run.
-  const pendingRequestId = useRef<string | null>(null)
   const now = useNow()
+  const loadWait = useWait(session.loadReadyInSeconds, now, props.onChanged)
+  const chaosWait = useWait(session.chaosReadyInSeconds, now, props.onChanged)
 
-  useEffect(() => {
-    setChaosReadyAt((at) => nextChaosReadyAt(at, session.chaosReadyInSeconds, Date.now()))
-    setServerWaitSeconds(session.chaosReadyInSeconds)
-  }, [session])
-
-  const choose = (change: () => void) => {
-    pendingRequestId.current = null
-    change()
-  }
-
-  const start = async (event: FormEvent) => {
-    event.preventDefault()
+  const raise = async () => {
     setSending(true)
-    setMessage(null)
     try {
-      pendingRequestId.current ??= newRequestId()
-    } catch {
-      setMessage(NO_RANDOM_ID)
-      setSending(false)
-      return
-    }
-    try {
-      const run = await api.startRun(props.sessionId, { requestId: pendingRequestId.current, tps, durationSeconds })
-      pendingRequestId.current = null
-      props.onChanged(run)
+      const pulse = await api.load(props.sessionId, { tps, seconds })
+      setMessage(t.controls.raised(count(pulse.tps), hoursMinutes(pulse.until)))
     } catch (e) {
-      if (e instanceof ApiFailure) pendingRequestId.current = null
-      setMessage(refusal(e))
+      if (e instanceof ApiFailure && e.status === TOO_MANY && e.retryAfterSeconds !== null) loadWait.refused(e.retryAfterSeconds)
+      setMessage(loadRefusal(e))
     } finally {
       setSending(false)
-    }
-  }
-
-  const stop = async () => {
-    if (!selected) return
-    try {
-      props.onChanged(await api.stopRun(props.sessionId, selected.runId))
-    } catch (e) {
-      setMessage(e instanceof ApiFailure ? `Not stopped: ${e.error}.` : 'Control did not answer.')
-    }
-  }
-
-  const crash = async () => {
-    try {
-      const crashed = await api.chaos(props.sessionId)
-      props.onCrashed(crashed.at)
-      setMessage(`Crashed ${crashed.instances.length} ledger instances. They restart; the run goes on.`)
-    } catch (e) {
-      if (e instanceof ApiFailure && e.retryAfterSeconds !== null) {
-        setChaosReadyAt(Date.now() + e.retryAfterSeconds * MS_PER_SECOND)
-        setServerWaitSeconds(e.retryAfterSeconds)
-      }
-      setMessage(e instanceof ApiFailure ? `No crash: ${e.error}.` : 'Control did not answer.')
     }
     props.onChanged()
   }
 
-  const running = selected?.state === 'RUNNING'
-  const chaosWaitSeconds = chaosWaitShown(serverWaitSeconds, chaosReadyAt, now)
-  const crashBlocked = chaosWaitSeconds !== null ? `available in ${chaosWaitSeconds} s` : running ? null : 'while clients are sending'
+  const crash = async () => {
+    setSending(true)
+    try {
+      const crashed = await api.chaos(props.sessionId)
+      props.onCrashed(crashed.at)
+      setMessage(t.controls.crashed(crashed.instances.length))
+    } catch (e) {
+      if (e instanceof ApiFailure && e.status === TOO_MANY && e.retryAfterSeconds !== null) chaosWait.refused(e.retryAfterSeconds)
+      setMessage(chaosRefusal(e))
+    } finally {
+      setSending(false)
+    }
+    props.onChanged()
+  }
+
+  const closed = !session.inviteValid || sending
 
   return (
     <section className="card">
-      <form className="controls" onSubmit={start}>
-        <select aria-label="Transfers per second" value={tps} onChange={(e) => choose(() => setTps(Number(e.target.value)))}>
-          {session.tpsOptions.map((option) => (
+      <div className="controls">
+        <select aria-label={t.controls.tpsLabel} value={tps} onChange={(e) => setTps(Number(e.target.value))}>
+          {session.loadTpsOptions.map((option) => (
             <option key={option} value={option}>
-              {option} transfers/s
+              {t.controls.tpsOption(count(option))}
             </option>
           ))}
         </select>
-        <select aria-label="Duration" value={durationSeconds} onChange={(e) => choose(() => setDurationSeconds(Number(e.target.value)))}>
-          {session.durationOptions.map((option) => (
+        <select aria-label={t.controls.secondsLabel} value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
+          {session.loadDurationOptions.map((option) => (
             <option key={option} value={option}>
-              {option} s
+              {t.controls.secondsOption(option)}
             </option>
           ))}
         </select>
-        <button type="submit" className="primary" disabled={!session.inviteValid || sending || props.unfinished}>
-          Start the run
-          {props.unfinished && <small className="why">{RUN_NOT_FINISHED}</small>}
-        </button>
-        <button type="button" className="primary" disabled={!running || selected.stopRequested} onClick={stop}>
-          ■ Stop
+        <button type="button" className="primary" disabled={closed || loadWait.seconds !== null} onClick={raise}>
+          {t.controls.raise}
+          {loadWait.seconds !== null && <small className="why chaosWait">{t.controls.availableIn(loadWait.seconds)}</small>}
         </button>
         {session.chaosAvailable && (
-          <button type="button" className="danger" disabled={crashBlocked !== null} onClick={crash}>
-            {CRASH_LABEL}
-            {crashBlocked !== null && <small className="why chaosWait">{crashBlocked}</small>}
+          <button type="button" className="danger" disabled={closed || chaosWait.seconds !== null} onClick={crash}>
+            {t.controls.crash}
+            {chaosWait.seconds !== null && <small className="why chaosWait">{t.controls.availableIn(chaosWait.seconds)}</small>}
           </button>
         )}
-      </form>
-      <p className="quota">
-        <span className="pill">
-          {session.inviteValid ? `Runs this hour: ${session.runsLastHour} of ${session.runsPerHour}` : 'Invite expired; runs can still be read'}
-        </span>
-      </p>
+      </div>
       {message && (
         <p role="alert" className="hint">
           {message}

@@ -16,9 +16,7 @@ node {
 val pageTypes by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
     dependsOn(tasks.npmInstall)
     npmCommand = listOf("run", "types")
-    // Control already serves the bank of periods; the page still shows the bank of runs and takes its types from that API
-    // until it moves to periods itself.
-    inputs.file("page/runs-openapi.json")
+    inputs.file("openapi.json")
     outputs.file("page/src/api/schema.d.ts")
 }
 

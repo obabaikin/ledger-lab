@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SiteView } from './api/client'
 import { looksLikeEmail, waitText } from './InviteForm'
 import { en } from './texts/en'
-import { fakeControl, type Answer } from './test/fakeControl'
+import { bankAnswers, fakeControl, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
 
 const REQUEST = 'POST /api/invite-requests'
@@ -27,7 +27,7 @@ function ask(email: string) {
 
 describe('the link form', () => {
   it('sends the address and says the same for any address once it is taken, and that each mail can delete it', async () => {
-    const calls = fakeControl({ 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 202, body: {} } })
+    const calls = fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 202, body: {} } })
     renderAt('/')
     await screen.findByText(/The link works for 7 days\. Your address is deleted after 30 days without use\./)
 
@@ -49,7 +49,7 @@ describe('the link form', () => {
     ['code it does not know', { status: 422, body: { error: 'something-new' } }, COULD_NOT_SEND],
     ['no answer', () => { throw new TypeError('Failed to fetch') }, COULD_NOT_SEND],
   ])('names a %s in its own words and lets the visitor try again', async (_, answer, message) => {
-    fakeControl({ 'GET /api/site': { status: 200, body: site() }, [REQUEST]: answer })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: answer })
     renderAt('/')
 
     ask('visitor@example.org')
@@ -59,7 +59,7 @@ describe('the link form', () => {
   })
 
   it('says a malformed address is no address without asking control', async () => {
-    const calls = fakeControl({ 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 202, body: {} } })
+    const calls = fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 202, body: {} } })
     renderAt('/')
 
     ask('with space@example.org')
@@ -72,7 +72,7 @@ describe('the link form', () => {
     ['in the browser', () => ask('')],
     ['by control', () => ask('visitor@example.org')],
   ])('marks the field when the address is refused %s, puts the cursor back in it and clears the mark once it looks right', async (_, refuse) => {
-    fakeControl({ 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 400, body: { error: 'invalid-email' } } })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 400, body: { error: 'invalid-email' } } })
     renderAt('/')
     const field = screen.getByLabelText(en.inviteForm.emailLabel)
 
@@ -91,7 +91,7 @@ describe('the link form', () => {
     ['busy', { status: 503, body: { error: 'busy' } }],
     ['a 400 with another code', { status: 400, body: { error: 'invalid request body' } }],
   ])('leaves the field unmarked when the refusal is not about the address: %s', async (_, answer) => {
-    fakeControl({ 'GET /api/site': { status: 200, body: site() }, [REQUEST]: answer })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: answer })
     renderAt('/')
 
     ask('visitor@example.org')
@@ -108,7 +108,7 @@ describe('the link form', () => {
 
   it('holds the button while the request is on its way', async () => {
     let answer: (value: Response) => void = () => {}
-    fakeControl({ 'GET /api/site': { status: 200, body: site() } })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() } })
     const pending = new Promise<Response>((resolve) => (answer = resolve))
     const original = globalThis.fetch
     globalThis.fetch = (input, init) => (String(input) === '/api/invite-requests' ? pending : original(input, init))
@@ -146,7 +146,7 @@ describe('the link form with the bot check on', () => {
   })
 
   async function renderWithKey() {
-    const calls = fakeControl({ 'GET /api/site': { status: 200, body: site({ turnstileSiteKey: 'site-key' }) }, [REQUEST]: { status: 202, body: {} } })
+    const calls = fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site({ turnstileSiteKey: 'site-key' }) }, [REQUEST]: { status: 202, body: {} } })
     renderAt('/')
     await screen.findByText(/The link works for 7 days/)
     return calls
@@ -252,6 +252,7 @@ describe('the link form with the bot check on', () => {
       remove: () => {},
     })
     const calls = fakeControl({
+      ...bankAnswers(),
       'GET /api/site': { status: 200, body: site({ turnstileSiteKey: 'site-key' }) },
       [REQUEST]: { status: 403, body: { error: 'verification-failed' } },
     })
@@ -288,7 +289,7 @@ describe('the link form with the bot check on', () => {
 
 describe('privacy and imprint', () => {
   it('the footer shows the version from the site API', async () => {
-    fakeControl({ 'GET /api/site': { status: 200, body: site({ version: 'v9.8.7-rc.6' }) } })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site({ version: 'v9.8.7-rc.6' }) } })
     renderAt('/impressum')
 
     expect(await screen.findByRole('contentinfo')).toHaveTextContent('· v9.8.7-rc.6 ·')
@@ -296,7 +297,7 @@ describe('privacy and imprint', () => {
 
   it('show the operator the deployment sets', async () => {
     const operator = { name: 'Site Operator', address: 'Example Street 1, 12345 Example City', email: 'contact@example.org' }
-    fakeControl({ 'GET /api/site': { status: 200, body: site({ operator }) } })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site({ operator }) } })
     renderAt('/impressum')
 
     expect(await screen.findByText(/Site Operator/)).toHaveTextContent('Example Street 1, 12345 Example City')
@@ -305,7 +306,7 @@ describe('privacy and imprint', () => {
   })
 
   it('privacy shows its seven sections in order, then the operator, who is not set where the deployment has none', async () => {
-    fakeControl({ 'GET /api/site': { status: 200, body: site({ retentionDays: 45 }) } })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site({ retentionDays: 45 }) } })
     renderAt('/privacy')
 
     const p = en.privacy
@@ -325,7 +326,7 @@ describe('privacy and imprint', () => {
   })
 
   it('privacy still says what remains when the site settings do not answer, without a retention it has not read', async () => {
-    fakeControl({ 'GET /api/site': { status: 500, body: {} } })
+    fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 500, body: {} } })
     renderAt('/privacy')
 
     const how = await screen.findByRole('heading', { name: en.privacy.heading3 })

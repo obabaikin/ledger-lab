@@ -23,7 +23,7 @@ export function stopLedgerWires(rates: number[], crashAt: number | null, interva
 
 const WIRE_COUNT_ZEROS = [0, 0, 0, 0, 0, 0, 0]
 const SVG_NS = 'http://www.w3.org/2000/svg'
-export const DOT_TRAVEL_MS = 600
+const DOT_TRAVEL_MS = 600
 const RATE_CAP = 2000
 /** Runs reach 2000 TPS: at that rate a wire still shows single dots, not a crowd. */
 const DOTS_PER_THOUSAND = 24
