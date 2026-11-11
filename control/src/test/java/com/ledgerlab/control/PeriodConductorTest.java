@@ -226,6 +226,62 @@ class PeriodConductorTest extends BankIntegrationTest {
         assertThat(periodView(PERIOD).get("failure")).isEqualTo("DRAIN_STALLED");
     }
 
+    private void window(Instant from, Instant to) {
+        jdbc.sql("INSERT INTO maintenance_windows (starts_at, ends_at) VALUES (:from, :to)")
+            .param("from", Timestamp.from(from))
+            .param("to", Timestamp.from(to))
+            .update();
+    }
+
+    @Test
+    @DisplayName("a bank that is down during declared maintenance does not fail the period: it is reconciled once the bank is back")
+    void a_bank_that_is_down_during_declared_maintenance_does_not_fail_the_period_it_is_reconciled_once_the_bank_is_back() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 503);
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 503);
+        var closing = closingTimeOf(PERIOD);
+        var windowEnd = closing.plus(Duration.ofMinutes(30));
+        window(closing.minusSeconds(120), windowEnd);
+
+        conductor.tick(closing);
+        conductor.tick(closing.plus(DRAIN_TIMEOUT));
+        conductor.tick(windowEnd.minusSeconds(1));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+
+        conductor.tick(windowEnd.plus(DRAIN_TIMEOUT).minusSeconds(2));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+        bankAnswersFor(PERIOD);
+        conductor.tick(windowEnd.plus(DRAIN_TIMEOUT).minusSeconds(2));
+        assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
+    }
+
+    @Test
+    @DisplayName("after the maintenance window the limit runs again, and a cancelled window does not hold it")
+    void after_the_maintenance_window_the_limit_runs_again_and_a_cancelled_window_does_not_hold_it() {
+        bankStartedIn(PERIOD);
+        List.of(PERIOD, NEXT_PERIOD).forEach(this::bankAnswersFor);
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 503);
+        var closing = closingTimeOf(PERIOD);
+        var windowEnd = closing.plus(Duration.ofMinutes(30));
+        window(closing.minusSeconds(120), windowEnd);
+        conductor.tick(closing);
+        conductor.tick(windowEnd.minusSeconds(1));
+
+        conductor.tick(windowEnd.minusSeconds(1).plus(DRAIN_TIMEOUT));
+        assertThat(periodView(PERIOD).get("failure")).isEqualTo("BANK_UNAVAILABLE");
+
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, NEXT_PERIOD), 503);
+        var nextClosing = closingTimeOf(NEXT_PERIOD);
+        window(nextClosing.minusSeconds(120), nextClosing.plus(Duration.ofMinutes(30)));
+        jdbc.sql("UPDATE maintenance_windows SET cancelled_at = declared_at WHERE starts_at = :from")
+            .param("from", Timestamp.from(nextClosing.minusSeconds(120)))
+            .update();
+        conductor.tick(nextClosing);
+        conductor.tick(nextClosing.plus(DRAIN_TIMEOUT));
+        assertThat(periodView(NEXT_PERIOD).get("failure")).isEqualTo("BANK_UNAVAILABLE");
+    }
+
     @Test
     @DisplayName("a period older than the bank keeps its transfers fails at once, without a call to the bank")
     void a_period_older_than_the_bank_keeps_its_transfers_fails_at_once_without_a_call_to_the_bank() {

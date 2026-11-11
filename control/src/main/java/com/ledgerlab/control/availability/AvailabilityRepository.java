@@ -113,6 +113,13 @@ public class AvailabilityRepository {
             .update();
     }
 
+    public boolean inWindow(Instant now) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM maintenance_windows WHERE cancelled_at IS NULL AND starts_at <= :now AND :now < ends_at)")
+            .param("now", Timestamp.from(now))
+            .query(Boolean.class)
+            .single();
+    }
+
     public @Nullable MaintenanceWindow nextWindow(Instant now) {
         return jdbc.sql("SELECT starts_at, ends_at FROM maintenance_windows WHERE cancelled_at IS NULL AND ends_at > :now ORDER BY starts_at LIMIT 1")
             .param("now", Timestamp.from(now))

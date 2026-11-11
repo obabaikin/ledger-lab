@@ -2,6 +2,7 @@ package com.ledgerlab.control.periods;
 
 import com.ledgerlab.control.ControlProperties;
 import com.ledgerlab.control.DatabaseClock;
+import com.ledgerlab.control.availability.AvailabilityRepository;
 import com.ledgerlab.control.bank.BankLive;
 import com.ledgerlab.control.chaos.ChaosRepository;
 import com.ledgerlab.control.gateway.ClosedPeriod;
@@ -42,6 +43,7 @@ public class PeriodConductor {
     private final ReportingClient reporting;
     private final BankLive live;
     private final ChaosRepository chaos;
+    private final AvailabilityRepository windows;
     private final DatabaseClock clock;
     private final ControlProperties.Periods props;
     private final ControlProperties.Reporting reportingProps;
@@ -59,6 +61,7 @@ public class PeriodConductor {
         ReportingClient reporting,
         BankLive live,
         ChaosRepository chaos,
+        AvailabilityRepository windows,
         DatabaseClock clock,
         ControlProperties props
     ) {
@@ -69,6 +72,7 @@ public class PeriodConductor {
         this.reporting = reporting;
         this.live = live;
         this.chaos = chaos;
+        this.windows = windows;
         this.clock = clock;
         this.props = props.periods();
         this.reportingProps = props.reporting();
@@ -104,11 +108,17 @@ public class PeriodConductor {
             if (period == null) {
                 return;
             }
-            if (period.state() != PeriodState.OPEN && !period.start().equals(settling)) {
-                periods.restartLimits(period.start(), now);
-                settling = period.start();
-                period = Objects.requireNonNull(periods.find(period.start()), "the period just read");
-                log.info("Period {}: taken over in {}, its limits start again", period.start(), period.state());
+            if (period.state() != PeriodState.OPEN) {
+                var takenOver = !period.start().equals(settling);
+                // During declared maintenance the bank may be down on purpose: the limits wait and start again after the window.
+                if (takenOver || windows.inWindow(now)) {
+                    periods.restartLimits(period.start(), now);
+                    period = Objects.requireNonNull(periods.find(period.start()), "the period just read");
+                }
+                if (takenOver) {
+                    settling = period.start();
+                    log.info("Period {}: taken over in {}, its limits start again", period.start(), period.state());
+                }
             }
             switch (period.state()) {
                 case OPEN -> open(period, now);

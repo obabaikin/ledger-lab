@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.ledgerlab.control.availability.AvailabilityRepository;
 import com.ledgerlab.control.bank.BankLive;
 import com.ledgerlab.control.chaos.ChaosRepository;
 import com.ledgerlab.control.gateway.GatewayClient;
@@ -46,7 +47,7 @@ class PeriodConductorFailureTest {
         });
         var conductor = new PeriodConductor(
             periods, mock(LedgerClient.class), mock(GatewayClient.class), mock(GeneratorClient.class), mock(ReportingClient.class), live,
-            mock(ChaosRepository.class), mock(DatabaseClock.class), props());
+            mock(ChaosRepository.class), mock(AvailabilityRepository.class), mock(DatabaseClock.class), props());
 
         conductor.tick(NOW);
 
