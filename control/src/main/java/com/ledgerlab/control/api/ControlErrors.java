@@ -19,6 +19,10 @@ public final class ControlErrors {
     public static final String UNKNOWN_PERIOD = "unknown-period";
     public static final String INVALID_LIMIT = "invalid-limit";
     public static final String INVALID_RANGE = "invalid-range";
+    public static final String INVALID_LOAD = "invalid-load";
+    public static final String LOAD_RUNNING = "load-running";
+    public static final String LOAD_USED_RECENTLY = "load-used-recently";
+    public static final String GENERATOR_DID_NOT_ANSWER = "generator-did-not-answer";
 
     private ControlErrors() {
     }

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.stream.IntStream;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -22,6 +23,7 @@ public record ControlProperties(
     Reporting reporting,
     Prometheus prometheus,
     Chaos chaos,
+    Load load,
     Invites invites,
     Turnstile turnstile,
     Mail mail,
@@ -94,6 +96,50 @@ public record ControlProperties(
     }
 
     public record LedgerInstance(String name, String url) {
+    }
+
+    /** {@link #minInterval} runs from a pulse's end, not its start. */
+    public record Load(
+        int minTps,
+        int maxTps,
+        int tpsStep,
+        int defaultTps,
+        List<Duration> durationOptions,
+        Duration defaultDuration,
+        Duration minInterval
+    ) {
+        public Load {
+            if (minTps < 1 || tpsStep < 1 || maxTps < minTps || (maxTps - minTps) % tpsStep != 0) {
+                throw new IllegalArgumentException(
+                    "load: min-tps " + minTps + " to max-tps " + maxTps + " must be whole steps of tps-step " + tpsStep);
+            }
+            durationOptions = List.copyOf(durationOptions);
+            if (durationOptions.isEmpty() || durationOptions.stream().anyMatch(it -> !isWholeSeconds(it))) {
+                throw new IllegalArgumentException("load.duration-options must be whole seconds, got " + durationOptions);
+            }
+            if (!tpsOptionsOf(minTps, maxTps, tpsStep).contains(defaultTps)) {
+                throw new IllegalArgumentException("load.default-tps " + defaultTps + " is not one of the options");
+            }
+            if (!durationOptions.contains(defaultDuration)) {
+                throw new IllegalArgumentException("load.default-duration " + defaultDuration + " is not one of " + durationOptions);
+            }
+        }
+
+        public List<Integer> tpsOptions() {
+            return tpsOptionsOf(minTps, maxTps, tpsStep);
+        }
+
+        public List<Integer> secondsOptions() {
+            return durationOptions.stream().map(it -> (int) it.toSeconds()).toList();
+        }
+
+        private static List<Integer> tpsOptionsOf(int minTps, int maxTps, int tpsStep) {
+            return IntStream.rangeClosed(0, (maxTps - minTps) / tpsStep).map(it -> minTps + it * tpsStep).boxed().toList();
+        }
+
+        private static boolean isWholeSeconds(Duration duration) {
+            return duration.isPositive() && duration.equals(Duration.ofSeconds(duration.toSeconds()));
+        }
     }
 
     public record Invites(InviteEmail email) {

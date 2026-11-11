@@ -4,6 +4,7 @@ package com.ledgerlab.control.generator;
 public final class GeneratorApi {
 
     public static final String LOAD_PATH = "/internal/load";
+    public static final String PULSE_PATH = "/internal/load/pulse";
     public static final String MINUTES_PATH = "/internal/load/minutes";
     public static final String MINUTES_AFTER = "after";
     public static final String RECONCILIATION_PATH = "/internal/periods/{periodStart}/reconciliation";

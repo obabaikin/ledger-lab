@@ -15,6 +15,7 @@ import com.ledgerlab.control.generator.MinuteResponses;
 import com.ledgerlab.control.generator.MinutesPage;
 import com.ledgerlab.control.generator.MismatchedTransfer;
 import com.ledgerlab.control.generator.Pulse;
+import com.ledgerlab.control.generator.PulseRequest;
 import com.ledgerlab.control.generator.ReconciliationBreaks;
 import com.ledgerlab.control.generator.StatementTotals;
 import com.ledgerlab.control.generator.TransferIds;
@@ -146,6 +147,7 @@ class ServiceContractsTest {
             new Call(gateway, HttpMethod.GET, GatewayApi.SUMMARY_PATH),
             new Call(gateway, HttpMethod.POST, GatewayApi.CLOSE_PATH),
             new Call(generator, HttpMethod.GET, GeneratorApi.LOAD_PATH),
+            new Call(generator, HttpMethod.POST, GeneratorApi.PULSE_PATH),
             new Call(generator, HttpMethod.GET, GeneratorApi.MINUTES_PATH),
             new Call(generator, HttpMethod.GET, GeneratorApi.RECONCILIATION_PATH),
             new Call(generator, HttpMethod.POST, GeneratorApi.RECONCILIATION_PATH),
@@ -157,6 +159,16 @@ class ServiceContractsTest {
     private List<String> parametersOf(Call call) {
         var declared = call.spec().operation(call.method(), call.path()).get("parameters");
         return declared == null ? List.of() : declared.values().stream().map(it -> it.get("name").asString()).toList();
+    }
+
+    @Test
+    @DisplayName("control sends a pulse with exactly the fields the generator requires")
+    void control_sends_a_pulse_with_exactly_the_fields_the_generator_requires() {
+        var body = generator.operation(HttpMethod.POST, GeneratorApi.PULSE_PATH).get("requestBody").get("content").get("application/json").get("schema");
+        var schema = generator.schemaOf(body.get("$ref").asString().substring(body.get("$ref").asString().lastIndexOf('/') + 1));
+
+        assertThat(names(schema.get("required"))).containsExactlyInAnyOrderElementsOf(fieldsOf(PulseRequest.class));
+        assertThat(schema.get("properties").propertyNames()).containsExactlyInAnyOrderElementsOf(fieldsOf(PulseRequest.class));
     }
 
     @Test
@@ -174,6 +186,7 @@ class ServiceContractsTest {
             new Answers(gateway, HttpMethod.GET, GatewayApi.SUMMARY_PATH, List.of("200", "404")),
             new Answers(gateway, HttpMethod.POST, GatewayApi.CLOSE_PATH, List.of("200", "404")),
             new Answers(generator, HttpMethod.GET, GeneratorApi.LOAD_PATH, List.of("200")),
+            new Answers(generator, HttpMethod.POST, GeneratorApi.PULSE_PATH, List.of("200", "400")),
             new Answers(generator, HttpMethod.GET, GeneratorApi.MINUTES_PATH, List.of("200")),
             new Answers(generator, HttpMethod.GET, GeneratorApi.RECONCILIATION_PATH, List.of("200", "404")),
             new Answers(generator, HttpMethod.POST, GeneratorApi.RECONCILIATION_PATH, List.of("202", "404")),

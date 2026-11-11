@@ -34,7 +34,7 @@ class PeriodConductorFailureTest {
         return new ControlProperties(
             new ControlProperties.Periods(Duration.ofHours(1), second, second, second, second, Duration.ofHours(4)),
             null, null, null, null, null, null, null, null, null, new ControlProperties.Reporting("http://localhost", second),
-            null, null, null, null, null, null);
+            null, null, null, null, null, null, null);
     }
 
     @Test

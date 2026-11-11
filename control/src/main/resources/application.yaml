@@ -80,6 +80,15 @@ control:
     enabled: false
     min-interval: 90s
     request-timeout: 2s
+  load:
+    # The bank's speed while a visitor's pulse lasts; its base (400) is the lowest option.
+    min-tps: 400
+    max-tps: 2000
+    tps-step: 100
+    default-tps: 1000
+    duration-options: 10s, 20s, 30s
+    default-duration: 10s
+    min-interval: 60s
   invites:
     email:
       links-per-address: 3

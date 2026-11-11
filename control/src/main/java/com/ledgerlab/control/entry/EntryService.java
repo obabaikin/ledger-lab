@@ -2,6 +2,7 @@ package com.ledgerlab.control.entry;
 
 import com.ledgerlab.control.ControlProperties;
 import com.ledgerlab.control.chaos.ChaosService;
+import com.ledgerlab.control.load.LoadService;
 import java.util.Objects;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -13,11 +14,13 @@ public class EntryService {
 
     private final InviteRepository invites;
     private final ChaosService chaos;
+    private final LoadService load;
     private final ControlProperties props;
 
-    public EntryService(InviteRepository invites, ChaosService chaos, ControlProperties props) {
+    public EntryService(InviteRepository invites, ChaosService chaos, LoadService load, ControlProperties props) {
         this.invites = invites;
         this.chaos = chaos;
+        this.load = load;
         this.props = props;
     }
 
@@ -42,6 +45,10 @@ public class EntryService {
             throw new SessionNotFoundException();
         }
         var invite = Objects.requireNonNull(invites.find(session.token()), "the invite of a session");
-        return new SessionOverview(sessionId, invite.valid(), props.chaos().enabled(), chaos.readyInSeconds());
+        var loadSettings = props.load();
+        return new SessionOverview(
+            sessionId, invite.valid(), props.chaos().enabled(), chaos.readyInSeconds(),
+            loadSettings.tpsOptions(), loadSettings.defaultTps(), loadSettings.secondsOptions(),
+            (int) loadSettings.defaultDuration().toSeconds(), load.readyInSeconds());
     }
 }

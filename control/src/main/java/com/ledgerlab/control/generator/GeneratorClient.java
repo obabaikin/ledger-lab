@@ -25,6 +25,10 @@ public class GeneratorClient {
         return http.call("GET", GeneratorApi.LOAD_PATH, LoadStatus.class);
     }
 
+    public Reply<LoadStatus> pulse(PulseRequest request) throws InterruptedException {
+        return http.call("POST", GeneratorApi.PULSE_PATH, LoadStatus.class, request);
+    }
+
     public Reply<MinutesPage> minutesAfter(@Nullable Instant after) throws InterruptedException {
         var query = after == null ? "" : "?" + GeneratorApi.MINUTES_AFTER + "=" + URLEncoder.encode(after.toString(), StandardCharsets.UTF_8);
         return http.call("GET", GeneratorApi.MINUTES_PATH + query, MinutesPage.class);

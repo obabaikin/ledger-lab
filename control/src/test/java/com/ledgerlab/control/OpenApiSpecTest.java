@@ -23,6 +23,7 @@ class OpenApiSpecTest extends IntegrationTest {
     private static final String SERVERS = "servers";
     private static final String JSON = "application/json";
     private static final String CHAOS = "/api/sessions/{sessionId}/chaos";
+    private static final String LOAD = "/api/sessions/{sessionId}/load";
     private static final String SESSIONS = "/api/sessions";
 
     @Test
@@ -70,6 +71,7 @@ class OpenApiSpecTest extends IntegrationTest {
         };
 
         assertThat(headersOf.apply(CHAOS, "429")).contains(HttpHeaders.RETRY_AFTER);
+        assertThat(headersOf.apply(LOAD, "429")).contains(HttpHeaders.RETRY_AFTER);
         assertThat(headersOf.apply(SESSIONS, "201")).contains(HttpHeaders.LOCATION);
     }
 

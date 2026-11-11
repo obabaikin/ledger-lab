@@ -14,6 +14,10 @@ import com.ledgerlab.control.entry.TokenRequiredException;
 import com.ledgerlab.control.entry.UnknownLinkException;
 import com.ledgerlab.control.entry.VerificationFailedException;
 import com.ledgerlab.control.entry.VerifierBusyException;
+import com.ledgerlab.control.load.GeneratorDidNotAnswerException;
+import com.ledgerlab.control.load.InvalidLoadException;
+import com.ledgerlab.control.load.LoadRunningException;
+import com.ledgerlab.control.load.LoadUsedRecentlyException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -42,8 +46,6 @@ public class ApiExceptionHandler {
         return new ApiError(ControlErrors.SESSION_NOT_FOUND);
     }
 
-
-
     @ExceptionHandler(HttpMessageNotReadableException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ApiError unreadableBody() {
@@ -61,19 +63,11 @@ public class ApiExceptionHandler {
         };
     }
 
-
-
-
-
-
-
-
     @ExceptionHandler(ChaosNotAvailableException.class)
     @ResponseStatus(HttpStatus.NOT_IMPLEMENTED)
     public ApiError chaosNotAvailable() {
         return new ApiError(ControlErrors.CHAOS_NOT_AVAILABLE);
     }
-
 
     @ExceptionHandler(ChaosUsedRecentlyException.class)
     public ResponseEntity<ApiError> chaosUsedRecently(ChaosUsedRecentlyException e) {
@@ -86,6 +80,32 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
     public ApiError ledgerDidNotAnswer() {
         return new ApiError(ControlErrors.LEDGER_DID_NOT_ANSWER);
+    }
+
+    @ExceptionHandler(InvalidLoadException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiError invalidLoad() {
+        return new ApiError(ControlErrors.INVALID_LOAD);
+    }
+
+    @ExceptionHandler(LoadRunningException.class)
+    public ResponseEntity<ApiError> loadRunning(LoadRunningException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, Long.toString(e.retryAfterSeconds()))
+            .body(new ApiError(ControlErrors.LOAD_RUNNING));
+    }
+
+    @ExceptionHandler(LoadUsedRecentlyException.class)
+    public ResponseEntity<ApiError> loadUsedRecently(LoadUsedRecentlyException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, Long.toString(e.retryAfterSeconds()))
+            .body(new ApiError(ControlErrors.LOAD_USED_RECENTLY));
+    }
+
+    @ExceptionHandler(GeneratorDidNotAnswerException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public ApiError generatorDidNotAnswer() {
+        return new ApiError(ControlErrors.GENERATOR_DID_NOT_ANSWER);
     }
 
     @ExceptionHandler(InvalidEmailException.class)

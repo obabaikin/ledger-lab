@@ -392,6 +392,23 @@
         "required" : [ "poolPostings", "postedTransfers", "rejectedTransfers" ],
         "type" : "object"
       },
+      "LoadRequest" : {
+        "description" : "A load pulse: one of the session's speed and length options.",
+        "properties" : {
+          "seconds" : {
+            "description" : "How long the pulse lasts, in seconds.",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "tps" : {
+            "description" : "The bank's speed while the pulse lasts, in transfers a second.",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "seconds", "tps" ],
+        "type" : "object"
+      },
       "MaintenanceWindow" : {
         "description" : "A declared maintenance window.",
         "properties" : {
@@ -843,16 +860,47 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "defaultLoadSeconds" : {
+            "description" : "The length offered first, in seconds.",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "defaultLoadTps" : {
+            "description" : "The speed offered first.",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "inviteValid" : {
             "description" : "False once the invite expired or was switched off; the session can then only look.",
             "type" : "boolean"
+          },
+          "loadDurationOptions" : {
+            "description" : "Lengths a load pulse may last, in seconds, shortest first.",
+            "items" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : "array"
+          },
+          "loadReadyInSeconds" : {
+            "description" : "Seconds until a load pulse may be started again, on the whole bank; 0 when it may be started now.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "loadTpsOptions" : {
+            "description" : "Speeds a load pulse may set, in transfers a second, lowest first.",
+            "items" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : "array"
           },
           "sessionId" : {
             "format" : "uuid",
             "type" : "string"
           }
         },
-        "required" : [ "chaosAvailable", "chaosReadyInSeconds", "inviteValid", "sessionId" ],
+        "required" : [ "chaosAvailable", "chaosReadyInSeconds", "defaultLoadSeconds", "defaultLoadTps", "inviteValid", "loadDurationOptions", "loadReadyInSeconds", "loadTpsOptions", "sessionId" ],
         "type" : "object"
       },
       "SiteView" : {
@@ -1487,6 +1535,103 @@
         },
         "summary" : "Crash every ledger instance",
         "tags" : [ "chaos-controller" ]
+      }
+    },
+    "/api/sessions/{sessionId}/load" : {
+      "post" : {
+        "operationId" : "load",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sessionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoadRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Pulse"
+                }
+              }
+            },
+            "description" : "The pulse runs until the time given; then the load goes back to its base"
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unreadable body, or a speed or length not among the options"
+          },
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The session's invite expired or was switched off"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Unknown session"
+          },
+          "429" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "A pulse runs, or ended recently (Retry-After says when)",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds until a pulse may be started again",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
+          },
+          "503" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The generator did not take the pulse"
+          }
+        },
+        "summary" : "Raise the bank's load for a while",
+        "tags" : [ "load-controller" ]
       }
     },
     "/api/site" : {

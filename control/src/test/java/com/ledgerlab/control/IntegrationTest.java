@@ -86,7 +86,7 @@ abstract class IntegrationTest {
         jdbc.sql(
             """
             TRUNCATE periods, availability_minutes, availability_hours, maintenance_windows, sessions, invite_visits, invite_mails,
-                invite_requests, invite_emails, invite_tokens, chaos_events
+                invite_requests, invite_emails, invite_tokens, chaos_events, load_pulses
             """).update();
         ledger.reset();
         gateway.reset();
