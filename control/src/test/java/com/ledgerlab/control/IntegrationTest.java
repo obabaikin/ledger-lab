@@ -8,7 +8,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -54,6 +58,7 @@ abstract class IntegrationTest {
     @Autowired ControlProperties props;
     @Autowired BankLive bankLive;
     @Autowired PeriodConductor conductor;
+    @Autowired DataSource dataSource;
 
     static final StubService ledger = new StubService();
     static final StubService gateway = new StubService();
@@ -99,6 +104,25 @@ abstract class IntegrationTest {
         // The live numbers are kept between ticks; a test must not start with those an earlier test read.
         ReflectionTestUtils.setField(bankLive, "snapshot", ReflectionTestUtils.getField(BankLive.Snapshot.class, "EMPTY"));
         ReflectionTestUtils.setField(conductor, "settling", null);
+    }
+
+    /**
+     * Runs {@code press} while another transaction holds the advisory lock {@code name}, as a press still calling out would.
+     * A press that waits for the lock fails the test after {@code patience} instead of hanging it: the lock is let go then.
+     */
+    protected <T> T whileLockHeld(String name, Duration patience, Callable<T> press) throws Exception {
+        try (var holder = dataSource.getConnection(); var presses = Executors.newVirtualThreadPerTaskExecutor()) {
+            holder.setAutoCommit(false);
+            try (var lock = holder.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+                lock.setString(1, name);
+                lock.execute();
+            }
+            try {
+                return presses.submit(press).get(patience.toMillis(), TimeUnit.MILLISECONDS);
+            } finally {
+                holder.rollback();
+            }
+        }
     }
 
     protected String invite() {

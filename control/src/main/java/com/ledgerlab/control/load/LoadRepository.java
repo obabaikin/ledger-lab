@@ -18,11 +18,12 @@ public class LoadRepository {
         this.jdbc = jdbc;
     }
 
-    public void lock() {
-        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:name, 0))")
+    /** False at once when another press holds the lock; held until this transaction ends. */
+    public boolean tryLock() {
+        return jdbc.sql("SELECT pg_try_advisory_xact_lock(hashtextextended(:name, 0))")
             .param("name", LOAD_LOCK)
-            .query(rs -> {
-            });
+            .query(Boolean.class)
+            .single();
     }
 
     public @Nullable Instant lastUntil() {

@@ -1501,7 +1501,7 @@
                 }
               }
             },
-            "description" : "Chaos was used on the cluster recently (Retry-After says when)",
+            "description" : "Chaos is being used or was used on the cluster recently (Retry-After says when to ask again)",
             "headers" : {
               "Retry-After" : {
                 "description" : "Seconds until chaos is available again",
@@ -1608,7 +1608,7 @@
                 }
               }
             },
-            "description" : "A pulse runs, or ended recently (Retry-After says when)",
+            "description" : "A pulse is being started, runs or ended recently (Retry-After says when to ask again)",
             "headers" : {
               "Retry-After" : {
                 "description" : "Seconds until a pulse may be started again",

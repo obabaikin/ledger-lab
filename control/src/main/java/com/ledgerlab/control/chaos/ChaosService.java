@@ -37,8 +37,8 @@ public class ChaosService {
     }
 
     /**
-     * The lock is held over the calls to the instances, so a second press waits and sees this one's event.
-     * The time is taken after the lock: the waiting transaction's now() would lie before it.
+     * The lock is held over the calls to the instances; a press meanwhile is refused at once rather than holding a pooled
+     * connection while it waits. It is told to ask again once those calls are over: this press's outcome is not known yet.
      */
     @Transactional
     public ChaosEvent crash(UUID sessionId) throws InterruptedException, ExecutionException {
@@ -53,7 +53,9 @@ public class ChaosService {
         if (invite == null || !invite.valid()) {
             throw new InviteNotValidException();
         }
-        events.lock();
+        if (!events.tryLock()) {
+            throw new ChaosUsedRecentlyException(wholeSeconds(props.chaos().requestTimeout()));
+        }
         var at = clock.now();
         var readyIn = secondsUntilReady(events.lastAt(), at);
         if (readyIn > 0) {
@@ -80,9 +82,10 @@ public class ChaosService {
             return 0;
         }
         var left = Duration.between(now, lastAt.plus(props.chaos().minInterval()));
-        if (left.compareTo(Duration.ZERO) <= 0) {
-            return 0;
-        }
-        return Math.max(Math.ceilDiv(left.toMillis(), MILLIS_PER_SECOND), 1);
+        return left.compareTo(Duration.ZERO) <= 0 ? 0 : wholeSeconds(left);
+    }
+
+    private static long wholeSeconds(Duration duration) {
+        return Math.max(Math.ceilDiv(duration.toMillis(), MILLIS_PER_SECOND), 1);
     }
 }

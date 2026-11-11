@@ -183,6 +183,20 @@ class LoadTest extends IntegrationTest {
     }
 
     @Test
+    @DisplayName("a press while another press is still calling the generator is 429 load-running at once, to ask again after that call's timeout")
+    void a_press_while_another_press_is_still_calling_the_generator_is_429_load_running_at_once_to_ask_again_after_that_calls_timeout() throws Exception {
+        var sessionId = visitor();
+
+        var refused = whileLockHeld("control.load", Duration.ofSeconds(2), () -> load(sessionId, 1000, 10));
+
+        assertThat(refused.getStatusCode().value()).isEqualTo(429);
+        assertThat(refused.getBody().get("error")).isEqualTo("load-running");
+        assertThat(retryAfter(refused)).isEqualTo(Long.toString(Math.ceilDiv(props.services().requestTimeout().toMillis(), 1000)));
+        assertThat(pulseCalls()).isEmpty();
+        assertThat(pulses()).isEmpty();
+    }
+
+    @Test
     void of_two_simultaneous_presses_exactly_one_raises_the_load_and_the_generator_is_called_once() throws Exception {
         generator.answer("POST", PULSE_PATH, 200, Fixtures.load(), Duration.ofMillis(200));
         var sessions = List.of(visitor(), visitor());

@@ -132,6 +132,20 @@ class ChaosTest extends IntegrationTest {
     }
 
     @Test
+    @DisplayName("chaos while another press is still crashing the ledger is 429 at once, to ask again after those calls' timeout")
+    void chaos_while_another_press_is_still_crashing_the_ledger_is_429_at_once_to_ask_again_after_those_calls_timeout() throws Exception {
+        var sessionId = visitor();
+
+        var refused = whileLockHeld("control.chaos", Duration.ofSeconds(2), () -> chaos(sessionId));
+
+        assertThat(refused.getStatusCode().value()).isEqualTo(429);
+        assertThat(refused.getBody().get("error")).isEqualTo("chaos used recently");
+        assertThat(refused.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("1");
+        assertThat(crashCalls()).containsExactly(0, 0, 0);
+        assertThat(events()).isEmpty();
+    }
+
+    @Test
     void of_two_simultaneous_chaos_requests_exactly_one_crashes_the_ledger() throws Exception {
         ledgerInstances.forEach(it -> it.delay = Duration.ofMillis(200));
         var sessions = List.of(visitor(), visitor());

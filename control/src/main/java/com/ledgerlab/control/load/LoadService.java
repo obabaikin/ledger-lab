@@ -40,8 +40,9 @@ public class LoadService {
     }
 
     /**
-     * The lock is held over the call to the generator, so a second press waits and sees this one's pulse; the time is taken
-     * after the lock. A pulse the generator may have taken without saying so is kept: the next press waits for it as for any.
+     * The lock is held over the call to the generator; a press meanwhile is refused at once rather than holding a pooled
+     * connection while it waits, and told to ask again once that call is over, as this press's pulse is not known yet. A
+     * pulse the generator may have taken without saying so is kept: the next press waits for it as for any.
      */
     @Transactional(noRollbackFor = GeneratorDidNotAnswerException.class)
     public Pulse raise(UUID sessionId, @Nullable Integer tps, @Nullable Integer seconds) throws InterruptedException {
@@ -57,7 +58,9 @@ public class LoadService {
         if (invite == null || !invite.valid()) {
             throw new InviteNotValidException();
         }
-        pulses.lock();
+        if (!pulses.tryLock()) {
+            throw new LoadRunningException(wholeSeconds(props.services().requestTimeout()));
+        }
         var at = clock.now();
         var lastUntil = pulses.lastUntil();
         if (lastUntil != null) {
@@ -99,9 +102,10 @@ public class LoadService {
 
     private long secondsUntilReady(Instant lastUntil, Instant now) {
         var left = Duration.between(now, lastUntil.plus(props.load().minInterval()));
-        if (left.compareTo(Duration.ZERO) <= 0) {
-            return 0;
-        }
-        return Math.max(Math.ceilDiv(left.toMillis(), MILLIS_PER_SECOND), 1);
+        return left.compareTo(Duration.ZERO) <= 0 ? 0 : wholeSeconds(left);
+    }
+
+    private static long wholeSeconds(Duration duration) {
+        return Math.max(Math.ceilDiv(duration.toMillis(), MILLIS_PER_SECOND), 1);
     }
 }

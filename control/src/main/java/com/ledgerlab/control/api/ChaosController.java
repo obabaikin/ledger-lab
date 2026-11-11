@@ -32,7 +32,7 @@ public class ChaosController {
     @ApiResponse(responseCode = "404", description = "Unknown session", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "403", description = "The session's invite expired or was switched off", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
-        responseCode = "429", description = "Chaos was used on the cluster recently (Retry-After says when)",
+        responseCode = "429", description = "Chaos is being used or was used on the cluster recently (Retry-After says when to ask again)",
         headers = @Header(name = HttpHeaders.RETRY_AFTER, description = "Seconds until chaos is available again", schema = @Schema(type = "integer")),
         content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "501", description = "Not available in this deployment", content = @Content(schema = @Schema(implementation = ApiError.class)))

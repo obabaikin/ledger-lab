@@ -35,7 +35,7 @@ public class LoadController {
     @ApiResponse(responseCode = "404", description = "Unknown session", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "403", description = "The session's invite expired or was switched off", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
-        responseCode = "429", description = "A pulse runs, or ended recently (Retry-After says when)",
+        responseCode = "429", description = "A pulse is being started, runs or ended recently (Retry-After says when to ask again)",
         headers = @Header(name = HttpHeaders.RETRY_AFTER, description = "Seconds until a pulse may be started again", schema = @Schema(type = "integer")),
         content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "503", description = "The generator did not confirm the pulse; without an answer it is taken as running", content = @Content(schema = @Schema(implementation = ApiError.class)))
