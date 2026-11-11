@@ -68,7 +68,7 @@ public class InviteRequestService {
 
     private String newInvite(String email, Instant now) {
         var token = MAILED_TOKEN_PREFIX + UUID.randomUUID();
-        mails.createInvite(token, now, limits.lifetime(), limits.runsPerHour());
+        mails.createInvite(token, now, limits.lifetime());
         mails.setAddressInvite(email, token, now);
         return token;
     }

@@ -1,9 +1,11 @@
 package com.ledgerlab.control.api;
 
+import com.ledgerlab.control.bank.InvalidLimitException;
+import com.ledgerlab.control.bank.InvalidRangeException;
+import com.ledgerlab.control.bank.UnknownPeriodException;
 import com.ledgerlab.control.chaos.ChaosNotAvailableException;
 import com.ledgerlab.control.chaos.ChaosUsedRecentlyException;
 import com.ledgerlab.control.chaos.LedgerDidNotAnswerException;
-import com.ledgerlab.control.chaos.NoRunningRunException;
 import com.ledgerlab.control.entry.DailyLimitException;
 import com.ledgerlab.control.entry.InvalidEmailException;
 import com.ledgerlab.control.entry.InviteNotValidException;
@@ -12,16 +14,6 @@ import com.ledgerlab.control.entry.TokenRequiredException;
 import com.ledgerlab.control.entry.UnknownLinkException;
 import com.ledgerlab.control.entry.VerificationFailedException;
 import com.ledgerlab.control.entry.VerifierBusyException;
-import com.ledgerlab.control.runs.InvalidRunRequestException;
-import com.ledgerlab.control.runs.QueueFullException;
-import com.ledgerlab.control.runs.QuotaExceededException;
-import com.ledgerlab.control.runs.ReportNotReadyException;
-import com.ledgerlab.control.runs.RequestIdConflictException;
-import com.ledgerlab.control.runs.RunNotFinalException;
-import com.ledgerlab.control.runs.RunNotFoundException;
-import com.ledgerlab.control.runs.RunNotStartedException;
-import com.ledgerlab.control.runs.StartsBusyException;
-import java.util.Objects;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -35,8 +27,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 public class ApiExceptionHandler {
 
     private static final String SESSION_ID = "sessionId";
-    private static final String RUN_ID = "runId";
-    private static final int BUSY_RETRY_AFTER_SECONDS = 1;
+    private static final String PERIOD_START = "periodStart";
+    private static final String LIMIT = "limit";
 
     @ExceptionHandler(InviteNotValidException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
@@ -50,17 +42,7 @@ public class ApiExceptionHandler {
         return new ApiError(ControlErrors.SESSION_NOT_FOUND);
     }
 
-    @ExceptionHandler(RunNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public ApiError runNotFound() {
-        return new ApiError(ControlErrors.RUN_NOT_FOUND);
-    }
 
-    @ExceptionHandler(InvalidRunRequestException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiError invalidRequest(InvalidRunRequestException e) {
-        return new ApiError(Objects.requireNonNull(e.getMessage(), "the message of an invalid run request"));
-    }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
@@ -68,62 +50,23 @@ public class ApiExceptionHandler {
         return new ApiError(ControlErrors.INVALID_REQUEST_BODY);
     }
 
-    // An id that is not a UUID cannot name an existing session or run, so it gets the same 404.
+    // An id that is not a UUID cannot name an existing session, nor can a start that is no instant name a period: the same 404.
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiError> malformedId(MethodArgumentTypeMismatchException e) {
         return switch (e.getName()) {
             case SESSION_ID -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiError(ControlErrors.SESSION_NOT_FOUND));
-            case RUN_ID -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiError(ControlErrors.RUN_NOT_FOUND));
+            case PERIOD_START -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiError(ControlErrors.UNKNOWN_PERIOD));
+            case LIMIT -> ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiError(ControlErrors.INVALID_LIMIT));
             default -> throw e;
         };
     }
 
-    @ExceptionHandler(RequestIdConflictException.class)
-    @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
-    public ApiError requestIdConflict() {
-        return new ApiError(ControlErrors.REQUEST_ID_CONFLICT);
-    }
 
-    @ExceptionHandler(RunNotFinalException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public ApiError runNotFinal() {
-        return new ApiError(ControlErrors.RUN_NOT_FINAL);
-    }
 
-    @ExceptionHandler(QuotaExceededException.class)
-    public ResponseEntity<ApiError> quotaExceeded(QuotaExceededException e) {
-        var answer = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS);
-        var retryAfterSeconds = e.retryAfterSeconds();
-        if (retryAfterSeconds != null) {
-            answer.header(HttpHeaders.RETRY_AFTER, Long.toString(Math.max(retryAfterSeconds, 1)));
-        }
-        return answer.body(new ApiError(ControlErrors.RUN_QUOTA_EXCEEDED));
-    }
 
-    @ExceptionHandler(StartsBusyException.class)
-    public ResponseEntity<ApiError> startsBusy() {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-            .header(HttpHeaders.RETRY_AFTER, Integer.toString(BUSY_RETRY_AFTER_SECONDS))
-            .body(new ApiError(ControlErrors.BUSY));
-    }
 
-    @ExceptionHandler(QueueFullException.class)
-    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
-    public ApiError queueFull() {
-        return new ApiError(ControlErrors.RUN_QUEUE_FULL);
-    }
 
-    @ExceptionHandler(RunNotStartedException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public ApiError runNotStarted() {
-        return new ApiError(ControlErrors.RUN_NOT_STARTED);
-    }
 
-    @ExceptionHandler(ReportNotReadyException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public ApiError reportNotReady() {
-        return new ApiError(ControlErrors.REPORT_NOT_READY);
-    }
 
     @ExceptionHandler(ChaosNotAvailableException.class)
     @ResponseStatus(HttpStatus.NOT_IMPLEMENTED)
@@ -131,11 +74,6 @@ public class ApiExceptionHandler {
         return new ApiError(ControlErrors.CHAOS_NOT_AVAILABLE);
     }
 
-    @ExceptionHandler(NoRunningRunException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public ApiError noRunningRun() {
-        return new ApiError(ControlErrors.NO_RUNNING_RUN);
-    }
 
     @ExceptionHandler(ChaosUsedRecentlyException.class)
     public ResponseEntity<ApiError> chaosUsedRecently(ChaosUsedRecentlyException e) {
@@ -185,5 +123,23 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ApiError unknownLink() {
         return new ApiError(ControlErrors.UNKNOWN_LINK);
+    }
+
+    @ExceptionHandler(UnknownPeriodException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiError unknownPeriod() {
+        return new ApiError(ControlErrors.UNKNOWN_PERIOD);
+    }
+
+    @ExceptionHandler(InvalidLimitException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiError invalidLimit() {
+        return new ApiError(ControlErrors.INVALID_LIMIT);
+    }
+
+    @ExceptionHandler(InvalidRangeException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiError invalidRange() {
+        return new ApiError(ControlErrors.INVALID_RANGE);
     }
 }

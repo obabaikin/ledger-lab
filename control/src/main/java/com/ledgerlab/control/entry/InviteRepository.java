@@ -15,9 +15,9 @@ public class InviteRepository {
     }
 
     public @Nullable Invite find(String token) {
-        return jdbc.sql("SELECT token, quota, active AND expires_at > now() AS valid FROM invite_tokens WHERE token = :token")
+        return jdbc.sql("SELECT token, active AND expires_at > now() AS valid FROM invite_tokens WHERE token = :token")
             .param("token", token)
-            .query((rs, rowNum) -> new Invite(rs.getString("token"), rs.getInt("quota"), rs.getBoolean("valid")))
+            .query((rs, rowNum) -> new Invite(rs.getString("token"), rs.getBoolean("valid")))
             .optional()
             .orElse(null);
     }

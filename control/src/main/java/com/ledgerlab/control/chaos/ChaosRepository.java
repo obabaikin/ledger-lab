@@ -51,6 +51,14 @@ public class ChaosRepository {
             .list();
     }
 
+    public List<ChaosEvent> between(Instant from, Instant to) {
+        return jdbc.sql("SELECT at, instances FROM chaos_events WHERE at >= :from AND at < :to ORDER BY at")
+            .param("from", Timestamp.from(from))
+            .param("to", Timestamp.from(to))
+            .query((rs, rowNum) -> toEvent(rs))
+            .list();
+    }
+
     public int deleteOlderThan(Duration retention) {
         return jdbc.sql("DELETE FROM chaos_events WHERE at <= clock_timestamp() - CAST(:retentionMillis AS bigint) * interval '1 millisecond'")
             .param("retentionMillis", retention.toMillis())

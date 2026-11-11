@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "types": "openapi-typescript ../openapi.json --output src/api/schema.d.ts",
+    "types": "openapi-typescript runs-openapi.json --output src/api/schema.d.ts",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",

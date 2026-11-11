@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ledgerlab.control.api.ControlErrors;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,8 +58,8 @@ class EntryTest extends IntegrationTest {
     @Test
     @DisplayName("an expired or inactive invite gets 403 and no session, but its visit is counted")
     void an_expired_or_inactive_invite_gets_403_and_no_session_but_its_visit_is_counted() {
-        var expired = invite(DEFAULT_QUOTA, Duration.ofMinutes(-1), true);
-        var inactive = invite(DEFAULT_QUOTA, Duration.ofDays(1), false);
+        var expired = invite(Duration.ofMinutes(-1), true);
+        var inactive = invite(Duration.ofDays(1), false);
 
         List.of(expired, inactive).forEach(token -> {
             var response = enter(token);
@@ -70,22 +71,13 @@ class EntryTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("a session shows its quota, the runs of its invite in the last hour and the options")
-    void a_session_shows_its_quota_the_runs_of_its_invite_in_the_last_hour_and_the_options() {
-        var token = invite(5);
-        var sessionId = sessionOf(token);
-        start(sessionOf(token));
-        start(sessionId);
+    @DisplayName("a session shows whether its invite holds and whether chaos may be used")
+    void a_session_shows_whether_its_invite_holds_and_whether_chaos_may_be_used() {
+        var sessionId = sessionOf(invite());
 
         var view = get("/api/sessions/" + sessionId).getBody();
 
-        assertThat(view.get("sessionId")).isEqualTo(sessionId.toString());
-        assertThat(view.get("inviteValid")).isEqualTo(true);
-        assertThat(view.get("runsPerHour")).isEqualTo(5);
-        assertThat(view.get("runsLastHour")).isEqualTo(2);
-        assertThat(view.get("tpsOptions")).isEqualTo(List.of(100, 500, 1000, 2000));
-        assertThat(view.get("defaultTps")).isEqualTo(1000);
-        assertThat(view.get("durationOptions")).isEqualTo(List.of(10, 20, 30));
+        assertThat(view).isEqualTo(Map.of("sessionId", sessionId.toString(), "inviteValid", true, "chaosAvailable", false, "chaosReadyInSeconds", 0));
     }
 
     @Test

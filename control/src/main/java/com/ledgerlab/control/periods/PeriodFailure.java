@@ -1,0 +1,12 @@
+package com.ledgerlab.control.periods;
+
+public enum PeriodFailure {
+    PERIOD_NOT_CLOSED,
+    PERIOD_UNKNOWN_TO_BANK,
+    BANK_UNAVAILABLE,
+    DRAIN_TIMED_OUT,
+    LEDGER_CHECK_UNAVAILABLE,
+    BOOKS_UNAVAILABLE,
+    CLIENT_RECONCILIATION_UNAVAILABLE,
+    DETAILS_EXPIRED,
+}

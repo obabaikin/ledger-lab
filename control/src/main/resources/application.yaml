@@ -28,63 +28,59 @@ server:
   port: 8083
 
 control:
-  runs:
-    max-active: 3
-    max-queued: 10
-    # Batched writes sustained 1200 TPS on the server with room above it (ADR 0019).
-    max-total-tps: 2000
-    # A start holds a connection of the pool of 10 while it waits for the queue's lock; the rest stay for reads and the tick.
-    max-concurrent-starts: 4
-    start-wait: 200ms
-    queue-timeout: 5m
-    tps-options: 100, 500, 1000, 2000
-    default-tps: 1000
-    duration-options: 10s, 20s, 30s
-    setup-timeout: 30s
-    running-grace: 60s
+  periods:
+    # The bank's period: the same value as in the gateway, ledger, reporting and generator.
+    length: 60m
+    # The gateway closes a period only once no transfer accepted in it is still being written.
+    close-delay: 60s
+    tick-interval: 1s
     drain-stall-timeout: 60s
-    drain-timeout: 3m
-    accounts:
-      count: 100
-      # 10 000 EUR ran out after about 17 minutes at 300 TPS (measured): most payments go to five merchants.
-      # 1 000 000 EUR lasts many such runs; an account sends about 110 000 EUR an hour, the daily limit is twice that.
-      opening-balance-cents: 100000000
-      blocked: 2
-      daily-limit-cents: 20000000
-  queue:
-    poll-interval: 1s
+    drain-timeout: 10m
+    # A check or a client reconciliation asked for and not there after this is asked for again: its service may have restarted.
+    request-retry: 30s
+    # The bank's retention of transfers: the same value as in its services.
+    details-retention: 4h
+  bank:
+    books-interval: 1m
+    recent-chaos: 2h
+  availability:
+    poll-interval: 15s
+    good-minute-answered-percent: 99
+    minutes-retention: 48h
+    # Minutes the generator hands over late still reach their hour.
+    rollup-lookback: 3h
+    slo-target: 0.999
+    slo-window: 30d
+  maintenance:
+    notice: 3h
+  series:
+    range: 2h
+    step: 30s
+    # Every visitor's page asks for the same charts.
+    cache: 15s
   ledger:
     base-url: http://localhost:8080
-    # The transfers topic's partition count (infra/kafka/create-topics.sh); runs start once the ledger holds them all.
-    transfer-partitions: 6
-    # It reads the whole run: longer than a plain request, and grows with the run's size.
-    reconciliation-timeout: 30s
   gateway:
     base-url: http://localhost:8081
-    # Like the ledger's reconciliation: it reads the whole run.
-    summary-timeout: 30s
   generator:
     base-url: http://localhost:8082
-    reconciliation-timeout: 30s
   services:
     request-timeout: 5s
   cleanup:
     interval: 1h
-    retention: 24h
+    retention: 48h
   reporting:
     base-url: http://localhost:8084
     # Past Kafka's session timeout (45 s): a killed reporting instance's partitions move to another by then (ADR 0015).
     catch-up-wait: 60s
-    # The live chart reads the stats every tick within the services' timeout; the report's read covers the whole run.
-    final-stats-timeout: 30s
   prometheus:
     base-url: http://localhost:9090
-    # Shorter than the services': it is read every tick for every live run.
+    # Shorter than the services': it is read every tick.
     request-timeout: 1s
   chaos:
     # On in the chart, which also lists the ledger instances by their management URLs.
     enabled: false
-    min-interval: 60s
+    min-interval: 90s
     request-timeout: 2s
   invites:
     email:
@@ -93,7 +89,6 @@ control:
       daily-mails: 50
       window: 24h
       lifetime: 7d
-      runs-per-hour: 10
       retention: 30d
       deletion-check: 1m
   turnstile:

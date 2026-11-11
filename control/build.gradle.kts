@@ -16,7 +16,9 @@ node {
 val pageTypes by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
     dependsOn(tasks.npmInstall)
     npmCommand = listOf("run", "types")
-    inputs.file("openapi.json")
+    // Control already serves the bank of periods; the page still shows the bank of runs and takes its types from that API
+    // until it moves to periods itself.
+    inputs.file("page/runs-openapi.json")
     outputs.file("page/src/api/schema.d.ts")
 }
 
@@ -84,12 +86,10 @@ tasks.test {
     systemProperty("openapi.actualDir", layout.buildDirectory.get().asFile.path)
     // Control knows the services only through their specs (ADR 0011), not through their classes.
     val specs = mapOf(
-        // The bank's services and the generator already serve periods; control still calls the bank of runs and is checked
-        // against the specs of those services until it moves to periods itself.
-        "ledger.spec" to file("src/test/runs-specs/ledger.json"),
-        "gateway.spec" to file("src/test/runs-specs/gateway.json"),
-        "generator.spec" to file("src/test/runs-specs/generator.json"),
-        "reporting.spec" to file("src/test/runs-specs/reporting.json"),
+        "ledger.spec" to rootProject.file("ledger-service/openapi.json"),
+        "gateway.spec" to rootProject.file("gateway/openapi-internal.json"),
+        "generator.spec" to rootProject.file("generator/openapi.json"),
+        "reporting.spec" to rootProject.file("reporting/openapi.json"),
     )
     inputs.files(specs.values).withPropertyName("serviceSpecs")
     specs.forEach { (property, file) -> systemProperty(property, file.path) }

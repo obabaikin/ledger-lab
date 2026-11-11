@@ -2,8 +2,6 @@ package com.ledgerlab.control.entry;
 
 import com.ledgerlab.control.ControlProperties;
 import com.ledgerlab.control.chaos.ChaosService;
-import com.ledgerlab.control.runs.Run;
-import com.ledgerlab.control.runs.RunRepository;
 import java.util.Objects;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -14,13 +12,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class EntryService {
 
     private final InviteRepository invites;
-    private final RunRepository runs;
     private final ChaosService chaos;
     private final ControlProperties props;
 
-    public EntryService(InviteRepository invites, RunRepository runs, ChaosService chaos, ControlProperties props) {
+    public EntryService(InviteRepository invites, ChaosService chaos, ControlProperties props) {
         this.invites = invites;
-        this.runs = runs;
         this.chaos = chaos;
         this.props = props;
     }
@@ -46,15 +42,6 @@ public class EntryService {
             throw new SessionNotFoundException();
         }
         var invite = Objects.requireNonNull(invites.find(session.token()), "the invite of a session");
-        return new SessionOverview(
-            sessionId,
-            invite.valid(),
-            invite.quota(),
-            runs.quotaUsage(session.token(), Run.QUOTA_WINDOW, invite.quota()).used(),
-            props.runs().tpsOptions(),
-            props.runs().defaultTps(),
-            props.runs().durationSecondsOptions(),
-            props.chaos().enabled(),
-            chaos.readyInSeconds());
+        return new SessionOverview(sessionId, invite.valid(), props.chaos().enabled(), chaos.readyInSeconds());
     }
 }

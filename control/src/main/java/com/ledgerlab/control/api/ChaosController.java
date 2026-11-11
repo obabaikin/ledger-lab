@@ -1,5 +1,6 @@
 package com.ledgerlab.control.api;
 
+import com.ledgerlab.control.chaos.ChaosEvent;
 import com.ledgerlab.control.chaos.ChaosService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -26,10 +27,10 @@ public class ChaosController {
         this.chaos = chaos;
     }
 
-    @Operation(summary = "Crash every ledger instance during a run")
-    @ApiResponse(responseCode = "202", description = "Crashed; the instances restart and the run goes on")
+    @Operation(summary = "Crash every ledger instance")
+    @ApiResponse(responseCode = "202", description = "Crashed; the instances restart and the bank goes on")
     @ApiResponse(responseCode = "404", description = "Unknown session", content = @Content(schema = @Schema(implementation = ApiError.class)))
-    @ApiResponse(responseCode = "409", description = "The session has no running run", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "403", description = "The session's invite expired or was switched off", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
         responseCode = "429", description = "Chaos was used on the cluster recently (Retry-After says when)",
         headers = @Header(name = HttpHeaders.RETRY_AFTER, description = "Seconds until chaos is available again", schema = @Schema(type = "integer")),
@@ -38,8 +39,7 @@ public class ChaosController {
     @ApiResponse(responseCode = "503", description = "No ledger instance answered", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @PostMapping(CHAOS_PATH)
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public ChaosView chaos(@PathVariable UUID sessionId) throws InterruptedException, ExecutionException {
-        var event = chaos.crash(sessionId);
-        return new ChaosView(event.at(), event.instances());
+    public ChaosEvent chaos(@PathVariable UUID sessionId) throws InterruptedException, ExecutionException {
+        return chaos.crash(sessionId);
     }
 }

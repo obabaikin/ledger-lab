@@ -1,15 +1,19 @@
 package com.ledgerlab.control;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.ZoneId;
-import java.util.Collections;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 @ConfigurationProperties("control")
 public record ControlProperties(
-    Runs runs,
+    Periods periods,
+    Bank bank,
+    Availability availability,
+    Maintenance maintenance,
+    Series series,
     Ledger ledger,
     Gateway gateway,
     Generator generator,
@@ -23,47 +27,51 @@ public record ControlProperties(
     Mail mail,
     Site site
 ) {
-    public record Runs(
-        int maxActive,
-        int maxQueued,
-        Duration queueTimeout,
-        List<Integer> tpsOptions,
-        int defaultTps,
-        List<Duration> durationOptions,
-        Duration setupTimeout,
-        Duration runningGrace,
+    /**
+     * {@link #length} is the bank's: every service cuts its periods by the same setting. {@link #detailsRetention} is the
+     * bank's too: a period older than it cannot be reconciled any more.
+     */
+    public record Periods(
+        Duration length,
+        Duration closeDelay,
         Duration drainStallTimeout,
         Duration drainTimeout,
-        Accounts accounts,
-        int maxTotalTps,
-        // At most this many starts wait for the queue's lock at once; one more waits up to startWait, then is refused.
-        int maxConcurrentStarts,
-        Duration startWait
+        Duration requestRetry,
+        Duration detailsRetention
     ) {
-        public Runs {
-            if (!tpsOptions.stream().allMatch(it -> it <= maxTotalTps)) {
-                throw new IllegalArgumentException("a run of " + Collections.max(tpsOptions) + " TPS would never fit max-total-tps " + maxTotalTps);
-            }
-            if (!tpsOptions.contains(defaultTps)) {
-                throw new IllegalArgumentException("default-tps " + defaultTps + " is not one of tps-options " + tpsOptions);
+        public Periods {
+            if (length.isZero() || length.isNegative() || !length.equals(Duration.ofMinutes(length.toMinutes()))) {
+                throw new IllegalArgumentException("periods.length must be whole minutes, got " + length);
             }
         }
-
-        public List<Integer> durationSecondsOptions() {
-            return durationOptions.stream().map(it -> (int) it.toSeconds()).toList();
-        }
     }
 
-    public record Accounts(int count, long openingBalanceCents, int blocked, long dailyLimitCents) {
+    public record Bank(Duration booksInterval, Duration recentChaos) {
     }
 
-    public record Ledger(String baseUrl, int transferPartitions, Duration reconciliationTimeout) {
+    public record Availability(
+        int goodMinuteAnsweredPercent,
+        Duration minutesRetention,
+        Duration rollupLookback,
+        BigDecimal sloTarget,
+        Duration sloWindow
+    ) {
     }
 
-    public record Gateway(String baseUrl, Duration summaryTimeout) {
+    /** A window declared later than {@link #notice} before its start does not excuse its bad minutes. */
+    public record Maintenance(Duration notice) {
     }
 
-    public record Generator(String baseUrl, Duration reconciliationTimeout) {
+    public record Series(Duration range, Duration step, Duration cache) {
+    }
+
+    public record Ledger(String baseUrl) {
+    }
+
+    public record Gateway(String baseUrl) {
+    }
+
+    public record Generator(String baseUrl) {
     }
 
     public record Services(Duration requestTimeout) {
@@ -72,7 +80,7 @@ public record ControlProperties(
     public record Cleanup(Duration interval, Duration retention) {
     }
 
-    public record Reporting(String baseUrl, Duration catchUpWait, Duration finalStatsTimeout) {
+    public record Reporting(String baseUrl, Duration catchUpWait) {
     }
 
     public record Prometheus(String baseUrl, Duration requestTimeout) {
@@ -97,7 +105,6 @@ public record ControlProperties(
         int dailyMails,
         Duration window,
         Duration lifetime,
-        int runsPerHour,
         Duration retention,
         Duration deletionCheck
     ) {

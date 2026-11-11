@@ -22,7 +22,6 @@ class OpenApiSpecTest extends IntegrationTest {
     private static final String FILE_NAME = "openapi.json";
     private static final String SERVERS = "servers";
     private static final String JSON = "application/json";
-    private static final String RUNS = "/api/sessions/{sessionId}/runs";
     private static final String CHAOS = "/api/sessions/{sessionId}/chaos";
     private static final String SESSIONS = "/api/sessions";
 
@@ -62,18 +61,15 @@ class OpenApiSpecTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("a refusal to wait declares Retry-After, a created or accepted run or session declares its Location")
-    void a_refusal_to_wait_declares_Retry_After_a_created_or_accepted_run_or_session_declares_its_Location() {
+    @DisplayName("a refusal to wait declares Retry-After, a created session declares its Location")
+    void a_refusal_to_wait_declares_Retry_After_a_created_session_declares_its_Location() {
         var paths = committed().get("paths");
         BiFunction<String, String, Collection<String>> headersOf = (path, status) -> {
             var headers = paths.get(path).get("post").get("responses").get(status).get("headers");
             return headers == null ? List.of() : headers.propertyNames();
         };
 
-        assertThat(headersOf.apply(RUNS, "429")).contains(HttpHeaders.RETRY_AFTER);
         assertThat(headersOf.apply(CHAOS, "429")).contains(HttpHeaders.RETRY_AFTER);
-        assertThat(headersOf.apply(RUNS, "202")).contains(HttpHeaders.LOCATION);
-        assertThat(headersOf.apply(RUNS, "200")).contains(HttpHeaders.LOCATION);
         assertThat(headersOf.apply(SESSIONS, "201")).contains(HttpHeaders.LOCATION);
     }
 
