@@ -12,7 +12,7 @@ public record PeriodCheck(
     long transfersWithInvalidJournal,
     @Schema(description = "Ids of the first such transfers.")
     List<String> invalidJournalExamples,
-    @Schema(description = "False for the bank's first period: it has no balances of a period before to compare with.")
+    @Schema(description = "False where the ledger holds no balances of the period before to compare with: the bank's first period, and one after a period that failed.")
     boolean accountsCompared,
     long accountsOutOfBalance,
     List<AccountMismatch> accountExamples,

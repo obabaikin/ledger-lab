@@ -449,7 +449,7 @@
             "type" : "array"
           },
           "accountsCompared" : {
-            "description" : "False for the bank's first period: it has no balances of a period before to compare with.",
+            "description" : "False where the ledger holds no balances of the period before to compare with: the bank's first period, and one after a period that failed.",
             "type" : "boolean"
           },
           "accountsOutOfBalance" : {
@@ -583,7 +583,7 @@
           "mismatches" : {
             "description" : "What disagreed; empty for BALANCED.",
             "items" : {
-              "enum" : [ "NOT_DRAINED", "MORE_RESULTS_THAN_ACCEPTED", "ENTRIES_CHANGED_AFTER_CLOSE", "BANK_VIEWS_DISAGREE", "LEDGER_CHECK_FAILED", "BOOKS_OUT_OF_BALANCE", "CLIENT_JOURNAL_DISAGREES", "STATEMENT_NOT_FINAL" ],
+              "enum" : [ "ENTRIES_CHANGED_AFTER_CLOSE", "BANK_VIEWS_DISAGREE", "LEDGER_CHECK_FAILED", "BOOKS_OUT_OF_BALANCE", "CLIENT_JOURNAL_DISAGREES", "STATEMENT_NOT_FINAL" ],
               "type" : "string"
             },
             "type" : "array"
@@ -591,7 +591,7 @@
           "notes" : {
             "description" : "What the report could not show; does not decide the verdict.",
             "items" : {
-              "enum" : [ "REPORTING_UNAVAILABLE", "PROJECTION_BEHIND_BOOKS" ],
+              "enum" : [ "REPORTING_UNAVAILABLE", "PROJECTION_BEHIND_BOOKS", "ACCOUNTS_NOT_COMPARED" ],
               "type" : "string"
             },
             "type" : "array"
@@ -682,7 +682,7 @@
           },
           "failure" : {
             "description" : "Why the period ended without a verdict; only when failed.",
-            "enum" : [ "PERIOD_NOT_CLOSED", "PERIOD_UNKNOWN_TO_BANK", "BANK_UNAVAILABLE", "DRAIN_TIMED_OUT", "LEDGER_CHECK_UNAVAILABLE", "BOOKS_UNAVAILABLE", "CLIENT_RECONCILIATION_UNAVAILABLE", "DETAILS_EXPIRED" ],
+            "enum" : [ "PERIOD_NOT_CLOSED", "PERIOD_UNKNOWN_TO_BANK", "BANK_UNAVAILABLE", "DRAIN_STALLED", "DRAIN_TIMED_OUT", "MORE_RESULTS_THAN_ACCEPTED", "LEDGER_CHECK_UNAVAILABLE", "BOOKS_UNAVAILABLE", "CLIENT_RECONCILIATION_UNAVAILABLE", "DETAILS_EXPIRED" ],
             "type" : [ "string", "null" ]
           },
           "finishedAt" : {

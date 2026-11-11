@@ -1,8 +1,6 @@
 package com.ledgerlab.control.periods;
 
 public enum Mismatch {
-    NOT_DRAINED,
-    MORE_RESULTS_THAN_ACCEPTED,
     ENTRIES_CHANGED_AFTER_CLOSE,
     BANK_VIEWS_DISAGREE,
     LEDGER_CHECK_FAILED,

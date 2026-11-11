@@ -52,7 +52,6 @@ public record ControlProperties(
     public record Availability(
         int goodMinuteAnsweredPercent,
         Duration minutesRetention,
-        Duration rollupLookback,
         BigDecimal sloTarget,
         Duration sloWindow
     ) {

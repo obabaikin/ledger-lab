@@ -11,7 +11,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/lib.sh"
 
 NOTICE_HOURS=3
-TIME_SHAPE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z'
+# Whole minutes: availability is judged by the minute.
+TIME_SHAPE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z'
 
 usage() {
   echo "usage: $0 add <from> <to> | cancel <id> | list; times in UTC as 2026-11-12T02:00Z" >&2

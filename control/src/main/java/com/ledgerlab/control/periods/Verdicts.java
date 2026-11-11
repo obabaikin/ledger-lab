@@ -43,6 +43,7 @@ public final class Verdicts {
             ledger.rejectionsByReason());
     }
 
+    /** For a drained period: control asks for the ledger's check and the clients' reconciliation only once the books are final. */
     public static PeriodReport verdictOf(
         long entryCount,
         PeriodSummary gateway,
@@ -54,19 +55,12 @@ public final class Verdicts {
         List<ChaosEvent> chaos
     ) {
         var mismatches = new ArrayList<Mismatch>();
-        var overcounted = overcounted(gateway, ledger);
-        if (overcounted) {
-            mismatches.add(Mismatch.MORE_RESULTS_THAN_ACCEPTED);
-        } else if (!drained(gateway, ledger)) {
-            mismatches.add(Mismatch.NOT_DRAINED);
-        }
         if (entryCount != gateway.accepted()) {
             mismatches.add(Mismatch.ENTRIES_CHANGED_AFTER_CLOSE);
         }
         var bankViewsAgree = gateway.posted() == ledger.postedTransfers() && gateway.rejected() == ledger.rejectedTransfers()
             && gateway.rejectionsByReason().equals(ledger.rejectionsByReason());
-        // Before the drain ends the gateway's counts trail the ledger's: NOT_DRAINED says so already.
-        if (!bankViewsAgree && mismatches.stream().noneMatch(it -> it == Mismatch.NOT_DRAINED)) {
+        if (!bankViewsAgree) {
             mismatches.add(Mismatch.BANK_VIEWS_DISAGREE);
         }
         if (!ledgerCheck.balanced()) {
@@ -81,13 +75,14 @@ public final class Verdicts {
         if (!client.statementFinal()) {
             mismatches.add(Mismatch.STATEMENT_NOT_FINAL);
         }
-        List<PeriodNote> notes;
+        var notes = new ArrayList<PeriodNote>();
         if (stats == null) {
-            notes = List.of(PeriodNote.REPORTING_UNAVAILABLE);
+            notes.add(PeriodNote.REPORTING_UNAVAILABLE);
         } else if (!projectionMatchesBooks(stats, gateway, ledger)) {
-            notes = List.of(PeriodNote.PROJECTION_BEHIND_BOOKS);
-        } else {
-            notes = List.of();
+            notes.add(PeriodNote.PROJECTION_BEHIND_BOOKS);
+        }
+        if (!ledgerCheck.accountsCompared()) {
+            notes.add(PeriodNote.ACCOUNTS_NOT_COMPARED);
         }
         return new PeriodReport(
             mismatches.isEmpty() ? Verdict.BALANCED : Verdict.MISMATCH,

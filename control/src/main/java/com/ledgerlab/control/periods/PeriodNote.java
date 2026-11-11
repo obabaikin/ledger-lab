@@ -4,4 +4,5 @@ package com.ledgerlab.control.periods;
 public enum PeriodNote {
     REPORTING_UNAVAILABLE,
     PROJECTION_BEHIND_BOOKS,
+    ACCOUNTS_NOT_COMPARED,
 }

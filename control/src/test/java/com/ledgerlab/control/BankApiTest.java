@@ -13,6 +13,7 @@ import static com.ledgerlab.control.Fixtures.stats;
 import static com.ledgerlab.control.http.ServiceHttp.forPeriod;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ledgerlab.control.gateway.GatewayApi;
 import com.ledgerlab.control.generator.GeneratorApi;
 import com.ledgerlab.control.ledger.LedgerApi;
 import com.ledgerlab.control.metrics.BankMetrics;
@@ -95,6 +96,23 @@ class BankApiTest extends BankIntegrationTest {
             "accepted", (int) ACCEPTED + 50, "posted", (int) POSTED + 40, "rejected", (int) REJECTED + 5,
             "postedAmountCents", (int) (2 * POSTED_AMOUNT_CENTS), "rejectionsByReason", Map.of("INSUFFICIENT_FUNDS", 120, "BLOCKED_ACCOUNT", 80)));
         assertThat(bank().get("startedAt")).isEqualTo(PERIOD.toString());
+    }
+
+    @Test
+    @DisplayName("the totals do not fall when a period fails: it keeps the numbers from its events")
+    void the_totals_do_not_fall_when_a_period_fails_it_keeps_the_numbers_from_its_events() {
+        bankStartedIn(PERIOD);
+        reporting.answer("GET", forPeriod(ReportingApi.STATS_PATH, PERIOD), 200, stats(PERIOD));
+        conductor.tick(PERIOD.plusSeconds(1200));
+        var before = bank().get("totals");
+        gateway.answer("POST", forPeriod(GatewayApi.CLOSE_PATH, PERIOD), 404, mapOf("error", "unknown-period"));
+        reporting.answer("GET", forPeriod(ReportingApi.STATS_PATH, PERIOD), 503);
+
+        conductor.tick(closingTimeOf(PERIOD));
+
+        assertThat(stateOf(PERIOD)).isEqualTo("FAILED");
+        assertThat(((Map<?, ?>) before).get("accepted")).isEqualTo((int) ACCEPTED);
+        assertThat(bank().get("totals")).isEqualTo(before);
     }
 
     @Test

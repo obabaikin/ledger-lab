@@ -47,8 +47,6 @@ control:
     poll-interval: 15s
     good-minute-answered-percent: 99
     minutes-retention: 48h
-    # Minutes the generator hands over late still reach their hour.
-    rollup-lookback: 3h
     slo-target: 0.999
     slo-window: 30d
   maintenance:

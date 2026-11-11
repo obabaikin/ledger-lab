@@ -167,11 +167,27 @@ public class PeriodConductor {
         if (drained && period.booksFinalAt() == null) {
             periods.markBooksFinal(start, now);
         }
-        var stalled = !now.isBefore(progressAt.plus(props.drainStallTimeout()));
-        if (!drained && !Verdicts.overcounted(bank, inLedger) && !stalled && !pastDeadline) {
+        if (!drained) {
+            // The ledger's check is asked for only on books that are final: it is made once and kept, and a transfer booked
+            // after it would show as a difference of the next period.
+            var stalled = !now.isBefore(progressAt.plus(props.drainStallTimeout()));
+            PeriodFailure failure;
+            if (Verdicts.overcounted(bank, inLedger)) {
+                failure = PeriodFailure.MORE_RESULTS_THAN_ACCEPTED;
+            } else if (pastDeadline) {
+                failure = PeriodFailure.DRAIN_TIMED_OUT;
+            } else if (stalled) {
+                failure = PeriodFailure.DRAIN_STALLED;
+            } else {
+                return;
+            }
+            failed(
+                period, failure, bank, inLedger, now,
+                "accepted " + bank.accepted() + ", ledger applied " + (inLedger.postedTransfers() + inLedger.rejectedTransfers())
+                    + ", gateway results " + (bank.posted() + bank.rejected()));
             return;
         }
-        if (drained && !Verdicts.reasonsSettled(bank) && !pastDeadline) {
+        if (!Verdicts.reasonsSettled(bank) && !pastDeadline) {
             return;
         }
         var check = inLedger.check();
@@ -181,35 +197,26 @@ public class PeriodConductor {
         }
         var clientReply = generator.reconciliation(start);
         if (refusedWith(clientReply, HttpStatus.NOT_FOUND)) {
-            failed(period, PeriodFailure.PERIOD_UNKNOWN_TO_BANK, Verdicts.numbersOf(bank, inLedger, null), now, "generator: " + summary(clientReply));
+            failed(period, PeriodFailure.PERIOD_UNKNOWN_TO_BANK, bank, inLedger, now, "generator: " + summary(clientReply));
             return;
         }
         var client = clientReport(period, clientReply, now);
         if (check == null || client == null) {
             if (pastDeadline) {
-                PeriodFailure failure;
-                if (!drained) {
-                    failure = PeriodFailure.DRAIN_TIMED_OUT;
-                } else if (check == null) {
-                    failure = PeriodFailure.LEDGER_CHECK_UNAVAILABLE;
-                } else {
-                    failure = PeriodFailure.CLIENT_RECONCILIATION_UNAVAILABLE;
-                }
                 failed(
-                    period, failure, Verdicts.numbersOf(bank, inLedger, null), now,
-                    "accepted " + bank.accepted() + ", ledger applied " + (inLedger.postedTransfers() + inLedger.rejectedTransfers())
-                        + ", check " + (check == null ? "missing" : "made") + ", generator: " + summary(clientReply));
+                    period, check == null ? PeriodFailure.LEDGER_CHECK_UNAVAILABLE : PeriodFailure.CLIENT_RECONCILIATION_UNAVAILABLE, bank, inLedger, now,
+                    "check " + (check == null ? "missing" : "made") + ", generator: " + summary(clientReply));
             }
             return;
         }
         var stats = reporting.stats(start) instanceof Reply.Answered<PeriodStats>(var statsCode, var answeredStats) ? answeredStats : null;
-        var catchingUp = drained && !pastDeadline && now.isBefore(progressAt.plus(reportingProps.catchUpWait()));
+        var catchingUp = !pastDeadline && now.isBefore(progressAt.plus(reportingProps.catchUpWait()));
         if (catchingUp && (stats == null || !Verdicts.projectionMatchesBooks(stats, bank, inLedger))) {
             return;
         }
         if (!(ledger.books() instanceof Reply.Answered<Books>(var booksCode, var allBalances)) || allBalances == null) {
             if (pastDeadline) {
-                failed(period, PeriodFailure.BOOKS_UNAVAILABLE, Verdicts.numbersOf(bank, inLedger, stats), now, "ledger books not read");
+                failed(period, PeriodFailure.BOOKS_UNAVAILABLE, bank, inLedger, now, "ledger books not read");
             }
             return;
         }
@@ -227,8 +234,9 @@ public class PeriodConductor {
             return null;
         }
         var reconciliation = Objects.requireNonNull(answered, "the reconciliation of an answered call");
+        // A finished reconciliation without its report is waited for like one not finished: the period fails at its limit, not every tick.
         if (reconciliation.state() == ClientReconciliationState.DONE) {
-            return Objects.requireNonNull(reconciliation.report(), "the report of a finished reconciliation");
+            return reconciliation.report();
         }
         if (reconciliation.state() != ClientReconciliationState.RUNNING && due(period.clientRequestedAt(), now)) {
             periods.markClientRequested(period.start(), now);
@@ -246,10 +254,30 @@ public class PeriodConductor {
         return !now.isBefore(closingStartedAt.plus(props.drainTimeout()));
     }
 
-    private void failed(BankPeriod period, PeriodFailure failure, @Nullable PeriodNumbers numbers, Instant now, String detail) {
+    private void failed(BankPeriod period, PeriodFailure failure, PeriodSummary bank, LedgerReconciliation inLedger, Instant now, String detail)
+        throws InterruptedException {
+        failed(period, failure, Verdicts.numbersOf(bank, inLedger, lastStats(period)), now, detail);
+    }
+
+    /** Without the bank's counts the period keeps the numbers from its events: the bank's totals must not fall when a period fails. */
+    private void failed(BankPeriod period, PeriodFailure failure, @Nullable PeriodNumbers counted, Instant now, String detail)
+        throws InterruptedException {
+        var numbers = counted;
+        if (numbers == null) {
+            var stats = lastStats(period);
+            numbers = stats == null
+                ? null
+                : new PeriodNumbers(stats.accepted(), stats.posted(), stats.rejected(), stats.postedAmountCents(), stats.rejectionsByReason());
+        }
         if (periods.markFailed(period.start(), period.state(), failure, numbers, now) == 1) {
             log.warn("Period {}: failed in {}: {} ({})", period.start(), period.state(), failure, detail);
         }
+    }
+
+    private @Nullable PeriodStats lastStats(BankPeriod period) throws InterruptedException {
+        return reporting.stats(period.start()) instanceof Reply.Answered<PeriodStats>(var code, var stats) && stats != null
+            ? stats
+            : live.snapshot().stats().get(period.start());
     }
 
     private static boolean refusedWith(Reply<?> reply, HttpStatus status) {

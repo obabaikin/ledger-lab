@@ -136,19 +136,15 @@ class VerdictTest {
     }
 
     @Test
-    @DisplayName("accepted transfers without an outcome are not drained; that alone is named, not the lag between the views")
-    void accepted_transfers_without_an_outcome_are_not_drained_that_alone_is_named_not_the_lag_between_the_views() {
-        var report = verdict(gateway(1000, 890, 100), ledger(899, 100));
+    @DisplayName("a check that could not compare the accounts with the period before is noted and does not change the verdict")
+    void a_check_that_could_not_compare_the_accounts_with_the_period_before_is_noted_and_does_not_change_the_verdict() {
+        var gateway = gateway(1000, 900, 100);
+        var notCompared = new PeriodCheck(1800, 5000, 5000, 0, List.of(), false, 0, List.of(), List.of(), true);
 
-        assertThat(report.verdict()).isEqualTo(Verdict.MISMATCH);
-        assertThat(report.mismatches()).containsExactly(Mismatch.NOT_DRAINED);
-    }
+        var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), notCompared, books(true), client(), stats(1000, 900, 100), List.of());
 
-    @Test
-    void more_outcomes_than_accepted_transfers_is_a_mismatch() {
-        var report = verdict(gateway(1000, 900, 100), ledger(901, 100));
-
-        assertThat(report.mismatches()).contains(Mismatch.MORE_RESULTS_THAN_ACCEPTED);
+        assertThat(report.verdict()).isEqualTo(Verdict.BALANCED);
+        assertThat(report.notes()).containsExactly(PeriodNote.ACCOUNTS_NOT_COMPARED);
     }
 
     @Test

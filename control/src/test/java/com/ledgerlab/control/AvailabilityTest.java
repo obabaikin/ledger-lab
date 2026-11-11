@@ -209,6 +209,8 @@ class AvailabilityTest extends IntegrationTest {
         goodMinute(lastHour.plusSeconds(60));
         badMinute(lastHour.plusSeconds(120));
         minute(lastHour.plusSeconds(180), REQUESTS, 0, REQUESTS / 4);
+        badMinute(lastHour.plusSeconds(600));
+        window(lastHour.plusSeconds(600), lastHour.plusSeconds(900), lastHour.minus(Duration.ofDays(1)));
         goodMinute(minuteAgo(0).minusSeconds(60));
         generatorHandsOver(List.of());
         var before = slo();
@@ -216,7 +218,7 @@ class AvailabilityTest extends IntegrationTest {
         availability.collect();
 
         assertThat(jdbc.sql("SELECT measured_minutes, bad_minutes, planned_minutes FROM availability_hours").query().listOfRows())
-            .containsExactly(Map.of("measured_minutes", 3, "bad_minutes", 1, "planned_minutes", 0));
+            .containsExactly(Map.of("measured_minutes", 4, "bad_minutes", 1, "planned_minutes", 1));
         assertThat(slo()).isEqualTo(before);
         jdbc.sql("DELETE FROM availability_minutes WHERE minute < :hourEnd").param("hourEnd", Timestamp.from(lastHour.plus(Duration.ofHours(1)))).update();
         assertThat(slo()).isEqualTo(before);

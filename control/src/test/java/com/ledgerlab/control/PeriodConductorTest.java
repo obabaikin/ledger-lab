@@ -257,12 +257,13 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("a drain that stops moving for a minute ends in a mismatch: accepted transfers have no outcome")
-    void a_drain_that_stops_moving_for_a_minute_ends_in_a_mismatch_accepted_transfers_have_no_outcome() {
+    @DisplayName("a drain that stops moving for a minute fails the period with its counts, and the ledger is not asked to check books still open")
+    void a_drain_that_stops_moving_for_a_minute_fails_the_period_with_its_counts_and_the_ledger_is_not_asked_to_check_books_still_open() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 10, REJECTED, REASONS));
-        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED - 1, REJECTED, REASONS, check(true)));
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED - 1, REJECTED, REASONS, null));
+        generator.answer("GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD), 200, clientReconciliation(PERIOD, "NOT_STARTED"));
         var closing = closingTimeOf(PERIOD);
 
         conductor.tick(closing);
@@ -271,8 +272,46 @@ class PeriodConductorTest extends BankIntegrationTest {
         assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
         conductor.tick(closing.plusSeconds(1).plus(DRAIN_STALL_TIMEOUT));
-        assertThat(periodView(PERIOD).get("verdict")).isEqualTo("MISMATCH");
-        assertThat(reportOf(PERIOD).get("mismatches")).isEqualTo(List.of("NOT_DRAINED"));
+        var view = periodView(PERIOD);
+        assertThat(view.get("failure")).isEqualTo("DRAIN_STALLED");
+        assertThat(view.get("numbers")).isEqualTo(mapOf(
+            "accepted", (int) ACCEPTED, "posted", (int) POSTED - 1, "rejected", (int) REJECTED, "postedAmountCents", (int) POSTED_AMOUNT_CENTS,
+            "rejectionsByReason", Map.of("INSUFFICIENT_FUNDS", 60, "BLOCKED_ACCOUNT", 40)));
+        assertThat(checkRequests(PERIOD)).isZero();
+        assertThat(clientRequests(PERIOD)).isZero();
+    }
+
+    @Test
+    @DisplayName("more outcomes than accepted transfers fail the period at once: the counts cannot be reconciled")
+    void more_outcomes_than_accepted_transfers_fail_the_period_at_once_the_counts_cannot_be_reconciled() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED + 1, REJECTED, REASONS, null));
+
+        closeAndReconcile(PERIOD);
+
+        assertThat(periodView(PERIOD).get("failure")).isEqualTo("MORE_RESULTS_THAN_ACCEPTED");
+        assertThat(checkRequests(PERIOD)).isZero();
+    }
+
+    @Test
+    @DisplayName("a clients' reconciliation that says it is done and carries no report fails the period at the limit, and the next period goes on")
+    void a_clients_reconciliation_that_says_it_is_done_and_carries_no_report_fails_the_period_at_the_limit_and_the_next_period_goes_on() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        generator.answer(
+            "GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD), 200, mapOf("periodStart", PERIOD, "state", "DONE", "failure", null, "report", null));
+        var closing = closingTimeOf(PERIOD);
+
+        conductor.tick(closing);
+        conductor.tick(closing.plusSeconds(1));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+        conductor.tick(closing.plus(DRAIN_TIMEOUT));
+        assertThat(periodView(PERIOD).get("failure")).isEqualTo("CLIENT_RECONCILIATION_UNAVAILABLE");
+
+        bankAnswersFor(NEXT_PERIOD);
+        closeAndReconcile(NEXT_PERIOD);
+        assertThat(stateOf(NEXT_PERIOD)).isEqualTo("RECONCILED");
     }
 
     @Test
@@ -296,15 +335,16 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("a drain not finished at the limit, with the clients' reconciliation missing, fails as a drain timed out and keeps its counts")
-    void a_drain_not_finished_at_the_limit_with_the_clients_reconciliation_missing_fails_as_a_drain_timed_out_and_keeps_its_counts() {
+    @DisplayName("a drain that still moves at the limit fails as a drain timed out and keeps its counts")
+    void a_drain_that_still_moves_at_the_limit_fails_as_a_drain_timed_out_and_keeps_its_counts() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 10, REJECTED, REASONS));
-        generator.answer("GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD), 503);
         var closing = closingTimeOf(PERIOD);
 
         conductor.tick(closing);
+        conductor.tick(closing.plus(DRAIN_TIMEOUT).minusSeconds(30));
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 5, REJECTED, REASONS));
         conductor.tick(closing.plus(DRAIN_TIMEOUT));
 
         var view = periodView(PERIOD);
