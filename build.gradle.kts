@@ -40,6 +40,21 @@ subprojects {
                     disable("NullAway")
                 }
             }
+            if (name == "compileJava") {
+                val sources = source
+                val moduleDir = project.projectDir
+                // With OnlyNullMarked a package without @NullMarked is skipped silently and the build stays green.
+                doFirst {
+                    val unmarked = sources.files.groupBy { it.parentFile }
+                        .filterValues { files ->
+                            files.none { it.name == "package-info.java" && "@NullMarked" in it.readText() }
+                        }
+                        .keys.map { it.relativeTo(moduleDir).path }.sorted()
+                    if (unmarked.isNotEmpty()) {
+                        throw GradleException("Packages without @NullMarked in package-info.java, NullAway would skip them: $unmarked")
+                    }
+                }
+            }
         }
     }
 }
