@@ -42,6 +42,7 @@ class TransferBatcherTest {
     private final CountDownLatch firstHeld = new CountDownLatch(1);
     private final CountDownLatch releaseFirst = new CountDownLatch(1);
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private TransferBatcher batcher;
 
     @AfterEach
@@ -57,9 +58,13 @@ class TransferBatcherTest {
 
     private TransferBatcher batcher(Duration answerTimeout) {
         var props = TransferAdmissionTest.props(new GatewayProperties.Accept(10, 1, answerTimeout));
-        batcher = new TransferBatcher(service, props, new SimpleMeterRegistry());
+        batcher = new TransferBatcher(service, props, registry);
         batcher.start();
         return batcher;
+    }
+
+    private double countedAsStopping() {
+        return registry.counter("gateway.transfers", "outcome", "stopping").count();
     }
 
     private static TransferRequest request() {
@@ -183,6 +188,7 @@ class TransferBatcherTest {
         for (var future : queued) {
             assertThatThrownBy(() -> future.get(1, TimeUnit.SECONDS)).hasCauseInstanceOf(GatewayStoppingException.class);
         }
+        assertThat(countedAsStopping()).isEqualTo(queued.size());
         held.cancel(true);
     }
 
@@ -194,5 +200,6 @@ class TransferBatcherTest {
 
         assertThatThrownBy(() -> batcher.accept(request())).isInstanceOf(GatewayStoppingException.class);
         assertThat(calls).isEmpty();
+        assertThat(countedAsStopping()).isEqualTo(1);
     }
 }
