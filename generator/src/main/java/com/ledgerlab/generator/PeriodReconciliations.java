@@ -93,8 +93,12 @@ public class PeriodReconciliations implements DisposableBean {
         return period;
     }
 
+    /**
+     * A period's statement may list a transfer sent in the period before, so a period counts as held only while the
+     * journal of the one before is: that one's partitions are dropped a period earlier than its own.
+     */
     private boolean isExpired(Instant periodStart, Instant now) {
-        return !periodStart.plus(periods.length()).isAfter(now.minus(periods.retention()));
+        return !periodStart.isAfter(now.minus(periods.retention()));
     }
 
     @Override

@@ -402,6 +402,18 @@ class ReconciliationTest extends IntegrationTest {
     }
 
     @Test
+    @DisplayName("a period whose previous period the journal no longer holds is unknown: a transfer sent before it could not be found")
+    void a_period_whose_previous_period_the_journal_no_longer_holds_is_unknown_a_transfer_sent_before_it_could_not_be_found() {
+        var lastHeld = Period.containing(Instant.now().minus(props.periods().retention()), props.periods().length());
+
+        var answer = http.exchange(path(lastHeld.start()), HttpMethod.GET, null, JSON_OBJECT);
+
+        assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(answer.getBody()).containsEntry("error", GeneratorErrors.UNKNOWN_PERIOD);
+        assertThat(get(lastHeld.next()).state()).isEqualTo(ReconciliationState.NOT_STARTED);
+    }
+
+    @Test
     @DisplayName("a time off the grid, a period that has not ended and one older than the journal holds are unknown periods")
     void a_time_off_the_grid_a_period_that_has_not_ended_and_one_older_than_the_journal_holds_are_unknown_periods() {
         var running = period.next();
