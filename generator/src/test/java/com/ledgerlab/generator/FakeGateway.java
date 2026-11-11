@@ -5,6 +5,8 @@ import com.ledgerlab.generator.bank.Statement;
 import com.ledgerlab.generator.bank.StatementLine;
 import com.ledgerlab.generator.bank.SubmitTransferRequest;
 import com.ledgerlab.generator.bank.TransferStatus;
+import com.ledgerlab.generator.gateway.GatewayApi;
+import com.ledgerlab.generator.gateway.GatewayClient;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -39,7 +41,7 @@ import tools.jackson.databind.ObjectMapper;
  * 200 with a body as a newer gateway might send it; a transfer's status; and a period's statement, which lists every
  * transfer accepted in the period, as the ledger has settled them, in pages of {@link Options#statementPage}.
  */
-final class FakeGateway implements AutoCloseable {
+public final class FakeGateway implements AutoCloseable {
 
     // A test opens hundreds of connections at once; the system's default queue drops some, and the client gives up on them.
     private static final int CONNECTION_BACKLOG = 1_024;
@@ -47,7 +49,7 @@ final class FakeGateway implements AutoCloseable {
     private static final String STATEMENT_SUFFIX = "/statement";
     private static final ObjectMapper ANSWER_MAPPER = new ObjectMapper();
 
-    static final class Options {
+    public static final class Options {
         private boolean failFirstAttempt = false;
         private Integer refuseWith = null;
         /** The first attempts of every transfer are refused as busy, as an overloaded gateway does. */
@@ -73,92 +75,92 @@ final class FakeGateway implements AutoCloseable {
         /** Status code to answer every question about a transfer with, or null to answer it. */
         private Integer transferFailure = null;
 
-        Options failFirstAttempt() {
+        public Options failFirstAttempt() {
             this.failFirstAttempt = true;
             return this;
         }
 
-        Options refuseWith(int status) {
+        public Options refuseWith(int status) {
             this.refuseWith = status;
             return this;
         }
 
-        Options busyAttempts(int attempts) {
+        public Options busyAttempts(int attempts) {
             this.busyAttempts = attempts;
             return this;
         }
 
-        Options stoppingAttempts(int attempts) {
+        public Options stoppingAttempts(int attempts) {
             this.stoppingAttempts = attempts;
             return this;
         }
 
-        Options retryAfterSeconds(int seconds) {
+        public Options retryAfterSeconds(int seconds) {
             this.retryAfterSeconds = seconds;
             return this;
         }
 
-        Options responseDelay(Duration delay) {
+        public Options responseDelay(Duration delay) {
             this.responseDelay = delay;
             return this;
         }
 
-        Options rejectReason(RejectReason reason) {
+        public Options rejectReason(RejectReason reason) {
             this.rejectReason = reason;
             return this;
         }
 
-        Options repeatDelay(Duration delay) {
+        public Options repeatDelay(Duration delay) {
             this.repeatDelay = delay;
             return this;
         }
 
-        Options rawAnswer(Function<SubmitTransferRequest, String> answer) {
+        public Options rawAnswer(Function<SubmitTransferRequest, String> answer) {
             this.rawAnswer = answer;
             return this;
         }
 
-        Options onArrival(Consumer<SubmitTransferRequest> action) {
+        public Options onArrival(Consumer<SubmitTransferRequest> action) {
             this.onArrival = action;
             return this;
         }
 
-        Options periodLength(Duration length) {
+        public Options periodLength(Duration length) {
             this.periodLength = length;
             return this;
         }
 
-        Options periodNotClosed() {
+        public Options periodNotClosed() {
             this.periodClosed = false;
             return this;
         }
 
-        Options statementPage(int lines) {
+        public Options statementPage(int lines) {
             this.statementPage = lines;
             return this;
         }
 
-        Options statementFailure(IntFunction<Integer> failure) {
+        public Options statementFailure(IntFunction<Integer> failure) {
             this.statementFailure = failure;
             return this;
         }
 
-        Options rawStatement(String body) {
+        public Options rawStatement(String body) {
             this.rawStatement = body;
             return this;
         }
 
-        Options tamperStatement(BiFunction<Integer, Statement, Statement> tamper) {
+        public Options tamperStatement(BiFunction<Integer, Statement, Statement> tamper) {
             this.tamperStatement = tamper;
             return this;
         }
 
-        Options transferFailure(int status) {
+        public Options transferFailure(int status) {
             this.transferFailure = status;
             return this;
         }
 
-        FakeGateway start() {
+        public FakeGateway start() {
             return new FakeGateway(this);
         }
     }
@@ -170,18 +172,18 @@ final class FakeGateway implements AutoCloseable {
     private volatile Options options;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpServer server;
-    final ConcurrentHashMap<String, AtomicInteger> attemptsById = new ConcurrentHashMap<>();
-    final AtomicInteger requests = new AtomicInteger();
-    volatile CountDownLatch answersHeld = null;
-    final ConcurrentHashMap<UUID, Accepted> accepted = new ConcurrentHashMap<>();
-    final AtomicInteger statementRequests = new AtomicInteger();
-    final AtomicInteger transferQuestions = new AtomicInteger();
+    public final ConcurrentHashMap<String, AtomicInteger> attemptsById = new ConcurrentHashMap<>();
+    public final AtomicInteger requests = new AtomicInteger();
+    public volatile CountDownLatch answersHeld = null;
+    public final ConcurrentHashMap<UUID, Accepted> accepted = new ConcurrentHashMap<>();
+    public final AtomicInteger statementRequests = new AtomicInteger();
+    public final AtomicInteger transferQuestions = new AtomicInteger();
 
-    static Options with() {
+    public static Options with() {
         return new Options();
     }
 
-    FakeGateway() {
+    public FakeGateway() {
         this(new Options());
     }
 
@@ -198,16 +200,16 @@ final class FakeGateway implements AutoCloseable {
         server.start();
     }
 
-    String url() {
+    public String url() {
         return "http://localhost:" + server.getAddress().getPort();
     }
 
-    List<Integer> attempts() {
+    public List<Integer> attempts() {
         return attemptsById.values().stream().map(AtomicInteger::get).toList();
     }
 
     /** A bank that has seen nothing, behaving as the options say; for a gateway shared by the tests of a class. */
-    void reset(Options behaviour) {
+    public void reset(Options behaviour) {
         options = behaviour;
         attemptsById.clear();
         accepted.clear();
@@ -217,7 +219,7 @@ final class FakeGateway implements AutoCloseable {
     }
 
     /** Puts a transfer into the bank as if it had been accepted then. */
-    void accept(UUID transferId, int from, int to, long amountCents, TransferStatus status, RejectReason reason, Instant acceptedAt) {
+    public void accept(UUID transferId, int from, int to, long amountCents, TransferStatus status, RejectReason reason, Instant acceptedAt) {
         accepted.put(transferId, new Accepted(new StatementLine(transferId, from, to, amountCents, status, reason), acceptedAt));
     }
 

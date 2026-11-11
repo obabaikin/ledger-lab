@@ -6,9 +6,9 @@ import org.springframework.context.annotation.Bean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @TestConfiguration(proxyBeanMethods = false)
-class TestcontainersConfiguration {
+public class TestcontainersConfiguration {
 
-    static final String POSTGRES_IMAGE = "postgres:17-alpine";
+    public static final String POSTGRES_IMAGE = "postgres:17-alpine";
 
     @Bean
     @ServiceConnection

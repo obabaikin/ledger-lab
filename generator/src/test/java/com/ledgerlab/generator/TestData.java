@@ -1,5 +1,7 @@
 package com.ledgerlab.generator;
 
+import com.ledgerlab.generator.gateway.GatewayClient;
+import com.ledgerlab.generator.load.LoadProfile;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
@@ -7,7 +9,7 @@ import java.util.List;
 import java.util.UUID;
 import tools.jackson.databind.ObjectMapper;
 
-final class TestData {
+public final class TestData {
 
     private static final double INVALID_SHARE = 0.005;
 
@@ -15,7 +17,7 @@ final class TestData {
     }
 
     /** The generator's settings for a test, each with a default a test may change. */
-    static final class Settings {
+    public static final class Settings {
         private final String url;
         private int maxAttempts = 3;
         private Duration retryBackoff = Duration.ofMillis(50);
@@ -28,38 +30,38 @@ final class TestData {
             this.url = url;
         }
 
-        Settings maxAttempts(int attempts) {
+        public Settings maxAttempts(int attempts) {
             this.maxAttempts = attempts;
             return this;
         }
 
-        Settings retryBackoff(Duration backoff) {
+        public Settings retryBackoff(Duration backoff) {
             this.retryBackoff = backoff;
             return this;
         }
 
-        Settings maxInFlight(int requests) {
+        public Settings maxInFlight(int requests) {
             this.maxInFlight = requests;
             return this;
         }
 
-        Settings tps(int tps) {
+        public Settings tps(int tps) {
             this.tps = tps;
             return this;
         }
 
-        Settings waitShare(double share) {
+        public Settings waitShare(double share) {
             this.waitShare = share;
             return this;
         }
 
         /** Every transfer is sent twice, the second time after one of these delays. */
-        Settings duplicates(Duration... delays) {
+        public Settings duplicates(Duration... delays) {
             this.duplicateDelays = List.of(delays);
             return this;
         }
 
-        GeneratorProperties build() {
+        public GeneratorProperties build() {
             return new GeneratorProperties(
                 url, Duration.ofSeconds(2), Duration.ofSeconds(10), maxAttempts, retryBackoff, maxInFlight,
                 new GeneratorProperties.Load(true, tps, 2_000, Duration.ofMinutes(10), waitShare, Duration.ofSeconds(1), Duration.ofHours(48)),
@@ -70,32 +72,32 @@ final class TestData {
                 new ProfileProperties(duplicateDelays.isEmpty() ? 0.0 : 1.0, duplicateDelays, INVALID_SHARE, INVALID_SHARE));
         }
 
-        GatewayClient client(MeterRegistry registry) {
+        public GatewayClient client(MeterRegistry registry) {
             return new GatewayClient(build(), new ObjectMapper(), registry);
         }
 
-        GatewayClient client() {
+        public GatewayClient client() {
             return client(new SimpleMeterRegistry());
         }
     }
 
-    static Settings settings(String url) {
+    public static Settings settings(String url) {
         return new Settings(url);
     }
 
-    static GatewayClient client(String url) {
+    public static GatewayClient client(String url) {
         return settings(url).client();
     }
 
-    static LoadProfile profile(int accountCount, int blockedAccounts, int hotAccounts) {
+    public static LoadProfile profile(int accountCount, int blockedAccounts, int hotAccounts) {
         return new LoadProfile(accountCount, blockedAccounts, hotAccounts, INVALID_SHARE, INVALID_SHARE);
     }
 
-    static LoadProfile seededProfile(int accountCount, int blockedAccounts, int hotAccounts, double hotShare, long seed) {
+    public static LoadProfile seededProfile(int accountCount, int blockedAccounts, int hotAccounts, double hotShare, long seed) {
         return new LoadProfile(accountCount, blockedAccounts, hotAccounts, hotShare, INVALID_SHARE, INVALID_SHARE, seed);
     }
 
-    static PlannedTransfer transfer() {
+    public static PlannedTransfer transfer() {
         return new PlannedTransfer(UUID.randomUUID(), 1, 2, 100);
     }
 }

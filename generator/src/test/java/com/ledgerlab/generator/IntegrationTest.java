@@ -2,6 +2,8 @@ package com.ledgerlab.generator;
 
 import com.ledgerlab.generator.bank.RejectReason;
 import com.ledgerlab.generator.bank.TransferStatus;
+import com.ledgerlab.generator.journal.JournalOutcome;
+import com.ledgerlab.generator.journal.Period;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
@@ -25,7 +27,7 @@ import org.springframework.test.context.DynamicPropertySource;
 @Import(TestcontainersConfiguration.class)
 @ActiveProfiles("test")
 @AutoConfigureTestRestTemplate
-abstract class IntegrationTest {
+public abstract class IntegrationTest {
 
     protected static final FakeGateway gateway = new FakeGateway();
 
@@ -34,9 +36,9 @@ abstract class IntegrationTest {
         registry.add("generator.gateway-url", gateway::url);
     }
 
-    @Autowired TestRestTemplate http;
-    @Autowired GeneratorProperties props;
-    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired protected TestRestTemplate http;
+    @Autowired protected GeneratorProperties props;
+    @Autowired protected JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void emptyJournalAndBank() {
