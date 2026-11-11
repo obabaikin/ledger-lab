@@ -38,7 +38,7 @@ public class LoadController {
         responseCode = "429", description = "A pulse runs, or ended recently (Retry-After says when)",
         headers = @Header(name = HttpHeaders.RETRY_AFTER, description = "Seconds until a pulse may be started again", schema = @Schema(type = "integer")),
         content = @Content(schema = @Schema(implementation = ApiError.class)))
-    @ApiResponse(responseCode = "503", description = "The generator did not take the pulse", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "503", description = "The generator did not confirm the pulse; without an answer it is taken as running", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @PostMapping(LOAD_PATH)
     @ResponseStatus(HttpStatus.ACCEPTED)
     public Pulse load(@PathVariable UUID sessionId, @RequestBody LoadRequest request) throws InterruptedException {

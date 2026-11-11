@@ -3,6 +3,8 @@ package com.ledgerlab.control;
 import static com.ledgerlab.control.Fixtures.mapOf;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ledgerlab.control.generator.GeneratorClient;
+import com.ledgerlab.control.http.ServiceHttp;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,6 +24,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.JsonNode;
 
 class LoadTest extends IntegrationTest {
@@ -29,6 +32,7 @@ class LoadTest extends IntegrationTest {
     private static final String PULSE_PATH = "/internal/load/pulse";
 
     @Autowired Cleanup cleanup;
+    @Autowired GeneratorClient generatorClient;
 
     @BeforeEach
     void generatorTakesPulses() {
@@ -105,6 +109,28 @@ class LoadTest extends IntegrationTest {
         assertThat(pulseCalls()).isEmpty();
         assertThat(pulses()).isEmpty();
         assertThat(load(sessionId, 2000, 30).getStatusCode().value()).isEqualTo(202);
+    }
+
+    @Test
+    @DisplayName("a speed or length sent as a fraction, an exponent or a string is 400 invalid-load, not rounded to an option")
+    void a_speed_or_length_sent_as_a_fraction_an_exponent_or_a_string_is_400_invalid_load_not_rounded_to_an_option() {
+        var sessionId = visitor();
+        var headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        var bodies = List.of(
+            "{\"tps\": 1000.5, \"seconds\": 10}",
+            "{\"tps\": 1000, \"seconds\": 10.9}",
+            "{\"tps\": 1e3, \"seconds\": 10}",
+            "{\"tps\": \"1000\", \"seconds\": 10}",
+            "{\"tps\": 1000, \"seconds\": \"10\"}",
+            "{\"tps\": 4294968296, \"seconds\": 10}");
+
+        bodies.forEach(body -> {
+            var answer = postEntity("/api/sessions/" + sessionId + "/load", new HttpEntity<>(body, headers));
+            assertThat(answer.getStatusCode().value()).as(body).isEqualTo(400);
+            assertThat(answer.getBody().get("error")).as(body).isEqualTo("invalid-load");
+        });
+        assertThat(pulseCalls()).isEmpty();
     }
 
     @Test
@@ -223,10 +249,33 @@ class LoadTest extends IntegrationTest {
     void an_answer_of_the_generator_it_cannot_read_is_503_but_kept_as_the_pulse_may_run() {
         generator.answer("POST", PULSE_PATH, 200, "not json");
 
-        var unreadable = load(visitor(), 1000, 10);
+        var sessionId = visitor();
+
+        var unreadable = load(sessionId, 1000, 10);
 
         assertThat(unreadable.getStatusCode().value()).isEqualTo(503);
+        assertThat(unreadable.getBody().get("error")).isEqualTo("generator-did-not-answer");
         assertThat(pulses()).hasSize(1);
+        assertThat(load(sessionId, 1000, 10).getBody().get("error")).isEqualTo("load-running");
+    }
+
+    @Test
+    @DisplayName("a pulse that never reached the generator is 503 and not kept, so the next press raises the load")
+    void a_pulse_that_never_reached_the_generator_is_503_and_not_kept_so_the_next_press_raises_the_load() {
+        var reachable = ReflectionTestUtils.getField(generatorClient, "http");
+        var sessionId = visitor();
+        try {
+            ReflectionTestUtils.setField(generatorClient, "http", new ServiceHttp("http://localhost:1", Duration.ofMillis(500), objectMapper));
+
+            var notConnected = load(sessionId, 1000, 10);
+
+            assertThat(notConnected.getStatusCode().value()).isEqualTo(503);
+            assertThat(notConnected.getBody().get("error")).isEqualTo("generator-did-not-answer");
+            assertThat(pulses()).isEmpty();
+        } finally {
+            ReflectionTestUtils.setField(generatorClient, "http", reachable);
+        }
+        assertThat(load(sessionId, 1000, 10).getStatusCode().value()).isEqualTo(202);
     }
 
     @Test
