@@ -56,6 +56,7 @@ class PeriodCheckAtScaleTest extends IntegrationTest {
         assertThat(check.accountsCompared()).isTrue();
         assertThat(check.journalEntries()).isEqualTo(2L * ACCOUNTS);
         assertThat(check.failedChecks()).containsExactly(ReconciliationCheck.EVERY_ACCOUNT_MATCHES_JOURNAL);
+        assertThat(check.accountsOutOfBalance()).isEqualTo(1);
         assertThat(check.accountExamples()).containsExactly(new AccountMismatch(DRIFTED_ACCOUNT, 0, 1));
     }
 
