@@ -10,7 +10,8 @@ public record PeriodsProperties(
     Duration partitionsAhead,
     Duration maintenanceInterval,
     Duration lockTimeout,
-    Duration snapshotRetention
+    Duration snapshotRetention,
+    int unpartitionedDeleteBatch
 ) {
     /** Partitions are named to the minute of their period's start. */
     public PeriodsProperties {

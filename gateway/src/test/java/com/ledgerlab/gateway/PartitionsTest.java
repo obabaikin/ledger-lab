@@ -71,7 +71,7 @@ class PartitionsTest extends IntegrationTest {
         var shorter = new GatewayProperties(p.transfersTopic(), p.resultsTopic(), p.outbox(), p.consumer(), p.maxWait(), p.waitRead(),
             p.retryAfter(), p.closeLockTimeout(), p.inflight(), p.admission(), p.accept(), p.warmUp(),
             new GatewayProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout(),
-                q.keyCleanupInterval(), q.keyCleanupBatch()));
+                q.keyCleanupInterval(), q.keyCleanupBatch(), q.unpartitionedDeleteBatch()));
         var restarted = new Partitions(partitionRepository, periodRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
 
         assertThatThrownBy(restarted::afterPropertiesSet)
@@ -158,14 +158,17 @@ class PartitionsTest extends IntegrationTest {
     void transfers_of_a_period_whose_partition_was_dropped_by_hand_stay_outside_the_partitions_only_as_long_as_the_period_is_held() {
         var current = periodOf(now);
         tx.executeWithoutResult(status -> partitionRepository.drop(current.start(), props.periods().lockTimeout()));
-        acceptedAt(now);
+        var rows = props.periods().unpartitionedDeleteBatch() + 1;
+        for (var i = 0; i < rows; i++) {
+            acceptedAt(now.plusMillis(i));
+        }
 
         partitions.maintain(now);
         assertThat(partitionRepository.periodStarts()).doesNotContain(current.start());
-        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isEqualTo(1);
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isEqualTo(rows);
 
         partitions.maintain(current.end().plus(props.periods().retention()).minusMillis(1));
-        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isEqualTo(1);
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isEqualTo(rows);
 
         partitions.maintain(current.end().plus(props.periods().retention()));
         assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isZero();

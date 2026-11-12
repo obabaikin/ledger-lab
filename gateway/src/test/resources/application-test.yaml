@@ -15,6 +15,8 @@ gateway:
     rounds: 20
   periods:
     key-cleanup-batch: 3
+    # Below the rows a test leaves outside the partitions, so they go in more than one batch.
+    unpartitioned-delete-batch: 2
 logging:
   level:
     org.apache.kafka: WARN

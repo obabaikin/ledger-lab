@@ -98,8 +98,11 @@ public class PartitionRepository {
     }
 
     /** A period whose partition was missing (dropped by hand, or not created in time) kept its rows here past it. */
-    public void deleteUnpartitionedBefore(Instant periodStart) {
-        jdbc.sql("DELETE FROM " + DEFAULT_PARTITION + " WHERE accepted_at < :start").param("start", Sql.timestamptz(periodStart)).update();
+    public int deleteUnpartitionedBefore(Instant periodStart, int limit) {
+        return jdbc.sql("DELETE FROM %1$s WHERE ctid IN (SELECT ctid FROM %1$s WHERE accepted_at < :start LIMIT :limit)".formatted(DEFAULT_PARTITION))
+            .param("start", Sql.timestamptz(periodStart))
+            .param("limit", limit)
+            .update();
     }
 
     public long rowsOutsidePartitions() {

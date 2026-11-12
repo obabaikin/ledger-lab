@@ -57,6 +57,9 @@ ledger:
     # Creating or dropping a partition holds up every booking while it waits for the table.
     lock-timeout: 2s
     snapshot-retention: 48h
+    # Rows left outside the partitions are deleted this many a statement: one long delete would hold up another instance's
+    # partition change, and every insert queued behind it.
+    unpartitioned-delete-batch: 10000
   pool:
     opening-balance-cents: 10000000000
     # Accounts 1..n receive a third of all payments; their surplus goes to the pool once per interval.

@@ -86,9 +86,12 @@ gateway:
     # Creating or dropping a partition holds up every submission while it waits for the table.
     lock-timeout: 2s
     key-cleanup-interval: ${gateway.periods.length}
-    # A gateway replaced more often than once a period would otherwise never clean; after the warm-up (at most 90 s).
+    # A gateway replaced more often than once a period would otherwise never clean; after the warm-up (warm-up.max-duration).
     key-cleanup-first-delay: 5m
     key-cleanup-batch: 10000
+    # Rows left outside the partitions are deleted this many a statement: one long delete would hold up another instance's
+    # partition change, and every insert queued behind it.
+    unpartitioned-delete-batch: 10000
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every controller-local error handler is added to every operation.

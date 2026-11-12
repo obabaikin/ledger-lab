@@ -132,7 +132,10 @@ public class Partitions implements InitializingBean {
 
     private void deleteUnpartitionedBefore(PartitionedTable table, Instant oldestHeld) {
         try {
-            partitions.deleteUnpartitionedBefore(table, oldestHeld);
+            int deleted;
+            do {
+                deleted = partitions.deleteUnpartitionedBefore(table, oldestHeld, props.unpartitionedDeleteBatch());
+            } while (deleted == props.unpartitionedDeleteBatch());
         } catch (DataAccessException e) {
             failures.increment();
             log.warn("Could not delete the rows of {} outside partitions from before {}", table.tableName(), oldestHeld, e);

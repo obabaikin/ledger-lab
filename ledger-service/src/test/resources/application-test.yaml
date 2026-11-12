@@ -16,6 +16,9 @@ ledger:
     count: 10
     opening-balance-cents: 100000
     blocked: 0
+  periods:
+    # Below the rows a test leaves outside the partitions, so they go in more than one batch.
+    unpartitioned-delete-batch: 1
   pool:
     opening-balance-cents: 1000000
     hot-accounts: 2

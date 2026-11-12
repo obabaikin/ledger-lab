@@ -61,6 +61,9 @@ generator:
     partitions-ahead: 6h
     maintenance-interval: 1m
     lock-timeout: 2s
+    # Rows left outside the partitions are deleted this many a statement: one long delete would hold up another instance's
+    # partition change, and every insert queued behind it.
+    unpartitioned-delete-batch: 10000
   reconciliation:
     statement-timeout: 60s
     example-limit: 20

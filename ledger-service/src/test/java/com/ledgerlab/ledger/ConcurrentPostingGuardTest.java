@@ -34,7 +34,7 @@ class ConcurrentPostingGuardTest {
 
     private static final Instant NOW = Instant.parse("2026-11-10T10:00:00Z");
     private static final PeriodsProperties PERIODS = new PeriodsProperties(
-        Duration.ofHours(1), Duration.ofHours(4), Duration.ofHours(48), Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofHours(48));
+        Duration.ofHours(1), Duration.ofHours(4), Duration.ofHours(48), Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofHours(48), 100);
 
     private final AccountRepository accounts = mock(AccountRepository.class);
     private final TransferRepository transfers = mock(TransferRepository.class);

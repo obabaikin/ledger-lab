@@ -119,16 +119,22 @@ public class Partitions implements InitializingBean {
             }
         }
         var oldestHeld = Period.containing(horizon, props.length()).start();
-        periods.deleteBefore(oldestHeld);
-        deleteUnpartitionedBefore(oldestHeld);
+        deleteExpired("closing rows of the periods", () -> periods.deleteBefore(oldestHeld), oldestHeld);
+        deleteExpired("transfers outside partitions", () -> {
+            int deleted;
+            do {
+                deleted = partitions.deleteUnpartitionedBefore(oldestHeld, props.unpartitionedDeleteBatch());
+            } while (deleted == props.unpartitionedDeleteBatch());
+        }, oldestHeld);
     }
 
-    private void deleteUnpartitionedBefore(Instant oldestHeld) {
+    /** Each on its own: one that fails leaves the other to run, and the next maintenance tries it again. */
+    private void deleteExpired(String what, Runnable delete, Instant oldestHeld) {
         try {
-            partitions.deleteUnpartitionedBefore(oldestHeld);
+            delete.run();
         } catch (DataAccessException e) {
             failures.increment();
-            log.warn("Could not delete the transfers outside partitions from before {}", oldestHeld, e);
+            log.warn("Could not delete the {} from before {}", what, oldestHeld, e);
         }
     }
 

@@ -84,7 +84,8 @@ class PartitionsTest extends IntegrationTest {
         var q = p.periods();
         var shorter = new GeneratorProperties(p.gatewayUrl(), p.connectTimeout(), p.requestTimeout(), p.maxAttempts(), p.retryBackoff(),
             p.maxInFlight(), p.load(), p.accounts(), p.journal(),
-            new GeneratorProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout()),
+            new GeneratorProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout(),
+                q.unpartitionedDeleteBatch()),
             p.reconciliation(), p.profile());
         var restarted = new Partitions(partitionRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
 
@@ -166,16 +167,19 @@ class PartitionsTest extends IntegrationTest {
         for (var table : PartitionedTable.values()) {
             tx.executeWithoutResult(status -> partitionRepository.drop(table, current.start(), props.periods().lockTimeout()));
         }
-        agreed(now);
+        var rows = props.periods().unpartitionedDeleteBatch() + 1;
+        for (var i = 0; i < rows; i++) {
+            agreed(now.plusMillis(i));
+        }
 
         partitions.maintain(now);
         for (var table : PartitionedTable.values()) {
-            assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, table)).isEqualTo(1);
+            assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, table)).isEqualTo(rows);
         }
 
         partitions.maintain(current.end().plus(props.periods().retention()).minusMillis(1));
         for (var table : PartitionedTable.values()) {
-            assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, table)).isEqualTo(1);
+            assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, table)).isEqualTo(rows);
         }
 
         partitions.maintain(current.end().plus(props.periods().retention()));

@@ -61,7 +61,8 @@ public record GatewayProperties(
         Duration maintenanceInterval,
         Duration lockTimeout,
         Duration keyCleanupInterval,
-        int keyCleanupBatch
+        int keyCleanupBatch,
+        int unpartitionedDeleteBatch
     ) {
         /** Partitions are named to the minute of their period's start. */
         public Periods {

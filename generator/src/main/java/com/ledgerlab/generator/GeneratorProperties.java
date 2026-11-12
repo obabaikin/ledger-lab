@@ -46,7 +46,9 @@ public record GeneratorProperties(
     }
 
     /** The journal is cut by the bank's periods and held for {@link #retention} after a period ended (ADR 0022). */
-    public record Periods(Duration length, Duration retention, Duration partitionsAhead, Duration maintenanceInterval, Duration lockTimeout) {
+    public record Periods(
+        Duration length, Duration retention, Duration partitionsAhead, Duration maintenanceInterval, Duration lockTimeout, int unpartitionedDeleteBatch
+    ) {
         /** Partitions are named to the minute of their period's start. */
         public Periods {
             if (length.compareTo(Duration.ofMinutes(1)) < 0 || !length.equals(Duration.ofMinutes(length.toMinutes()))) {

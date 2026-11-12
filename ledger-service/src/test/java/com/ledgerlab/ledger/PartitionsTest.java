@@ -84,7 +84,8 @@ class PartitionsTest extends IntegrationTest {
     void a_ledger_started_with_a_shorter_period_length_than_its_partitions_refuses_to_start_and_drops_none_of_them() {
         var before = partitionRepository.periodStarts(PartitionedTable.TRANSFERS);
         var p = periodsProperties;
-        var shorter = new PeriodsProperties(Duration.ofMinutes(1), p.retention(), p.partitionsAhead(), p.maintenanceInterval(), p.lockTimeout(), p.snapshotRetention());
+        var shorter = new PeriodsProperties(Duration.ofMinutes(1), p.retention(), p.partitionsAhead(), p.maintenanceInterval(), p.lockTimeout(), p.snapshotRetention(),
+            p.unpartitionedDeleteBatch());
         var restarted = new Partitions(partitionRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
 
         assertThatThrownBy(restarted::afterPropertiesSet)
