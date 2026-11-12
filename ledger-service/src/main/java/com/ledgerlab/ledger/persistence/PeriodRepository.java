@@ -129,26 +129,35 @@ public class PeriodRepository {
     public record AccountMismatches(long total, List<AccountMismatch> examples) {
     }
 
-    /** Accounts whose balance moved over the period by another amount than their journal entries of the period. */
+    /**
+     * Accounts in both snapshots whose balance moved over the period by another amount than their journal entries of the
+     * period. One grouping of the three sources and no join: a snapshot just taken is not yet in the statistics, and a
+     * join planned on that estimate of one row ran past the check's timeout.
+     */
     public AccountMismatches accountsOutOfBalance(Period period, int exampleLimit) {
         var examples = new ArrayList<AccountMismatch>();
         var total = new long[1];
         jdbc.sql(
             """
-            WITH moved AS (
-                SELECT account_no, sum(amount_cents) AS cents
+            WITH movements AS (
+                SELECT account_no, balance_cents AS balance_change_cents, 0::bigint AS journal_cents, 1 AS in_current, 0 AS in_previous
+                FROM account_snapshots
+                WHERE period_start = :start
+                UNION ALL
+                SELECT account_no, -balance_cents, 0, 0, 1
+                FROM account_snapshots
+                WHERE period_start = :previousStart
+                UNION ALL
+                SELECT account_no, 0, amount_cents, 0, 0
                 FROM journal_entries
                 WHERE accepted_at >= :start AND accepted_at < :end
-                GROUP BY account_no
             ), mismatch AS (
-                SELECT cur.account_no,
-                       coalesce(m.cents, 0) AS journal_cents,
-                       cur.balance_cents - prev.balance_cents AS balance_change_cents
-                FROM account_snapshots cur
-                JOIN account_snapshots prev ON prev.account_no = cur.account_no AND prev.period_start = :previousStart
-                LEFT JOIN moved m ON m.account_no = cur.account_no
-                WHERE cur.period_start = :start
-                  AND cur.balance_cents - prev.balance_cents <> coalesce(m.cents, 0)
+                SELECT account_no,
+                       sum(journal_cents)::bigint AS journal_cents,
+                       sum(balance_change_cents)::bigint AS balance_change_cents
+                FROM movements
+                GROUP BY account_no
+                HAVING sum(in_current) = 1 AND sum(in_previous) = 1 AND sum(balance_change_cents) <> sum(journal_cents)
             )
             SELECT account_no, journal_cents, balance_change_cents, count(*) OVER () AS total
             FROM mismatch

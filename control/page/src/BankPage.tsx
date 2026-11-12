@@ -3,7 +3,7 @@ import { api, type BankView, type PeriodView, type SeriesView } from './api/clie
 import { Availability } from './Availability'
 import { BuildInfo } from './BuildInfo'
 import { Charts } from './Charts'
-import { flowRates, stopLedgerWires, type Flow } from './FlowDots'
+import { flowRates, NO_FLOW, stopLedgerWires, type Flow } from './FlowDots'
 import { dayAndMonth, hoursMinutes, MS_PER_SECOND } from './format'
 import { Hero } from './Hero'
 import { LiveScheme } from './LiveScheme'
@@ -58,12 +58,14 @@ export function BankPage(props: { controls?: ReactNode; top?: ReactNode; after?:
       const flow = flowOf(bank)
       if (fresh) previous.current = { at, flow }
       setLive((last) => {
-        if (!fresh) return { bank, rates: last?.rates ?? flowRates(null, null, 0), ratesFrom: last?.ratesFrom ?? null }
+        if (!fresh) return { bank, rates: last?.rates ?? NO_FLOW, ratesFrom: last?.ratesFrom ?? null }
         const seconds = prev === null ? 0 : (at - prev.at) / MS_PER_SECOND
         return { bank, rates: flowRates(prev?.flow ?? null, flow, seconds), ratesFrom: prev?.at ?? null }
       })
       setBankLost(false)
     } catch {
+      // A rate across the gap would be the outage's average, not the flow of now.
+      previous.current = null
       setBankLost(true)
     }
   }, [])
@@ -93,7 +95,7 @@ export function BankPage(props: { controls?: ReactNode; top?: ReactNode; after?:
   const bank = live?.bank ?? null
   const lastCrash = bank?.chaos.recent.at(-1)
   const crashAt = Math.max(props.pressedCrashAt ?? 0, lastCrash ? Date.parse(lastCrash.at) : 0) || null
-  const rates = live && stopLedgerWires(live.rates, crashAt, live.ratesFrom)
+  const rates = live && (lost ? NO_FLOW : stopLedgerWires(live.rates, crashAt, live.ratesFrom))
 
   return (
     <main aria-busy={bank === null}>

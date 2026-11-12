@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ledgerlab.common.TransferCommand;
 import com.ledgerlab.ledger.domain.AccountMismatch;
 import com.ledgerlab.ledger.domain.ReconciliationCheck;
+import com.ledgerlab.ledger.service.AccountOpening;
+import com.ledgerlab.ledger.service.AccountSetup;
 import com.ledgerlab.ledger.service.LedgerService;
 import com.ledgerlab.ledger.service.PeriodChecker;
 import java.sql.Timestamp;
@@ -22,6 +24,7 @@ class PeriodCheckTest extends IntegrationTest {
     @Autowired LedgerService ledger;
     @Autowired PeriodChecker checker;
     @Autowired JdbcClient jdbc;
+    @Autowired AccountOpening accountOpening;
 
     private TransferCommand onePostingInANewBank() {
         openBank(3, 1_000);
@@ -198,6 +201,17 @@ class PeriodCheckTest extends IntegrationTest {
 
         assertThat(check.accountsCompared()).isFalse();
         assertThat(check.accountsOutOfBalance()).isZero();
+        assertThat(check.failedChecks()).isEmpty();
+    }
+
+    @Test
+    void an_account_opened_after_the_balances_of_the_period_before_were_kept_is_not_compared() {
+        onePostingInANewBank();
+        accountOpening.open(new AccountSetup(4, 1_000, 0, POOL_OPENING_BALANCE_CENTS));
+
+        var check = check();
+
+        assertThat(check.accountsCompared()).isTrue();
         assertThat(check.failedChecks()).isEmpty();
     }
 

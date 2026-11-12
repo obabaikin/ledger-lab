@@ -133,9 +133,9 @@ final class StatementComparison implements AutoCloseable {
             .single();
 
         var breaks = new ReconciliationBreaks(
-            ids(lines.notInJournal(), "SELECT s.transfer_id FROM %s WHERE %s ORDER BY s.transfer_id LIMIT :limit".formatted(LINES_WITH_JOURNAL, NOT_IN_JOURNAL), params),
+            ids(lines.notInJournal(), firstLinesWithJournal("s.transfer_id", NOT_IN_JOURNAL), params),
             ids(accepted.notInStatement(), "SELECT o.transfer_id FROM %s AND %s ORDER BY o.transfer_id LIMIT :limit".formatted(ACCEPTED_IN_PERIOD, NOT_IN_STATEMENT), params),
-            ids(lines.notTakenButInStatement(), "SELECT s.transfer_id FROM %s WHERE %s ORDER BY s.transfer_id LIMIT :limit".formatted(LINES_WITH_JOURNAL, NOT_TAKEN_BUT_IN_STATEMENT), params),
+            ids(lines.notTakenButInStatement(), firstLinesWithJournal("s.transfer_id", NOT_TAKEN_BUT_IN_STATEMENT), params),
             sides(lines.payloadMismatch(), PAYLOAD_MISMATCH, params),
             sides(lines.statusMismatch(), STATUS_MISMATCH, params));
         return new ClientReconciliationReport(
@@ -178,22 +178,31 @@ final class StatementComparison implements AutoCloseable {
         if (count == 0) {
             return TransferSides.NONE;
         }
-        var examples = jdbc.sql(
-            """
-            SELECT s.transfer_id,
-                   j.from_account AS client_from, j.to_account AS client_to, j.amount_cents AS client_amount,
-                   j.bank_status AS client_status, j.reject_reason AS client_reason,
-                   s.from_account AS bank_from, s.to_account AS bank_to, s.amount_cents AS bank_amount,
-                   s.status AS bank_status, s.reject_reason AS bank_reason
-            FROM %s
-            WHERE %s
-            ORDER BY s.transfer_id
-            LIMIT :limit
-            """.formatted(LINES_WITH_JOURNAL, predicate))
+        var examples = jdbc.sql(firstLinesWithJournal(
+                """
+                s.transfer_id,
+                j.from_account AS client_from, j.to_account AS client_to, j.amount_cents AS client_amount,
+                j.bank_status AS client_status, j.reject_reason AS client_reason,
+                s.from_account AS bank_from, s.to_account AS bank_to, s.amount_cents AS bank_amount,
+                s.status AS bank_status, s.reject_reason AS bank_reason
+                """,
+                predicate))
             .params(params)
             .query((rs, row) -> new TransferSides.MismatchedTransfer(rs.getObject("transfer_id", UUID.class), side(rs, "client"), side(rs, "bank")))
             .list();
         return new TransferSides(count, examples);
+    }
+
+    /**
+     * Joined in full before the limit: under a limit the planner expects the first rows early and probes the journal once
+     * per statement line by transfer_id, which its index does not lead with; on statistics that miss the period's rows,
+     * that read the period once per line.
+     */
+    private static String firstLinesWithJournal(String columns, String predicate) {
+        return """
+            WITH matching AS MATERIALIZED (SELECT %s FROM %s WHERE %s)
+            SELECT * FROM matching ORDER BY transfer_id LIMIT :limit
+            """.formatted(columns, LINES_WITH_JOURNAL, predicate);
     }
 
     private static TransferSides.TransferSide side(ResultSet rs, String prefix) throws SQLException {
