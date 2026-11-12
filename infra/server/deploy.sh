@@ -48,8 +48,26 @@ for setting in $REQUIRED_SETTINGS; do
 done
 require_cluster
 
+installed=false
+if helm status ledger-lab --namespace "$NAMESPACE" >/dev/null 2>&1; then
+  installed=true
+fi
+
+# Postgres creates the generator's role only on an empty volume, and the chart's volume sizes reach only new volumes.
+if [ "$installed" = true ]; then
+  if ! has_generator=$(psql_admin -tAc "SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = 'generator')"); then
+    echo "cannot read the roles from Postgres: fix that first" >&2
+    exit 1
+  fi
+  if [ "$has_generator" != t ]; then
+    echo "the server runs the chart from before the bank ran 24/7: move it as docs/guides/operations.md," \
+      "\"Moving from runs to one bank\", describes" >&2
+    exit 1
+  fi
+fi
+
 # Only a first install skips the check; a database that cannot be asked refuses the deploy like a missing window.
-if [ "$contract" = true ] && helm status ledger-lab --namespace "$NAMESPACE" >/dev/null 2>&1; then
+if [ "$contract" = true ] && [ "$installed" = true ]; then
   if ! in_window=$(psql_admin -tAc "SELECT EXISTS (SELECT FROM control.maintenance_windows WHERE cancelled_at IS NULL AND starts_at <= now() AND now() < ends_at)"); then
     echo "cannot read the maintenance windows from Postgres: fix that first" >&2
     exit 1
