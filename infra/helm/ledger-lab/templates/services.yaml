@@ -134,6 +134,8 @@ spec:
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
             - {name: CONTROL_LOAD_MINTPS, value: {{ int64 $root.Values.load.baseTps | quote }}}
             - {name: CONTROL_LOAD_MAXTPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
+            - {name: CONTROL_LOAD_TPSSTEP, value: {{ int64 $root.Values.load.tpsStep | quote }}}
+            - {name: CONTROL_LOAD_DEFAULTTPS, value: {{ int64 $root.Values.load.defaultPulseTps | quote }}}
             # Read back by infra/server/maintenance.sh, which tells whether a window is declared in time.
             - {name: CONTROL_MAINTENANCE_NOTICE, value: "{{ int $root.Values.maintenance.noticeHours }}h"}
             - {name: CONTROL_SITE_VERSION, value: {{ $root.Values.version | quote }}}

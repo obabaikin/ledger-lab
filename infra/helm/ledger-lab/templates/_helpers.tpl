@@ -36,9 +36,8 @@ would reach a service as "1e+06" and 0.5 hours would be cut to 0. Takes (list "n
 {{- end }}
 
 {{- /*
-The bank's numbers, checked together; every template that reads one of them includes this first.
-control refuses to start unless its own load.default-tps and load.tps-step (control/src/main/resources/application.yaml)
-fit the speeds set here; the chart says so before the deploy instead of a control pod that never gets ready.
+The bank's numbers, checked together; every template that reads one of them includes this first. control refuses to start
+with load options that do not fit, so the chart says so before the deploy instead of a control pod that never gets ready.
 */}}
 {{- define "ledger-lab.checkNumbers" -}}
 {{- $period := include "ledger-lab.whole" (list "periodMinutes" .Values.periodMinutes false) | int64 }}
@@ -46,18 +45,19 @@ fit the speeds set here; the chart says so before the deploy instead of a contro
 {{- include "ledger-lab.whole" (list "accounts.count" .Values.accounts.count false) | int64 }}
 {{- $base := include "ledger-lab.whole" (list "load.baseTps" .Values.load.baseTps false) | int64 }}
 {{- $max := include "ledger-lab.whole" (list "load.maxTps" .Values.load.maxTps false) | int64 }}
+{{- $step := include "ledger-lab.whole" (list "load.tpsStep" .Values.load.tpsStep false) | int64 }}
+{{- $pulse := include "ledger-lab.whole" (list "load.defaultPulseTps" .Values.load.defaultPulseTps false) | int64 }}
 {{- include "ledger-lab.whole" (list "maintenance.noticeHours" .Values.maintenance.noticeHours true) | int64 }}
 {{- if lt (mul $retention 60) $period }}
 {{- fail "retentionHours must hold at least one period of periodMinutes" }}
 {{- end }}
-{{- $controlDefaultTps := 1000 }}{{ $controlTpsStep := 100 }}
-{{- if or (gt $base $controlDefaultTps) (lt $max $controlDefaultTps) }}
-{{- fail (printf "load.baseTps and load.maxTps must hold control's default pulse of %d TPS" $controlDefaultTps) }}
+{{- if gt $base $max }}
+{{- fail "load.baseTps must not be above load.maxTps" }}
 {{- end }}
-{{- if mod (sub $max $base) $controlTpsStep }}
-{{- fail (printf "load.maxTps - load.baseTps must be a multiple of control's step of %d TPS" $controlTpsStep) }}
+{{- if mod (sub $max $base) $step }}
+{{- fail "load.maxTps - load.baseTps must be a multiple of load.tpsStep" }}
 {{- end }}
-{{- if mod (sub $controlDefaultTps $base) $controlTpsStep }}
-{{- fail (printf "control's default pulse of %d TPS must be load.baseTps plus a multiple of its step of %d TPS" $controlDefaultTps $controlTpsStep) }}
+{{- if or (lt $pulse $base) (gt $pulse $max) (mod (sub $pulse $base) $step) }}
+{{- fail "load.defaultPulseTps must be one of the options from load.baseTps to load.maxTps in steps of load.tpsStep" }}
 {{- end }}
 {{- end }}

@@ -25,6 +25,9 @@ load:
   baseTps: 400
   # The highest pulse the generator takes, also the highest option a visitor is offered.
   maxTps: 2000
+  # A visitor's options run from baseTps to maxTps in steps of this; the pulse offered first is one of them.
+  tpsStep: 100
+  defaultPulseTps: 1000
 maintenance:
   # A window declared this long before its start keeps its bad minutes out of the error budget.
   noticeHours: 3
