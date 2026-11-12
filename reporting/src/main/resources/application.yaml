@@ -37,7 +37,9 @@ reporting:
     length: 60m
     # How long a period's numbers and the rows of its transfers are held after it ended.
     retention: 4h
-    partitions-ahead: 48h
+    # Every connection that reads a table keeps a cache entry per partition: 313 partitions took 21 MB a connection and
+    # Postgres out of its memory (k3d, 10-minute periods). Maintenance creates them every minute.
+    partitions-ahead: 6h
     maintenance-interval: 1m
     # Creating or dropping a partition holds up the consumers while it waits for the table.
     lock-timeout: 2s

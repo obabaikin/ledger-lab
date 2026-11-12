@@ -56,7 +56,9 @@ generator:
     length: 60m
     # How long the journal is held after its hour ended; the bank holds its transfers as long.
     retention: 4h
-    partitions-ahead: 48h
+    # Every connection that reads a table keeps a cache entry per partition: 313 partitions took 21 MB a connection and
+    # Postgres out of its memory (k3d, 10-minute periods). Maintenance creates them every minute.
+    partitions-ahead: 6h
     maintenance-interval: 1m
     lock-timeout: 2s
   reconciliation:
