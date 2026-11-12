@@ -48,7 +48,7 @@ public class Partitions implements InitializingBean {
         this.clock = clock;
         this.tx = tx;
         this.failures = Counter.builder(FAILURES_METRIC)
-            .description("Partitions that could not be created or dropped; tried again at the next maintenance")
+            .description("Partitions that could not be created or dropped and expired rows that could not be deleted; tried again at the next maintenance")
             .register(registry);
         for (var table : PartitionedTable.values()) {
             var partitionsAhead = new AtomicLong();
@@ -126,6 +126,16 @@ public class Partitions implements InitializingBean {
             if (!start.plus(props.length()).isAfter(horizon)) {
                 attempt("drop", table, start, () -> partitions.drop(table, start, props.lockTimeout()));
             }
+        }
+        deleteUnpartitionedBefore(table, Period.containing(horizon, props.length()).start());
+    }
+
+    private void deleteUnpartitionedBefore(PartitionedTable table, Instant oldestHeld) {
+        try {
+            partitions.deleteUnpartitionedBefore(table, oldestHeld);
+        } catch (DataAccessException e) {
+            failures.increment();
+            log.warn("Could not delete the rows of {} outside partitions from before {}", table.tableName(), oldestHeld, e);
         }
     }
 

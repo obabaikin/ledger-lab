@@ -153,4 +153,21 @@ class PartitionsTest extends IntegrationTest {
         assertThat(partitionRepository.periodStarts()).doesNotContain(beyond.start()).contains(beyond.end());
         assertThat(failures() - failuresBefore).isEqualTo(1);
     }
+
+    @Test
+    void transfers_of_a_period_whose_partition_was_dropped_by_hand_stay_outside_the_partitions_only_as_long_as_the_period_is_held() {
+        var current = periodOf(now);
+        tx.executeWithoutResult(status -> partitionRepository.drop(current.start(), props.periods().lockTimeout()));
+        acceptedAt(now);
+
+        partitions.maintain(now);
+        assertThat(partitionRepository.periodStarts()).doesNotContain(current.start());
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isEqualTo(1);
+
+        partitions.maintain(current.end().plus(props.periods().retention()).minusMillis(1));
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isEqualTo(1);
+
+        partitions.maintain(current.end().plus(props.periods().retention()));
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC)).isZero();
+    }
 }

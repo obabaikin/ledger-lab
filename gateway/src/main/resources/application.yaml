@@ -84,6 +84,8 @@ gateway:
     # Creating or dropping a partition holds up every submission while it waits for the table.
     lock-timeout: 2s
     key-cleanup-interval: ${gateway.periods.length}
+    # A gateway replaced more often than once a period would otherwise never clean; after the warm-up (at most 90 s).
+    key-cleanup-first-delay: 5m
     key-cleanup-batch: 10000
 
 springdoc:

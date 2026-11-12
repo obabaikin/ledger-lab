@@ -93,6 +93,11 @@ public class PartitionRepository {
         jdbc.sql("SET LOCAL lock_timeout = '" + lockTimeout.toMillis() + "ms'").update();
     }
 
+    /** A period whose partition was missing (dropped by hand, or not created in time) kept its rows here past it. */
+    public void deleteUnpartitionedBefore(PartitionedTable table, Instant periodStart) {
+        jdbc.sql("DELETE FROM " + defaultPartition(table) + " WHERE sent_at < :start").param("start", Sql.timestamptz(periodStart)).update();
+    }
+
     public long rowsOutsidePartitions(PartitionedTable table) {
         return jdbc.sql("SELECT count(*) FROM " + defaultPartition(table)).query(Long.class).single();
     }

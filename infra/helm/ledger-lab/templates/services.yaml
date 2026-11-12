@@ -71,6 +71,17 @@ spec:
           resources:
             limits: {memory: {{ $root.Values.kafka.toolsMemory }}}
         {{- end }}
+        {{- if eq $name "generator" }}
+        # The clients start once the bank takes requests: the Service lets a connection through only to a ready gateway,
+        # and the gateway is ready after its warm-up. Started beside a cold gateway, they gave up on thousands of
+        # transfers in the first minute of a deploy.
+        - name: wait-for-gateway
+          image: {{ $root.Values.postgres.image }}
+          command: ["sh", "-c", "until nc -z -w 2 gateway {{ $root.Values.services.gateway.port }}; do sleep 2; done"]
+          securityContext: {{- include "ledger-lab.restricted" $root | nindent 12 }}
+          resources:
+            limits: {memory: {{ $root.Values.initMemory }}}
+        {{- end }}
       containers:
         - name: {{ $name }}
           image: {{ include "ledger-lab.image" (dict "root" $root "service" $service) }}

@@ -13,6 +13,7 @@ import java.util.UUID;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
@@ -36,6 +37,7 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import({TestcontainersConfiguration.class, IntegrationTest.Topics.class})
 @ActiveProfiles("test")
+@ExtendWith(AwayFromTheHoursEnd.class)
 @AutoConfigureTestRestTemplate
 abstract class IntegrationTest {
 

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ledgerlab.common.TransferCommand;
 import com.ledgerlab.common.TransferResultEvent;
+import com.ledgerlab.reporting.persistence.StatsChange;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
@@ -17,6 +19,7 @@ class ConcurrentWritersTest extends IntegrationTest {
 
     private static final int ROWS = 400;
     private static final int ROUNDS = 10;
+    private static final int SECONDS = 1000;
     private static final long AMOUNT_CENTS = 10;
 
     @Test
@@ -54,6 +57,37 @@ class ConcurrentWritersTest extends IntegrationTest {
         assertThat(stats.commandsSeen()).isEqualTo((long) ROWS * ROUNDS);
         assertThat(stats.posted()).isEqualTo((long) ROWS * ROUNDS);
         assertThat(stats.postedAmountCents()).isEqualTo(AMOUNT_CENTS * ROWS * ROUNDS);
+    }
+
+    @Test
+    @DisplayName("numbers of the same seconds added at once by batches that list them in opposite orders neither deadlock nor get lost")
+    void numbers_of_the_same_seconds_added_at_once_in_opposite_orders_neither_deadlock_nor_get_lost() throws Exception {
+        var ended = lastEndedPeriod();
+        var ascending = IntStream.range(0, SECONDS).mapToObj(i -> accepted(ended.start().plusSeconds(i))).toList();
+        var descending = ascending.reversed();
+        // The seconds exist, so both batches take their rows' locks rather than insert.
+        tx.executeWithoutResult(status -> seconds.add(ascending));
+        var barrier = new CyclicBarrier(2);
+        var pool = Executors.newFixedThreadPool(2);
+
+        try {
+            for (var round = 0; round < ROUNDS; round++) {
+                var writes = List.of(
+                    pool.submit(afterBarrier(barrier, () -> tx.executeWithoutResult(status -> seconds.add(ascending)))),
+                    pool.submit(afterBarrier(barrier, () -> tx.executeWithoutResult(status -> seconds.add(descending)))));
+                for (var write : writes) {
+                    write.get(30, TimeUnit.SECONDS);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(seconds.sum(ended).accepted()).isEqualTo((long) SECONDS * (1 + 2 * ROUNDS));
+    }
+
+    private static StatsChange accepted(Instant second) {
+        return new StatsChange(second, true, true, false, false, 0, null);
     }
 
     private static Callable<Void> afterBarrier(CyclicBarrier barrier, Runnable write) {

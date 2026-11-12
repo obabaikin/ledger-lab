@@ -147,4 +147,26 @@ class PartitionsTest extends IntegrationTest {
         assertThat(partitionRepository.periodStarts(PartitionedTable.TRANSFERS)).doesNotContain(beyond.start()).contains(beyond.end());
         assertThat(registry.get(Partitions.FAILURES_METRIC).counter().count() - failuresBefore).isEqualTo(2);
     }
+
+    @Test
+    void rows_of_a_period_whose_partitions_were_dropped_by_hand_stay_outside_the_partitions_only_as_long_as_the_period_is_held() {
+        openBank(2, 1_000);
+        var current = periodOf(now);
+        for (var table : PartitionedTable.values()) {
+            tx.executeWithoutResult(status -> partitionRepository.drop(table, current.start(), periodsProperties.lockTimeout()));
+        }
+        assertThat(applyOne(ledger, transferAt(now, 1, 2, 100))).isEqualTo(POSTED);
+
+        partitions.maintain(now);
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, PartitionedTable.TRANSFERS)).isEqualTo(1);
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, PartitionedTable.JOURNAL_ENTRIES)).isEqualTo(2);
+
+        partitions.maintain(current.end().plus(periodsProperties.retention()).minusMillis(1));
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, PartitionedTable.TRANSFERS)).isEqualTo(1);
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, PartitionedTable.JOURNAL_ENTRIES)).isEqualTo(2);
+
+        partitions.maintain(current.end().plus(periodsProperties.retention()));
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, PartitionedTable.TRANSFERS)).isZero();
+        assertThat(gauge(Partitions.UNPARTITIONED_ROWS_METRIC, PartitionedTable.JOURNAL_ENTRIES)).isZero();
+    }
 }

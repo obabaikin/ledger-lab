@@ -25,7 +25,7 @@ public class ExpiredKeys {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${gateway.periods.key-cleanup-interval}", initialDelayString = "${gateway.periods.key-cleanup-interval}")
+    @Scheduled(fixedDelayString = "${gateway.periods.key-cleanup-interval}", initialDelayString = "${gateway.periods.key-cleanup-first-delay}")
     public void deleteNow() {
         var deleted = delete(clock.instant());
         log.info("Deleted {} idempotency keys older than {}", deleted, props.retention());
