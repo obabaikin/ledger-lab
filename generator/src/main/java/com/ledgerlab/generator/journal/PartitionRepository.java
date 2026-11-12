@@ -51,6 +51,28 @@ public class PartitionRepository {
             .toList();
     }
 
+    /** Names of the partitions whose bounds, as Postgres keeps them, are not one period of this length. */
+    public List<String> partitionsNotOf(PartitionedTable table, Duration length) {
+        return jdbc.sql(
+            """
+            SELECT child.relname
+            FROM pg_inherits i
+            JOIN pg_class child ON child.oid = i.inhrelid
+            JOIN pg_class parent ON parent.oid = i.inhparent
+            JOIN pg_namespace n ON n.oid = parent.relnamespace
+            CROSS JOIN LATERAL regexp_match(pg_get_expr(child.relpartbound, child.oid),
+                                            'FROM \\(''([^'']+)''\\) TO \\(''([^'']+)''\\)') AS bound(b)
+            WHERE parent.relname = :table AND n.nspname = current_schema()
+              AND bound.b IS NOT NULL
+              AND CAST(bound.b[2] AS timestamptz) - CAST(bound.b[1] AS timestamptz) <> make_interval(secs => :seconds)
+            ORDER BY child.relname
+            """)
+            .param("table", table.tableName())
+            .param("seconds", length.toSeconds())
+            .query(String.class)
+            .list();
+    }
+
     /**
      * Both take the strongest lock on the table: they wait for every transaction that uses it, and all that come after
      * wait behind them. So they give up after the timeout, and the next maintenance tries again.

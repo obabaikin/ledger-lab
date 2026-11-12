@@ -1,6 +1,7 @@
 #!/bin/sh
 # Deploys a release's images from GHCR to the server through the SSH tunnel: cert-manager, then the chart.
-# Usage: infra/server/deploy.sh <release tag> [--force] [helm args]. --force deploys while runs are in progress.
+# Usage: infra/server/deploy.sh <release tag> [--force] [helm args]. --force deploys outside a maintenance window; its
+# bad minutes use the error budget.
 # The first deploy on a new domain: add --set ingress.tls.issuer=letsencrypt-staging, then deploy again without it.
 set -eu
 
@@ -46,15 +47,14 @@ for setting in $REQUIRED_SETTINGS; do
 done
 require_cluster
 
-# Only a first install skips the check; a database that cannot be asked refuses the deploy like a running run.
+# Only a first install skips the check; a database that cannot be asked refuses the deploy like a missing window.
 if [ "$force" = false ] && helm status ledger-lab --namespace "$NAMESPACE" >/dev/null 2>&1; then
-  if ! has_runs=$(psql_admin -tAc "SELECT to_regclass('control.runs') IS NOT NULL") \
-    || { [ "$has_runs" = t ] && ! active=$(psql_admin -tAc "SELECT count(*) FROM control.runs WHERE state IN ($ACTIVE_RUN_STATES)"); }; then
-    echo "cannot read the runs from Postgres: fix that, or deploy with --force" >&2
+  if ! in_window=$(psql_admin -tAc "SELECT EXISTS (SELECT FROM control.maintenance_windows WHERE cancelled_at IS NULL AND starts_at <= now() AND now() < ends_at)"); then
+    echo "cannot read the maintenance windows from Postgres: fix that, or deploy with --force" >&2
     exit 1
   fi
-  if [ "$has_runs" = t ] && [ "$active" -gt 0 ]; then
-    echo "$active runs in progress: wait for them to finish, or deploy with --force" >&2
+  if [ "$in_window" != t ]; then
+    echo "no maintenance window now: declare one with infra/server/maintenance.sh add, or deploy with --force (its bad minutes use the error budget)" >&2
     exit 1
   fi
 fi
@@ -114,5 +114,5 @@ echo "control: https://$DOMAIN"
 
 # Updates install without a reboot (apt-unattended-upgrades.conf), so a new kernel waits for one by hand.
 if [ -n "${SERVER:-}" ] && ssh -o BatchMode=yes "root@$SERVER" test -f /var/run/reboot-required; then
-  echo "the server needs a reboot to finish its updates; between runs: ssh root@$SERVER systemctl reboot" >&2
+  echo "the server needs a reboot to finish its updates; in a maintenance window: ssh root@$SERVER systemctl reboot" >&2
 fi

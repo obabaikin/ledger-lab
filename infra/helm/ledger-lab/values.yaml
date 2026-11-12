@@ -11,6 +11,24 @@ managementPort: 9000
 chaos: true
 initMemory: 64Mi
 
+# The bank's clock, the same in every service: they cut time at the same instants (ADR 0021). A changed length needs
+# empty databases: the services refuse to start beside partitions cut for another one.
+periodMinutes: 60
+# How long a period's transfers, journals and keys are held after it ends: also the idempotency window and the
+# retention of the Kafka topics (ADR 0022).
+retentionHours: 4
+# Opened once by the ledger and paid between by the generator; a higher count opens the missing ones.
+accounts:
+  count: 100000
+load:
+  # The generator's steady speed, also the lowest option of a visitor's pulse.
+  baseTps: 400
+  # The highest pulse the generator takes, also the highest option a visitor is offered.
+  maxTps: 2000
+maintenance:
+  # A window declared this long before its start keeps its bad minutes out of the error budget.
+  noticeHours: 3
+
 # The services' roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand
 # in Postgres. The monitor role is created or updated on every install and upgrade.
 passwords:
@@ -19,30 +37,37 @@ passwords:
   gateway: change-me-gateway
   control: change-me-control
   reporting: change-me-reporting
+  generator: change-me-generator
   monitor: change-me-monitor
 
 kafka:
   image: apache/kafka:4.2.1
   partitions: 6
-  storage: 2Gi
+  # About 1 GB an hour at 400 TPS, held for retentionHours.
+  storage: 8Gi
   heap: 768m
   memory: 1268Mi
   toolsMemory: 512Mi
 
 postgres:
   image: postgres:17-alpine
-  storage: 2Gi
+  # Four hours of transfers in every service at 400 TPS took 9 to 12 GB in the estimate, with room for bloat and WAL.
+  storage: 50Gi
   # The peak of the server's series was 729Mi of 768Mi; a quarter above it (docs/results/2026-10-23-server-baseline.md).
   memory: 912Mi
-  # The indexes of a run are written in random order, so they must stay cached.
+  # The indexes of the transfers are written in random order, so they must stay cached.
   sharedBuffers: 384MB
-  # The services' pools take 84 (gateway 40, ledger 2 x 10, control 10, reporting 10, the exporter and the operator);
-  # while the gateway is replaced, its old and new pod hold their pools at once.
+  # The services' pools take 90 (gateway 40, ledger 2 x 10, control 10, reporting 10, generator 6, the exporter and the
+  # operator); while the gateway is replaced, its old and new pod hold their pools at once.
   maxConnections: 150
 
 prometheus:
   image: prom/prometheus:v3.5.0
   memory: 512Mi
+  retention: 5d
+  storage: 5Gi
+  # Below the volume: the oldest blocks go first when the series outgrow it.
+  retentionSize: 4GB
 
 # Outside the bank's work path: they only feed Prometheus, and nothing waits for them.
 exporters:
@@ -121,8 +146,8 @@ services:
     module: generator
     port: 8082
     replicas: 1
-    # The bank's clients; the journals of a run stay on the heap until it is reconciled, at most 179 MiB live at
-    # 279,000 entries (measured on the server).
+    # The bank's clients. Sized when the journals of a run stayed on the heap (at most 179 MiB live at 279,000 entries,
+    # measured on the server); the journal is in Postgres now, and the heap holds the requests in flight.
     memory: 1280Mi
     # As the gateway's: about 330 MiB outside the heap (measured), the heap fixed from the start, malloc's arenas
     # limited the same way.
@@ -155,11 +180,3 @@ keys:
   mailjetApiKey: ""
   mailjetApiSecret: ""
 
-runs:
-  # Transfers per second of all active runs together (ADR 0012); 2000 since batched writes (ADR 0019).
-  maxTotalTps: 2000
-  # Empty: control's own options and default (control/src/main/resources/application.yaml).
-  tpsOptions: []
-  defaultTps: null
-  # Accounts a run opens; empty: control's own (100).
-  accountCount: null

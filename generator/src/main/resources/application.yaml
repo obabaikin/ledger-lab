@@ -17,6 +17,10 @@ spring:
       maximum-pool-size: 6
       # Milliseconds. While the database is away no transfer is sent; a short wait tells the clients sooner.
       connection-timeout: 2000
+      data-source-properties:
+        # Seconds. A statement whose database froze would otherwise hold the journal's writer, and the stop, for good;
+        # longer than the reconciliation's statement-timeout, which the database ends itself.
+        socketTimeout: 90
   flyway:
     default-schema: generator
 

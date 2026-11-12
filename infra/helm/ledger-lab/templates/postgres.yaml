@@ -6,7 +6,7 @@ data:
   init.sh: |
     #!/bin/sh
     set -eu
-    for role in ledger gateway control reporting; do
+    for role in ledger gateway control reporting generator; do
       password=$(cat "/run/db-passwords/$role")
       psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
         -v role="$role" -v password="$password" <<'SQL'

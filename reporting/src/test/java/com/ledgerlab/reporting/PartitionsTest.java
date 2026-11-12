@@ -1,15 +1,20 @@
 package com.ledgerlab.reporting;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
 import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.reporting.domain.Period;
 import com.ledgerlab.reporting.persistence.PartitionRepository;
+import com.ledgerlab.reporting.persistence.SecondStatsRepository;
 import com.ledgerlab.reporting.service.Partitions;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,6 +28,7 @@ class PartitionsTest extends IntegrationTest {
 
     @Autowired Partitions partitions;
     @Autowired PartitionRepository partitionRepository;
+    @Autowired SecondStatsRepository secondStats;
     @Autowired MeterRegistry registry;
 
     private final Instant now = Instant.now();
@@ -55,6 +61,20 @@ class PartitionsTest extends IntegrationTest {
 
     private double failures() {
         return registry.get(Partitions.FAILURES_METRIC).counter().count();
+    }
+
+    @Test
+    void a_service_started_with_a_shorter_period_length_than_its_partitions_refuses_to_start_and_drops_none_of_them() {
+        var before = partitionRepository.periodStarts();
+        var q = props.periods();
+        var shorter = new ReportingProperties(props.transfersTopic(), props.resultsTopic(), props.consumer(),
+            new ReportingProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout()));
+        var restarted = new Partitions(partitionRepository, secondStats, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
+
+        assertThatThrownBy(restarted::afterPropertiesSet)
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining(PartitionRepository.TABLE + "_p");
+        assertThat(partitionRepository.periodStarts()).isEqualTo(before);
     }
 
     @Test

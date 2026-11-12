@@ -1,13 +1,18 @@
 package com.ledgerlab.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ledgerlab.gateway.domain.Period;
 import com.ledgerlab.gateway.persistence.PartitionRepository;
+import com.ledgerlab.gateway.persistence.PeriodRepository;
 import com.ledgerlab.gateway.service.Partitions;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +27,7 @@ class PartitionsTest extends IntegrationTest {
 
     @Autowired Partitions partitions;
     @Autowired PartitionRepository partitionRepository;
+    @Autowired PeriodRepository periodRepository;
     @Autowired MeterRegistry registry;
     @Autowired TransactionTemplate tx;
 
@@ -55,6 +61,23 @@ class PartitionsTest extends IntegrationTest {
 
     private double failures() {
         return registry.get(Partitions.FAILURES_METRIC).counter().count();
+    }
+
+    @Test
+    void a_gateway_started_with_a_shorter_period_length_than_its_partitions_refuses_to_start_and_drops_none_of_them() {
+        var before = partitionRepository.periodStarts();
+        var p = props;
+        var q = p.periods();
+        var shorter = new GatewayProperties(p.transfersTopic(), p.resultsTopic(), p.outbox(), p.consumer(), p.maxWait(), p.waitRead(),
+            p.retryAfter(), p.closeLockTimeout(), p.inflight(), p.admission(), p.accept(), p.warmUp(),
+            new GatewayProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout(),
+                q.keyCleanupInterval(), q.keyCleanupBatch()));
+        var restarted = new Partitions(partitionRepository, periodRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
+
+        assertThatThrownBy(restarted::afterPropertiesSet)
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining(PartitionRepository.TABLE + "_p");
+        assertThat(partitionRepository.periodStarts()).isEqualTo(before);
     }
 
     @Test

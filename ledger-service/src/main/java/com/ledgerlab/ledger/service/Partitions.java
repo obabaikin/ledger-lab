@@ -70,7 +70,19 @@ public class Partitions implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        requireOneLength();
         maintain(clock.instant());
+    }
+
+    /** A partition cut for a longer period would be dropped by this length's arithmetic before its rows are old enough. */
+    private void requireOneLength() {
+        for (var table : PartitionedTable.values()) {
+            var others = partitions.partitionsNotOf(table, props.length());
+            if (!others.isEmpty()) {
+                throw new IllegalStateException("Partitions %s were cut for another period length than %s; a changed length needs an empty database"
+                    .formatted(others, props.length()));
+            }
+        }
     }
 
     @Scheduled(fixedDelayString = "${ledger.periods.maintenance-interval}", initialDelayString = "${ledger.periods.maintenance-interval}")

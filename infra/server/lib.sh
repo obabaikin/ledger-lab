@@ -11,7 +11,6 @@ export KUBECONFIG
 NAMESPACE="${NAMESPACE:-ledger-lab}"
 TUNNEL_PORT="${TUNNEL_PORT:-16443}"
 TUNNEL_SOCKET="${TUNNEL_SOCKET:-$CONFIG_DIR/tunnel.sock}"
-ACTIVE_RUN_STATES="'QUEUED', 'CREATED', 'RUNNING', 'DRAINING'"
 
 require_cluster() {
   if [ ! -f "$KUBECONFIG" ]; then
@@ -36,6 +35,17 @@ require_domain() {
     echo "DOMAIN is not set: add DOMAIN=<domain> to $SERVER_ENV" >&2
     exit 1
   fi
+}
+
+# The notice control holds a maintenance window to, in hours, as the deployed chart set it.
+maintenance_notice_hours() {
+  notice=$(kubectl --namespace "$NAMESPACE" get deployment control \
+    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CONTROL_MAINTENANCE_NOTICE")].value}') || return 1
+  if ! echo "$notice" | grep -Eqx '[0-9]+h'; then
+    echo "control's CONTROL_MAINTENANCE_NOTICE is '$notice', not whole hours: is the chart deployed?" >&2
+    return 1
+  fi
+  echo "${notice%h}"
 }
 
 psql_admin() {

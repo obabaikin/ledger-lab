@@ -1,6 +1,7 @@
 package com.ledgerlab.generator.journal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.awaitility.Awaitility.await;
 
 import com.ledgerlab.generator.FakeGateway;
@@ -28,12 +29,16 @@ class JournalFirstTest {
 
     private static final String SCHEMA = "generator";
 
+    private static final int SOCKET_TIMEOUT_SECONDS = 2;
+
     private static HikariDataSource dataSource(PostgreSQLContainer postgres) {
         var config = new HikariConfig();
         config.setJdbcUrl(postgres.getJdbcUrl());
         config.setUsername(postgres.getUsername());
         config.setPassword(postgres.getPassword());
         config.setSchema(SCHEMA);
+        config.setConnectionTimeout(Duration.ofSeconds(2).toMillis());
+        config.addDataSourceProperty("socketTimeout", String.valueOf(SOCKET_TIMEOUT_SECONDS));
         return new HikariDataSource(config);
     }
 
@@ -75,6 +80,39 @@ class JournalFirstTest {
                 var status = load.status();
                 assertThat(status.acknowledged()).isEqualTo(status.requested());
                 assertThat(new JdbcTemplate(dataSource).queryForObject("SELECT count(*) FROM intents", Long.class)).isGreaterThanOrEqualTo(status.requested());
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a database that freezes in the middle of a write holds the generator's stop no longer than the socket timeout")
+    void a_database_that_freezes_in_the_middle_of_a_write_holds_the_generators_stop_no_longer_than_the_socket_timeout() throws Exception {
+        try (var postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE); var gateway = new FakeGateway()) {
+            postgres.start();
+            Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).defaultSchema(SCHEMA).load().migrate();
+            try (var dataSource = dataSource(postgres)) {
+                var settings = TestData.settings(gateway.url()).tps(200).build();
+                var registry = new SimpleMeterRegistry();
+                var clock = Clock.systemUTC();
+                var writer = new JournalWriter(
+                    new JdbcTemplate(dataSource), new TransactionTemplate(new DataSourceTransactionManager(dataSource)), settings, registry);
+                var load = new Load(settings, new GatewayClient(settings, new ObjectMapper(), registry), writer, new ResponseMinutes(clock, settings), clock, registry);
+                writer.start();
+                load.begin();
+                await().atMost(Duration.ofSeconds(15)).until(() -> gateway.requests.get() > 50);
+                postgres.getDockerClient().pauseContainerCmd(postgres.getContainerId()).exec();
+                try {
+                    Thread.sleep(500);
+
+                    assertTimeoutPreemptively(Duration.ofSeconds(SOCKET_TIMEOUT_SECONDS * 10L), () -> {
+                        load.stop();
+                        writer.stop();
+                    });
+                } finally {
+                    postgres.getDockerClient().unpauseContainerCmd(postgres.getContainerId()).exec();
+                    load.stop();
+                    writer.stop();
+                }
             }
         }
     }

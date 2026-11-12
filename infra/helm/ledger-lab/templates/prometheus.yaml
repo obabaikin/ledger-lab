@@ -25,6 +25,16 @@ subjects:
     name: prometheus
     namespace: {{ .Release.Namespace }}
 ---
+# The charts of the last days outlive a restart of the pod.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  labels: {{- include "ledger-lab.labels" (dict "name" "prometheus") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: {storage: {{ .Values.prometheus.storage }}}
 ---
 apiVersion: v1
 kind: Service
@@ -60,7 +70,9 @@ spec:
           image: {{ .Values.prometheus.image }}
           args:
             - --config.file=/etc/prometheus/prometheus.yml
-            - --storage.tsdb.retention.time=1d
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ .Values.prometheus.retention }}
+            - --storage.tsdb.retention.size={{ .Values.prometheus.retentionSize }}
           ports:
             - containerPort: 9090
           readinessProbe:
@@ -70,6 +82,9 @@ spec:
             limits: {memory: {{ .Values.prometheus.memory }}}
           volumeMounts:
             - {name: config, mountPath: /etc/prometheus}
+            - {name: data, mountPath: /prometheus}
       volumes:
         - name: config
           configMap: {name: prometheus}
+        - name: data
+          persistentVolumeClaim: {claimName: prometheus-data}

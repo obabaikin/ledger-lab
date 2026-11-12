@@ -1,15 +1,20 @@
 package com.ledgerlab.ledger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ledgerlab.ledger.domain.Period;
 import com.ledgerlab.ledger.persistence.PartitionRepository;
 import com.ledgerlab.ledger.persistence.PartitionedTable;
 import com.ledgerlab.ledger.service.LedgerService;
 import com.ledgerlab.ledger.service.Partitions;
+import com.ledgerlab.ledger.service.PeriodsProperties;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,6 +78,19 @@ class PartitionsTest extends IntegrationTest {
         assertThat(starts).hasSize((int) (Duration.between(oldest, newest).dividedBy(periodsProperties.length()) + 1));
         var periodsAhead = (int) periodsProperties.partitionsAhead().dividedBy(periodsProperties.length());
         assertThat((int) gauge(Partitions.AHEAD_METRIC, table)).isBetween(periodsAhead - 1, periodsAhead);
+    }
+
+    @Test
+    void a_ledger_started_with_a_shorter_period_length_than_its_partitions_refuses_to_start_and_drops_none_of_them() {
+        var before = partitionRepository.periodStarts(PartitionedTable.TRANSFERS);
+        var p = periodsProperties;
+        var shorter = new PeriodsProperties(Duration.ofMinutes(1), p.retention(), p.partitionsAhead(), p.maintenanceInterval(), p.lockTimeout(), p.snapshotRetention());
+        var restarted = new Partitions(partitionRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
+
+        assertThatThrownBy(restarted::afterPropertiesSet)
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining(PartitionedTable.TRANSFERS.tableName() + "_p");
+        assertThat(partitionRepository.periodStarts(PartitionedTable.TRANSFERS)).isEqualTo(before);
     }
 
     @Test

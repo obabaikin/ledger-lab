@@ -1,6 +1,6 @@
 #!/bin/sh
 # Declares or cancels a maintenance window. Bad minutes within a window do not use up the error budget, if it was declared
-# early enough before its start (control.maintenance.notice, 3 hours); the page shows the window to every visitor.
+# early enough before its start (maintenance.noticeHours of the chart); the page shows the window to every visitor.
 # Usage: infra/server/maintenance.sh add <from> <to>     times as 2026-11-12T02:00Z
 #        infra/server/maintenance.sh cancel <id>         only before the window starts
 #        infra/server/maintenance.sh list
@@ -10,7 +10,6 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
 . "$HERE/lib.sh"
 
-NOTICE_HOURS=3
 # Whole minutes: availability is judged by the minute.
 TIME_SHAPE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z'
 
@@ -29,7 +28,8 @@ case "$command" in
       echo "$time" | grep -Eqx "$TIME_SHAPE" || usage
     done
     require_cluster
-    psql_admin -tA -F ' ' -v from="$1" -v to="$2" -v notice="$NOTICE_HOURS" <<'SQL'
+    notice_hours=$(maintenance_notice_hours)
+    psql_admin -tA -F ' ' -v from="$1" -v to="$2" -v notice="$notice_hours" <<'SQL'
 INSERT INTO control.maintenance_windows (starts_at, ends_at)
 VALUES (CAST(:'from' AS timestamptz), CAST(:'to' AS timestamptz))
 RETURNING 'window', id, to_char(starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI"Z"'), to_char(ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI"Z"'),

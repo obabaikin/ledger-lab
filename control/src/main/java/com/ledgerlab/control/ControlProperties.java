@@ -123,6 +123,9 @@ public record ControlProperties(
             if (!durationOptions.contains(defaultDuration)) {
                 throw new IllegalArgumentException("load.default-duration " + defaultDuration + " is not one of " + durationOptions);
             }
+            if (minInterval == null || !minInterval.isPositive()) {
+                throw new IllegalArgumentException("load.min-interval must be set and positive, got " + minInterval);
+            }
         }
 
         public List<Integer> tpsOptions() {

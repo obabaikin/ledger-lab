@@ -1,11 +1,16 @@
 package com.ledgerlab.generator.journal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ledgerlab.generator.GeneratorProperties;
 import com.ledgerlab.generator.IntegrationTest;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,6 +75,23 @@ class PartitionsTest extends IntegrationTest {
         assertThat(starts).hasSize((int) (Duration.between(oldest, newest).dividedBy(props.periods().length()) + 1));
         var periodsAhead = (int) props.periods().partitionsAhead().dividedBy(props.periods().length());
         assertThat((int) gauge(Partitions.AHEAD_METRIC, table)).isBetween(periodsAhead - 1, periodsAhead);
+    }
+
+    @Test
+    void a_generator_started_with_a_shorter_period_length_than_its_partitions_refuses_to_start_and_drops_none_of_them() {
+        var before = partitionRepository.periodStarts(PartitionedTable.INTENTS);
+        var p = props;
+        var q = p.periods();
+        var shorter = new GeneratorProperties(p.gatewayUrl(), p.connectTimeout(), p.requestTimeout(), p.maxAttempts(), p.retryBackoff(),
+            p.maxInFlight(), p.load(), p.accounts(), p.journal(),
+            new GeneratorProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout()),
+            p.reconciliation(), p.profile());
+        var restarted = new Partitions(partitionRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
+
+        assertThatThrownBy(restarted::afterPropertiesSet)
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining(PartitionedTable.INTENTS.tableName() + "_p");
+        assertThat(partitionRepository.periodStarts(PartitionedTable.INTENTS)).isEqualTo(before);
     }
 
     @Test

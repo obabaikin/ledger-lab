@@ -52,7 +52,8 @@ class LoadSettingsTest {
             Map.of("control.load.default-duration", "15s"),
             Map.of("control.load.max-tps", "2050"),
             Map.of("control.load.tps-step", "0"),
-            Map.of("control.load.duration-options", "10s, 1500ms"));
+            Map.of("control.load.duration-options", "10s, 1500ms"),
+            Map.of("control.load.min-interval", "0s"));
 
         broken.forEach(change -> {
             var settings = settings();
@@ -61,5 +62,15 @@ class LoadSettingsTest {
                 .isInstanceOf(BindException.class)
                 .hasRootCauseInstanceOf(IllegalArgumentException.class);
         });
+    }
+
+    @Test
+    void control_does_not_start_without_a_pause_after_a_pulse() {
+        var settings = settings();
+        settings.remove("control.load.min-interval");
+
+        assertThatThrownBy(() -> bind(settings))
+            .isInstanceOf(BindException.class)
+            .hasRootCauseInstanceOf(IllegalArgumentException.class);
     }
 }
