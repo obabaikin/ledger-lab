@@ -1,4 +1,5 @@
 {{- $root := . }}
+{{- $_ := include "ledger-lab.checkNumbers" . }}
 {{- $periodLength := printf "%dm" (int .Values.periodMinutes) }}
 {{- $retention := printf "%dh" (int .Values.retentionHours) }}
 {{- range $name, $service := .Values.services }}
@@ -104,15 +105,15 @@ spec:
               valueFrom:
                 fieldRef: {fieldPath: metadata.name}
             - {name: LEDGER_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
-            - {name: LEDGER_ACCOUNTS_COUNT, value: {{ $root.Values.accounts.count | quote }}}
+            - {name: LEDGER_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
             # The hot accounts' surplus goes to the pool once a period.
             - {name: LEDGER_POOL_HOTSWEEPINTERVAL, value: {{ $periodLength | quote }}}
             {{- end }}
             {{- if eq $name "generator" }}
             - {name: GENERATOR_GATEWAYURL, value: "http://gateway:{{ $root.Values.services.gateway.port }}"}
-            - {name: GENERATOR_ACCOUNTS_COUNT, value: {{ $root.Values.accounts.count | quote }}}
-            - {name: GENERATOR_LOAD_TPS, value: {{ $root.Values.load.baseTps | quote }}}
-            - {name: GENERATOR_LOAD_MAXPULSETPS, value: {{ $root.Values.load.maxTps | quote }}}
+            - {name: GENERATOR_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
+            - {name: GENERATOR_LOAD_TPS, value: {{ int64 $root.Values.load.baseTps | quote }}}
+            - {name: GENERATOR_LOAD_MAXPULSETPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
             {{- end }}
             {{- if eq $name "control" }}
             {{- range $other := list "ledger" "gateway" "generator" "reporting" }}
@@ -120,8 +121,8 @@ spec:
             {{- end }}
             - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
-            - {name: CONTROL_LOAD_MINTPS, value: {{ $root.Values.load.baseTps | quote }}}
-            - {name: CONTROL_LOAD_MAXTPS, value: {{ $root.Values.load.maxTps | quote }}}
+            - {name: CONTROL_LOAD_MINTPS, value: {{ int64 $root.Values.load.baseTps | quote }}}
+            - {name: CONTROL_LOAD_MAXTPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
             # Read back by infra/server/maintenance.sh, which tells whether a window is declared in time.
             - {name: CONTROL_MAINTENANCE_NOTICE, value: "{{ int $root.Values.maintenance.noticeHours }}h"}
             - {name: CONTROL_SITE_VERSION, value: {{ $root.Values.version | quote }}}
