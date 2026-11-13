@@ -20,12 +20,13 @@ CREATE TABLE client_totals_delta (
     unknown_not_accepted bigint NOT NULL
 );
 
--- The journal still holds what it has not dropped; what it dropped before is lost to the totals.
+-- The journal still holds what it has not dropped; what it dropped before is lost to the totals. Only outcomes whose
+-- intent is still there count, or unanswered (sent less every outcome) would start below zero.
 INSERT INTO client_totals (started_at, sent, acknowledged, failed, unknown_accepted, unknown_not_accepted)
 SELECT coalesce((SELECT min(sent_at) FROM intents), now()),
        (SELECT count(*) FROM intents),
-       count(*) FILTER (WHERE outcome = 'ACKNOWLEDGED'),
-       count(*) FILTER (WHERE outcome = 'FAILED'),
-       count(*) FILTER (WHERE outcome = 'UNKNOWN_ACCEPTED'),
-       count(*) FILTER (WHERE outcome = 'UNKNOWN_NOT_ACCEPTED')
-FROM outcomes;
+       count(*) FILTER (WHERE o.outcome = 'ACKNOWLEDGED'),
+       count(*) FILTER (WHERE o.outcome = 'FAILED'),
+       count(*) FILTER (WHERE o.outcome = 'UNKNOWN_ACCEPTED'),
+       count(*) FILTER (WHERE o.outcome = 'UNKNOWN_NOT_ACCEPTED')
+FROM outcomes o JOIN intents i ON i.sent_at = o.sent_at AND i.transfer_id = o.transfer_id;

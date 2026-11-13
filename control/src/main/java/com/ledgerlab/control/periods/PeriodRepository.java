@@ -34,8 +34,11 @@ public class PeriodRepository {
     }
 
     /** Opens every period from the last one known up to the current one, so periods missed while control was down are reconciled too. */
-    public int openUpTo(Period current, Duration length) {
+    public int openUpTo(Instant now, Period current, Duration length) {
         var lastEnd = jdbc.sql("SELECT max(period_end) FROM periods").query(Timestamp.class).optional().map(Timestamp::toInstant).orElse(null);
+        if (lastEnd == null) {
+            jdbc.sql("INSERT INTO bank_start (started_at) VALUES (:now) ON CONFLICT DO NOTHING").param("now", Timestamp.from(now)).update();
+        }
         // An end off the grid is left by another period length: the periods go on from the current one.
         var from = lastEnd != null && Period.startsOnGrid(lastEnd, length) && lastEnd.isBefore(current.start()) ? lastEnd : current.start();
         return jdbc.sql(
@@ -90,8 +93,8 @@ public class PeriodRepository {
             .orElse(null);
     }
 
-    public @Nullable Instant firstStart() {
-        return jdbc.sql("SELECT min(period_start) FROM periods").query(Timestamp.class).optional().map(Timestamp::toInstant).orElse(null);
+    public @Nullable Instant bankStartedAt() {
+        return jdbc.sql("SELECT started_at FROM bank_start").query(Timestamp.class).optional().map(Timestamp::toInstant).orElse(null);
     }
 
     public PeriodNumbers numbersOfFinished() {

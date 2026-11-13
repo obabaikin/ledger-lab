@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
 
 @Schema(description = "The bank as control sees it now.")
 public record BankView(
-    @Schema(description = "Start of the bank's first period; null before control's first tick.", nullable = true)
+    @Schema(description = "When the bank started: control's first tick; null before it.", nullable = true)
     @Nullable Instant startedAt,
     long periodMinutes,
     CurrentPeriod currentPeriod,

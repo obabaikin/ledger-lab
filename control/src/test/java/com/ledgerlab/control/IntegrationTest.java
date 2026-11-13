@@ -92,7 +92,7 @@ abstract class IntegrationTest {
     void cleanDatabase() {
         jdbc.sql(
             """
-            TRUNCATE periods, availability_minutes, availability_hours, maintenance_windows, sessions, invite_visits, invite_mails,
+            TRUNCATE periods, bank_start, availability_minutes, availability_hours, maintenance_windows, sessions, invite_visits, invite_mails,
                 invite_requests, invite_emails, invite_tokens, chaos_events, load_pulses
             """).update();
         ledger.reset();

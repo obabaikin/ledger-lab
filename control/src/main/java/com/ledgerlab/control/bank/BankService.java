@@ -67,7 +67,7 @@ public class BankService {
         var booksReadAt = snapshot.booksReadAt();
         var clients = snapshot.clients();
         return new BankView(
-            periods.firstStart(),
+            periods.bankStartedAt(),
             props.periods().length().toMinutes(),
             new BankView.CurrentPeriod(current.start(), current.end(), current.end().plus(props.periods().closeDelay())),
             totals,

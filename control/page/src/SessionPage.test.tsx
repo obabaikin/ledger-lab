@@ -64,7 +64,7 @@ describe('the open page', () => {
     control()
     renderAt('/')
 
-    await waitFor(() => expect(screen.getByTestId('clients-number')).toHaveTextContent('917,000 sent'))
+    await waitFor(() => expect(screen.getByTestId('clients-number')).toHaveTextContent(en.bank.clientsSent('917,000')))
     expect(screen.getByTestId('clients-note')).toHaveTextContent(en.bank.clientsGaveUp('600'))
     expect(screen.getByTestId('clients-restarted')).toHaveTextContent(en.bank.clientsRestarted(hoursMinutes('2026-11-11T07:15:00Z'), '1,100', '3'))
   })

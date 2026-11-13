@@ -6,6 +6,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.ledgerlab.generator.IntegrationTest;
 import com.ledgerlab.generator.TestData;
 import com.ledgerlab.generator.bank.TransferStatus;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -18,7 +23,9 @@ import java.util.concurrent.Executors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DelegatingDataSource;
 
 class ClientTotalsTest extends IntegrationTest {
 
@@ -28,6 +35,7 @@ class ClientTotalsTest extends IntegrationTest {
     @Autowired JournalWriter writer;
     @Autowired ClientTotalsStore store;
     @Autowired JdbcClient jdbcClient;
+    @Autowired DataSource dataSource;
 
     private static Instant now() {
         return Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -160,6 +168,35 @@ class ClientTotalsTest extends IntegrationTest {
     }
 
     @Test
+    void outcomes_of_one_transfer_twice_in_one_write_add_to_the_totals_once() throws Exception {
+        var transfer = TestData.transfer();
+        var sentAt = now();
+        writer.intent(sentAt, transfer);
+
+        writer.writeNow(List.of(
+            new JournalWriter.Outcome(sentAt, transfer.transferId(), JournalOutcome.UNKNOWN_ACCEPTED, null, null, null),
+            new JournalWriter.Outcome(sentAt, transfer.transferId(), JournalOutcome.UNKNOWN_NOT_ACCEPTED, null, null, null)));
+
+        assertThat(store.read()).isEqualTo(new ClientTotals(1, 0, 1, 0));
+    }
+
+    @Test
+    void the_migration_counts_the_journal_it_finds_leaving_out_outcomes_whose_intent_is_gone() throws Exception {
+        var sentAt = now();
+        var answered = intent(sentAt);
+        outcome(sentAt, answered, JournalOutcome.ACKNOWLEDGED, TransferStatus.POSTED, null, sentAt);
+        intent(sentAt);
+        outcome(sentAt, UUID.randomUUID(), JournalOutcome.FAILED, null, null, null);
+        var migration = Files.readString(Path.of(getClass().getResource("/db/migration/V2__client_totals.sql").toURI()));
+
+        jdbcTemplate.update("DELETE FROM client_totals");
+        jdbcTemplate.update(migration.substring(migration.indexOf("INSERT INTO client_totals")));
+
+        assertThat(store.read()).isEqualTo(new ClientTotals(2, 1, 0, 1));
+        assertThat(jdbcTemplate.queryForObject("SELECT started_at FROM client_totals", Timestamp.class).toInstant()).isEqualTo(sentAt);
+    }
+
+    @Test
     void the_totals_are_not_shown_before_the_first_read_or_after_reads_stop() {
         var clock = new SettableClock(Instant.parse("2026-11-13T10:00:00Z"));
         var fresh = new ClientTotalsStore(jdbcClient, clock, props);
@@ -171,6 +208,40 @@ class ClientTotalsTest extends IntegrationTest {
 
         clock.now = clock.now.plusMillis(1);
         assertThat(fresh.current()).isNull();
+    }
+
+    @Test
+    void a_read_that_fails_keeps_the_last_totals_until_they_are_stale() {
+        var clock = new SettableClock(Instant.parse("2026-11-13T10:00:00Z"));
+        var database = new SwitchedDataSource(dataSource);
+        var store = new ClientTotalsStore(JdbcClient.create(database), clock, props);
+        store.refresh();
+        database.away = true;
+
+        clock.now = clock.now.plus(props.totals().readInterval());
+        store.refresh();
+        assertThat(store.current()).isEqualTo(new ClientTotals(0, 0, 0, 0));
+
+        clock.now = clock.now.plus(props.totals().readInterval().multipliedBy(ClientTotalsStore.STALE_AFTER_READS));
+        store.refresh();
+        assertThat(store.current()).isNull();
+    }
+
+    private static final class SwitchedDataSource extends DelegatingDataSource {
+
+        private volatile boolean away = false;
+
+        SwitchedDataSource(DataSource target) {
+            super(target);
+        }
+
+        @Override
+        public Connection getConnection() throws SQLException {
+            if (away) {
+                throw new SQLException("the database is away");
+            }
+            return super.getConnection();
+        }
     }
 
     private static final class SettableClock extends Clock {

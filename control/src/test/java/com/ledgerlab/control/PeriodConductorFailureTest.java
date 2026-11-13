@@ -42,7 +42,7 @@ class PeriodConductorFailureTest {
     void a_checked_exception_in_a_periods_step_is_logged_and_the_tick_goes_on_to_the_live_numbers(CapturedOutput output) throws Exception {
         var periods = mock(PeriodRepository.class);
         var live = mock(BankLive.class);
-        when(periods.openUpTo(any(), any())).thenAnswer(invocation -> {
+        when(periods.openUpTo(any(), any(), any())).thenAnswer(invocation -> {
             throw new TimeoutException("a checked exception from below");
         });
         var conductor = new PeriodConductor(

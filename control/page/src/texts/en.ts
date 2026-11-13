@@ -89,6 +89,7 @@ export const en = {
     was: (opening: string) => `was ${opening}`,
     rejected: (total: string) => `Rejected ${total}`,
     noRejections: 'Nothing rejected',
+    clientsSent: (count: string) => `${count} sent`,
     clientsGaveUp: (count: string) => `${count} gave up`,
     clientsSending: (tps: string) => `Clients send ${tps} transfers/s.`,
     pulse: (tps: string, until: string, base: string) => `Load raised to ${tps} transfers/s until ${until}, then back to ${base}.`,

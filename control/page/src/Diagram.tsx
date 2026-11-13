@@ -198,7 +198,7 @@ export function Diagram(props: {
           ? 'degraded'
           : ''
   const lines: Record<string, [string, string]> = bare ? {} : {
-    clients: [`${shown(sent)} sent`, numbers.gaveUp === null ? '' : t.bank.clientsGaveUp(count(numbers.gaveUp))],
+    clients: [t.bank.clientsSent(shown(sent)), numbers.gaveUp === null ? '' : t.bank.clientsGaveUp(count(numbers.gaveUp))],
     gateway: [`${shown(accepted)} accepted`, numbers.refused === null ? '' : `${count(numbers.refused)} refused (503)`],
     ledger: [`${shown(posted)} booked`, ledgerPods ? `${consuming} of ${ledgerPods.length} consuming` : ''],
   }

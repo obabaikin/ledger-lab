@@ -75,7 +75,7 @@ class BankApiTest extends BankIntegrationTest {
 
         var current = currentPeriod();
         var bank = bank();
-        assertThat(bank.get("startedAt")).isEqualTo(current.start().toString());
+        assertThat(Instant.parse((String) bank.get("startedAt"))).isAfterOrEqualTo(current.start()).isBefore(current.end());
         assertThat(bank.get("currentPeriod")).isEqualTo(mapOf(
             "start", current.start().toString(), "end", current.end().toString(), "closesAt", current.end().plus(CLOSE_DELAY).toString()));
         assertThat(periods()).isEmpty();
@@ -95,7 +95,18 @@ class BankApiTest extends BankIntegrationTest {
         assertThat(bank().get("totals")).isEqualTo(mapOf(
             "accepted", (int) ACCEPTED + 50, "posted", (int) POSTED + 40, "rejected", (int) REJECTED + 5,
             "postedAmountCents", (int) (2 * POSTED_AMOUNT_CENTS), "rejectionsByReason", Map.of("INSUFFICIENT_FUNDS", 120, "BLOCKED_ACCOUNT", 80)));
-        assertThat(bank().get("startedAt")).isEqualTo(PERIOD.toString());
+        assertThat(bank().get("startedAt")).isEqualTo(PERIOD.plusSeconds(600).toString());
+    }
+
+    @Test
+    @DisplayName("the bank started at control's first tick, not at the start of its period, and later ticks do not move it")
+    void the_bank_started_at_controls_first_tick_not_at_the_start_of_its_period_and_later_ticks_do_not_move_it() {
+        var firstTick = PERIOD.plusSeconds(37 * 60 + 12);
+        conductor.tick(firstTick);
+
+        conductor.tick(firstTick.plusSeconds(1200));
+
+        assertThat(bank().get("startedAt")).isEqualTo(firstTick.toString());
     }
 
     @Test

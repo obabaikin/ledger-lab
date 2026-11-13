@@ -103,7 +103,7 @@ public class PeriodConductor {
     private void step(Instant now) {
         BankPeriod period = null;
         try {
-            periods.openUpTo(Period.containing(now, props.length()), props.length());
+            periods.openUpTo(now, Period.containing(now, props.length()), props.length());
             period = periods.oldestUnfinished();
             if (period == null) {
                 return;

@@ -111,7 +111,7 @@
             "$ref" : "#/components/schemas/Slo"
           },
           "startedAt" : {
-            "description" : "Start of the bank's first period; null before control's first tick.",
+            "description" : "When the bank started: control's first tick; null before it.",
             "format" : "date-time",
             "type" : [ "string", "null" ]
           },
