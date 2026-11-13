@@ -21,6 +21,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.util.unit.DataSize;
 
 /**
  * A period's statement against the client journal, inside the database: the statement goes page by page into a
@@ -53,20 +54,46 @@ final class StatementComparison implements AutoCloseable {
         AND (j.bank_status <> s.status OR (j.reject_reason IS NOT NULL AND s.reject_reason IS NOT NULL AND j.reject_reason <> s.reject_reason))
         """;
     private static final String ACCEPTED_IN_PERIOD =
+        "o.sent_at >= :from AND o.sent_at < :end AND o.accepted_at >= :start AND o.accepted_at < :end AND o.outcome IN (:accepted)";
+    private static final String NOT_IN_STATEMENT = "s.transfer_id IS NULL";
+
+    /**
+     * A join, not NOT EXISTS inside FILTER: Postgres cannot turn a subquery in an aggregate's filter into a join and ran
+     * it once per accepted transfer, an index probe of the temporary table each; on the server that read about 10 GB
+     * through 8 MB of temp_buffers for one period and passed the statement timeout.
+     */
+    static final String LINE_COUNTS =
         """
-        outcomes o
-        WHERE o.sent_at >= :from AND o.sent_at < :end AND o.accepted_at >= :start AND o.accepted_at < :end AND o.outcome IN (:accepted)
-        """;
-    private static final String NOT_IN_STATEMENT = "NOT EXISTS (SELECT 1 FROM " + LINES + " s WHERE s.transfer_id = o.transfer_id)";
+        SELECT count(*) AS line_count,
+               coalesce(sum(s.amount_cents), 0) AS amount_cents,
+               count(*) FILTER (WHERE s.status IS NULL OR s.status NOT IN (:finalStatuses)) AS not_final,
+               count(*) FILTER (WHERE j.transfer_id IS NOT NULL AND (j.outcome IS NULL OR j.outcome = :unknownAccepted)) AS unknown_to_client,
+               count(*) FILTER (WHERE %s) AS not_in_journal,
+               count(*) FILTER (WHERE %s) AS not_taken_but_in_statement,
+               count(*) FILTER (WHERE %s) AS payload_mismatch,
+               count(*) FILTER (WHERE %s) AS status_mismatch
+        FROM %s
+        """.formatted(NOT_IN_JOURNAL, NOT_TAKEN_BUT_IN_STATEMENT, PAYLOAD_MISMATCH, STATUS_MISMATCH, LINES_WITH_JOURNAL);
+    static final String ACCEPTED_COUNTS =
+        "SELECT count(*) AS accepted, count(*) FILTER (WHERE %s) AS not_in_statement FROM outcomes o LEFT JOIN %s s ON s.transfer_id = o.transfer_id WHERE %s"
+            .formatted(NOT_IN_STATEMENT, LINES, ACCEPTED_IN_PERIOD);
+    private static final String NOT_IN_STATEMENT_EXAMPLES =
+        "SELECT o.transfer_id FROM outcomes o LEFT JOIN %s s ON s.transfer_id = o.transfer_id WHERE %s AND %s ORDER BY o.transfer_id LIMIT :limit"
+            .formatted(LINES, ACCEPTED_IN_PERIOD, NOT_IN_STATEMENT);
 
     private final JdbcTemplate template;
     private final JdbcClient jdbc;
 
-    StatementComparison(Connection connection, Duration statementTimeout) {
+    StatementComparison(Connection connection, Duration statementTimeout, DataSize workMem) {
         var onThisConnection = new SingleConnectionDataSource(connection, true);
         this.template = new JdbcTemplate(onThisConnection);
         this.jdbc = JdbcClient.create(onThisConnection);
         template.execute("SET statement_timeout = '" + statementTimeout.toMillis() + "ms'");
+        // Every join here is a whole period against a whole period: one pass of each side through a hash, whatever the
+        // statistics say. A nested loop probes per row, and its cost depends on a cache the planner cannot see.
+        template.execute("SET enable_nestloop = off");
+        template.execute("SET enable_mergejoin = off");
+        template.execute("SET work_mem = '" + workMem.toKilobytes() + "kB'");
         template.execute("DROP TABLE IF EXISTS " + LINES);
         template.execute(
             """
@@ -98,43 +125,22 @@ final class StatementComparison implements AutoCloseable {
     ClientReconciliationReport report(Period period, UnknownResolved unknownResolved, int exampleLimit) {
         // Autovacuum does not see a temporary table: without this the joins are planned for an empty one.
         template.execute("ANALYZE " + LINES);
-        var params = new HashMap<String, Object>();
-        params.put("from", Sql.timestamptz(period.previous().start()));
-        params.put("start", Sql.timestamptz(period.start()));
-        params.put("end", Sql.timestamptz(period.end()));
-        params.put("limit", exampleLimit);
-        params.put("acknowledged", JournalOutcome.ACKNOWLEDGED.name());
-        params.put("accepted", List.of(JournalOutcome.ACKNOWLEDGED.name(), JournalOutcome.UNKNOWN_ACCEPTED.name()));
-        params.put("unknownAccepted", JournalOutcome.UNKNOWN_ACCEPTED.name());
-        params.put("notTaken", List.of(JournalOutcome.FAILED.name(), JournalOutcome.UNKNOWN_NOT_ACCEPTED.name()));
-        params.put("finalStatuses", Arrays.stream(TransferStatus.values()).filter(TransferStatus::isFinal).map(Enum::name).toList());
+        var params = params(period, exampleLimit);
 
-        var lines = jdbc.sql(
-            """
-            SELECT count(*) AS line_count,
-                   coalesce(sum(s.amount_cents), 0) AS amount_cents,
-                   count(*) FILTER (WHERE s.status IS NULL OR s.status NOT IN (:finalStatuses)) AS not_final,
-                   count(*) FILTER (WHERE j.transfer_id IS NOT NULL AND (j.outcome IS NULL OR j.outcome = :unknownAccepted)) AS unknown_to_client,
-                   count(*) FILTER (WHERE %s) AS not_in_journal,
-                   count(*) FILTER (WHERE %s) AS not_taken_but_in_statement,
-                   count(*) FILTER (WHERE %s) AS payload_mismatch,
-                   count(*) FILTER (WHERE %s) AS status_mismatch
-            FROM %s
-            """.formatted(NOT_IN_JOURNAL, NOT_TAKEN_BUT_IN_STATEMENT, PAYLOAD_MISMATCH, STATUS_MISMATCH, LINES_WITH_JOURNAL))
+        var lines = jdbc.sql(LINE_COUNTS)
             .params(params)
             .query((rs, row) -> new LineCounts(
                 rs.getLong("line_count"), rs.getLong("amount_cents"), rs.getLong("not_final"), rs.getLong("unknown_to_client"),
                 rs.getLong("not_in_journal"), rs.getLong("not_taken_but_in_statement"), rs.getLong("payload_mismatch"), rs.getLong("status_mismatch")))
             .single();
-        var accepted = jdbc.sql(
-            "SELECT count(*) AS accepted, count(*) FILTER (WHERE %s) AS not_in_statement FROM %s".formatted(NOT_IN_STATEMENT, ACCEPTED_IN_PERIOD))
+        var accepted = jdbc.sql(ACCEPTED_COUNTS)
             .params(params)
             .query((rs, row) -> new AcceptedCounts(rs.getLong("accepted"), rs.getLong("not_in_statement")))
             .single();
 
         var breaks = new ReconciliationBreaks(
             ids(lines.notInJournal(), firstLinesWithJournal("s.transfer_id", NOT_IN_JOURNAL), params),
-            ids(accepted.notInStatement(), "SELECT o.transfer_id FROM %s AND %s ORDER BY o.transfer_id LIMIT :limit".formatted(ACCEPTED_IN_PERIOD, NOT_IN_STATEMENT), params),
+            ids(accepted.notInStatement(), NOT_IN_STATEMENT_EXAMPLES, params),
             ids(lines.notTakenButInStatement(), firstLinesWithJournal("s.transfer_id", NOT_TAKEN_BUT_IN_STATEMENT), params),
             sides(lines.payloadMismatch(), PAYLOAD_MISMATCH, params),
             sides(lines.statusMismatch(), STATUS_MISMATCH, params));
@@ -146,6 +152,20 @@ final class StatementComparison implements AutoCloseable {
             new StatementTotals(lines.rows(), lines.amountCents(), byStatus(), lines.unknownToClient()),
             breaks,
             unknownResolved);
+    }
+
+    static Map<String, Object> params(Period period, int exampleLimit) {
+        var params = new HashMap<String, Object>();
+        params.put("from", Sql.timestamptz(period.previous().start()));
+        params.put("start", Sql.timestamptz(period.start()));
+        params.put("end", Sql.timestamptz(period.end()));
+        params.put("limit", exampleLimit);
+        params.put("acknowledged", JournalOutcome.ACKNOWLEDGED.name());
+        params.put("accepted", List.of(JournalOutcome.ACKNOWLEDGED.name(), JournalOutcome.UNKNOWN_ACCEPTED.name()));
+        params.put("unknownAccepted", JournalOutcome.UNKNOWN_ACCEPTED.name());
+        params.put("notTaken", List.of(JournalOutcome.FAILED.name(), JournalOutcome.UNKNOWN_NOT_ACCEPTED.name()));
+        params.put("finalStatuses", Arrays.stream(TransferStatus.values()).filter(TransferStatus::isFinal).map(Enum::name).toList());
+        return params;
     }
 
     private record LineCounts(
@@ -221,5 +241,8 @@ final class StatementComparison implements AutoCloseable {
     public void close() {
         template.execute("DROP TABLE IF EXISTS " + LINES);
         template.execute("RESET statement_timeout");
+        template.execute("RESET enable_nestloop");
+        template.execute("RESET enable_mergejoin");
+        template.execute("RESET work_mem");
     }
 }

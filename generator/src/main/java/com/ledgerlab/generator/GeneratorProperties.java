@@ -2,6 +2,7 @@ package com.ledgerlab.generator;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.util.unit.DataSize;
 
 @ConfigurationProperties("generator")
 public record GeneratorProperties(
@@ -57,7 +58,10 @@ public record GeneratorProperties(
         }
     }
 
-    /** A report lists at most {@link #exampleLimit} transfers per kind of break; {@link #resolveConcurrency} unknown transfers are asked about at once. */
-    public record Reconciliation(Duration statementTimeout, int exampleLimit, int resolveConcurrency) {
+    /**
+     * A report lists at most {@link #exampleLimit} transfers per kind of break; {@link #resolveConcurrency} unknown transfers are asked about at once.
+     * {@link #workMem} is Postgres's work_mem for the comparison's hash joins.
+     */
+    public record Reconciliation(Duration statementTimeout, DataSize workMem, int exampleLimit, int resolveConcurrency) {
     }
 }

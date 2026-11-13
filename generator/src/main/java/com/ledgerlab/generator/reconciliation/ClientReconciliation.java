@@ -46,7 +46,7 @@ public class ClientReconciliation {
     public ClientReconciliationReport reconcile(Period period) throws InterruptedException {
         resolveUnknown(period.previous());
         try (var connection = dataSource.getConnection();
-             var comparison = new StatementComparison(connection, props.statementTimeout())) {
+             var comparison = new StatementComparison(connection, props.statementTimeout(), props.workMem())) {
             var lines = readStatement(period, comparison);
             var report = comparison.report(period, journal.resolved(period.previous()), props.exampleLimit());
             if (report.statement().rows() != lines) {

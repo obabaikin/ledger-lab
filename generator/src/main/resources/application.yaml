@@ -66,6 +66,8 @@ generator:
     unpartitioned-delete-batch: 10000
   reconciliation:
     statement-timeout: 60s
+    # Per hash, times Postgres's hash_mem_multiplier (2), and a comparison holds up to two: sized for Postgres's 912Mi.
+    work-mem: 32MB
     example-limit: 20
     resolve-concurrency: 16
   profile:
