@@ -135,6 +135,10 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "restarted" : {
+            "description" : "Whether clients sent before this generator started, so its own counts are less than the total.",
+            "type" : "boolean"
+          },
           "retries" : {
             "format" : "int64",
             "type" : "integer"

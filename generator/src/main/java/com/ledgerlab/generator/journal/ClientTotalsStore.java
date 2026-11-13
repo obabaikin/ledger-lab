@@ -51,6 +51,7 @@ public class ClientTotalsStore {
     private final JdbcClient jdbc;
     private final Clock clock;
     private final Duration staleAfter;
+    private final boolean othersSentBefore;
     private volatile @Nullable Read last = null;
     /** Touched by the scheduler's reads only, one at a time. */
     private long failedReadsInARow = 0L;
@@ -62,6 +63,14 @@ public class ClientTotalsStore {
         this.jdbc = jdbc;
         this.clock = clock;
         this.staleAfter = props.totals().readInterval().multipliedBy(STALE_AFTER_READS);
+        // Read before the load starts, which Spring does once every bean is made: this generator's own first
+        // transfers must not count as another's.
+        this.othersSentBefore = read(jdbc).sent() > 0;
+    }
+
+    /** Whether clients sent before this generator started: its own counts then fall short of the totals. */
+    public boolean othersSentBefore() {
+        return othersSentBefore;
     }
 
     /** null before the first read, or when the database has not answered for a while. */
@@ -90,6 +99,10 @@ public class ClientTotalsStore {
     }
 
     public ClientTotals read() {
+        return read(jdbc);
+    }
+
+    private static ClientTotals read(JdbcClient jdbc) {
         return jdbc.sql(READ).query((rs, row) -> {
             var sent = rs.getLong("sent");
             var acknowledged = rs.getLong("acknowledged");

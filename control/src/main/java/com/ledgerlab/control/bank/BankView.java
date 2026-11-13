@@ -63,7 +63,9 @@ public record BankView(
         long retries,
         long inFlight,
         @Schema(description = "Since the bank started; null while the generator cannot read its journal.", nullable = true)
-        @Nullable ClientTotals total
+        @Nullable ClientTotals total,
+        @Schema(description = "Whether clients sent before this generator started: the counts other than total then cover only its part.")
+        boolean restarted
     ) {
     }
 

@@ -122,6 +122,6 @@ final class Fixtures {
         return mapOf(
             "startedAt", "2026-11-10T08:00:00Z", "baseTps", 400, "targetTps", 400, "pulse", null, "requested", 5000, "acknowledged", 4980,
             "failed", 3, "unknown", 4, "retries", 9, "refused", 6, "inFlight", 13, "duplicatesSent", 2, "posted", 4500, "rejected", 480,
-            "rejectedByReason", Map.of(), "skipped", 0, "notJournaled", 0, "total", TOTAL);
+            "rejectedByReason", Map.of(), "skipped", 0, "notJournaled", 0, "total", TOTAL, "restarted", true);
     }
 }

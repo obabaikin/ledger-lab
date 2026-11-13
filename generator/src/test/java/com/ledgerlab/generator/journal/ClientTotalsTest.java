@@ -211,6 +211,17 @@ class ClientTotalsTest extends IntegrationTest {
     }
 
     @Test
+    void a_generator_knows_whether_clients_sent_before_it_started() {
+        var first = new ClientTotalsStore(jdbcClient, Clock.systemUTC(), props);
+        jdbcTemplate.update("INSERT INTO client_totals_delta (sent, acknowledged, failed, unknown_accepted, unknown_not_accepted) VALUES (1, 0, 0, 0, 0)");
+
+        var next = new ClientTotalsStore(jdbcClient, Clock.systemUTC(), props);
+
+        assertThat(first.othersSentBefore()).isFalse();
+        assertThat(next.othersSentBefore()).isTrue();
+    }
+
+    @Test
     void a_read_that_fails_keeps_the_last_totals_until_they_are_stale() {
         var clock = new SettableClock(Instant.parse("2026-11-13T10:00:00Z"));
         var database = new SwitchedDataSource(dataSource);

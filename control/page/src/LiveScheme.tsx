@@ -6,11 +6,6 @@ import { bankCounters } from './shownCounts'
 import { useSmoothed } from './smooth'
 import { t } from './texts'
 
-/** The clients' own counts differ from the totals only when their generator started after the bank; null otherwise. */
-function restartedAfterTheBank(clientsSince: string | null, bankStartedAt: string | null): string | null {
-  return clientsSince !== null && bankStartedAt !== null && Date.parse(clientsSince) > Date.parse(bankStartedAt) ? clientsSince : null
-}
-
 /**
  * The diagram and the counters under it. The counters move every frame between two snapshots, so they live here: a frame
  * redraws this part, not the page.
@@ -20,7 +15,7 @@ export function LiveScheme(props: { bank: BankView; rates: number[] | undefined;
   const target = useMemo(() => bankCounters(bank), [bank])
   const counters = useSmoothed(target, props.intervalMs)
   const { books, clients } = bank
-  const restartedAt = clients && restartedAfterTheBank(clients.since, bank.startedAt)
+  const restartedAt = clients?.restarted ? clients.since : null
   const lastCrash = bank.chaos.recent.at(-1)
   const rejections = Object.entries(bank.totals.rejectionsByReason).filter(([, n]) => n > 0)
 

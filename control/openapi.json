@@ -306,6 +306,10 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "restarted" : {
+            "description" : "Whether clients sent before this generator started: the counts other than total then cover only its part.",
+            "type" : "boolean"
+          },
           "retries" : {
             "format" : "int64",
             "type" : "integer"
@@ -328,7 +332,7 @@
             } ]
           }
         },
-        "required" : [ "acknowledged", "baseTps", "gaveUp", "inFlight", "pulse", "refused", "requested", "retries", "since", "targetTps", "total" ],
+        "required" : [ "acknowledged", "baseTps", "gaveUp", "inFlight", "pulse", "refused", "requested", "restarted", "retries", "since", "targetTps", "total" ],
         "type" : "object"
       },
       "CreateSessionRequest" : {

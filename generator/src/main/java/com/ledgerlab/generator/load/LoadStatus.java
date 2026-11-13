@@ -41,12 +41,14 @@ public record LoadStatus(
     long notJournaled,
     long inFlight,
     @Schema(description = "Since the bank started, whichever generator sent; null until the journal was read, or while it cannot be.", nullable = true)
-    @Nullable ClientTotals total
+    @Nullable ClientTotals total,
+    @Schema(description = "Whether clients sent before this generator started, so its own counts are less than the total.")
+    boolean restarted
 ) {
-    public LoadStatus withTotal(@Nullable ClientTotals total) {
+    public LoadStatus withTotal(@Nullable ClientTotals total, boolean restarted) {
         return new LoadStatus(
             startedAt, baseTps, targetTps, pulse, requested, acknowledged, posted, rejected, rejectedByReason, failed, unknown, retries, refused,
-            duplicatesSent, skipped, notJournaled, inFlight, total);
+            duplicatesSent, skipped, notJournaled, inFlight, total, restarted);
     }
 
     @Schema(description = "A rise of the load above its base for a while.")

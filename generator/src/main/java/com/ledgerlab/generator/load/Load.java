@@ -510,6 +510,6 @@ public class Load implements SmartLifecycle {
             pulse == null ? null : new LoadStatus.Pulse(pulse.tps(), pulse.until()),
             requested.sum(), acknowledged.sum(), posted.sum(), rejected.sum(), byReason,
             failed.sum(), unknown.sum(), retries.sum(), refused.sum(), duplicatesSent.sum(),
-            skipped.sum(), notJournaled.sum(), open.get(), null);
+            skipped.sum(), notJournaled.sum(), open.get(), null, false);
     }
 }

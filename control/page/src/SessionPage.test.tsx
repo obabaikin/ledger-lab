@@ -69,8 +69,8 @@ describe('the open page', () => {
     expect(screen.getByTestId('clients-restarted')).toHaveTextContent(en.bank.clientsRestarted(hoursMinutes('2026-11-11T07:15:00Z'), '1,100', '3'))
   })
 
-  it('shows no line of the clients\' own counts when they started with the bank', async () => {
-    control({ 'GET /api/bank': { status: 200, body: bank({ clients: { ...bank().clients!, since: bank().startedAt } }) } })
+  it('shows no line of the clients\' own counts when no clients sent before them', async () => {
+    control({ 'GET /api/bank': { status: 200, body: bank({ clients: { ...bank().clients!, restarted: false } }) } })
     renderAt('/')
 
     expect(await screen.findByTestId('clients')).toBeInTheDocument()

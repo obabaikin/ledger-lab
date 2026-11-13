@@ -16,6 +16,7 @@ public record LoadStatus(
     long retries,
     long refused,
     long inFlight,
-    @Nullable ClientTotals total
+    @Nullable ClientTotals total,
+    boolean restarted
 ) {
 }

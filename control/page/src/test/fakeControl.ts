@@ -55,6 +55,7 @@ export const bank = (changes: Partial<BankView> = {}): BankView => ({
     retries: 0,
     inFlight: 5,
     total: { sent: 917_000, acknowledged: 916_000, gaveUp: 600, unanswered: 400 },
+    restarted: true,
   },
   pods: null,
   slo: { target: 0.999, windowDays: 30, measuredMinutes: 1000, badMinutes: 17, budgetMinutes: 43, plannedMinutes: 12, availability: 0.9983, busyShare: 0.004 },

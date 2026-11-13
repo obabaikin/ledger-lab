@@ -43,7 +43,7 @@ public class LoadController {
     @Operation(summary = "The load now, the clients' counts since this generator started and their totals since the bank started")
     @GetMapping
     public LoadStatus status() {
-        return load.status().withTotal(totals.current());
+        return load.status().withTotal(totals.current(), totals.othersSentBefore());
     }
 
     @Operation(summary = "Raise the load for a while; of several pulses the highest sets the pace")
