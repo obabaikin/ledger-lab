@@ -57,11 +57,6 @@ final class StatementComparison implements AutoCloseable {
         "o.sent_at >= :from AND o.sent_at < :end AND o.accepted_at >= :start AND o.accepted_at < :end AND o.outcome IN (:accepted)";
     private static final String NOT_IN_STATEMENT = "s.transfer_id IS NULL";
 
-    /**
-     * A join, not NOT EXISTS inside FILTER: Postgres cannot turn a subquery in an aggregate's filter into a join and ran
-     * it once per accepted transfer, an index probe of the temporary table each; on the server that read about 10 GB
-     * through 8 MB of temp_buffers for one period and passed the statement timeout.
-     */
     static final String LINE_COUNTS =
         """
         SELECT count(*) AS line_count,
@@ -74,12 +69,20 @@ final class StatementComparison implements AutoCloseable {
                count(*) FILTER (WHERE %s) AS status_mismatch
         FROM %s
         """.formatted(NOT_IN_JOURNAL, NOT_TAKEN_BUT_IN_STATEMENT, PAYLOAD_MISMATCH, STATUS_MISMATCH, LINES_WITH_JOURNAL);
+    /**
+     * A join, not NOT EXISTS inside FILTER: Postgres cannot turn a subquery in an aggregate's filter into a join and ran
+     * it once per accepted transfer, an index probe of the temporary table each; on the server that read about 10 GB
+     * through 8 MB of temp_buffers for one period and passed the statement timeout.
+     */
     static final String ACCEPTED_COUNTS =
         "SELECT count(*) AS accepted, count(*) FILTER (WHERE %s) AS not_in_statement FROM outcomes o LEFT JOIN %s s ON s.transfer_id = o.transfer_id WHERE %s"
             .formatted(NOT_IN_STATEMENT, LINES, ACCEPTED_IN_PERIOD);
-    private static final String NOT_IN_STATEMENT_EXAMPLES =
+    static final String NOT_IN_STATEMENT_EXAMPLES =
         "SELECT o.transfer_id FROM outcomes o LEFT JOIN %s s ON s.transfer_id = o.transfer_id WHERE %s AND %s ORDER BY o.transfer_id LIMIT :limit"
             .formatted(LINES, ACCEPTED_IN_PERIOD, NOT_IN_STATEMENT);
+
+    private static final List<String> RESTORE = List.of(
+        "DROP TABLE IF EXISTS " + LINES, "RESET statement_timeout", "RESET enable_nestloop", "RESET enable_mergejoin", "RESET work_mem");
 
     private final JdbcTemplate template;
     private final JdbcClient jdbc;
@@ -88,24 +91,33 @@ final class StatementComparison implements AutoCloseable {
         var onThisConnection = new SingleConnectionDataSource(connection, true);
         this.template = new JdbcTemplate(onThisConnection);
         this.jdbc = JdbcClient.create(onThisConnection);
-        template.execute("SET statement_timeout = '" + statementTimeout.toMillis() + "ms'");
-        // Every join here is a whole period against a whole period: one pass of each side through a hash, whatever the
-        // statistics say. A nested loop probes per row, and its cost depends on a cache the planner cannot see.
-        template.execute("SET enable_nestloop = off");
-        template.execute("SET enable_mergejoin = off");
-        template.execute("SET work_mem = '" + workMem.toKilobytes() + "kB'");
-        template.execute("DROP TABLE IF EXISTS " + LINES);
-        template.execute(
-            """
-            CREATE TEMP TABLE statement_lines (
-                transfer_id   uuid    PRIMARY KEY,
-                from_account  integer NOT NULL,
-                to_account    integer NOT NULL,
-                amount_cents  bigint  NOT NULL,
-                status        text,
-                reject_reason text
-            )
-            """);
+        try {
+            template.execute("SET statement_timeout = '" + statementTimeout.toMillis() + "ms'");
+            // Every join here is a whole period against a whole period: one pass of each side through a hash, whatever the
+            // statistics say. A nested loop probes per row, and its cost depends on a cache the planner cannot see.
+            template.execute("SET enable_nestloop = off");
+            template.execute("SET enable_mergejoin = off");
+            template.execute("SET work_mem = '" + workMem.toKilobytes() + "kB'");
+            template.execute("DROP TABLE IF EXISTS " + LINES);
+            template.execute(
+                """
+                CREATE TEMP TABLE statement_lines (
+                    transfer_id   uuid    PRIMARY KEY,
+                    from_account  integer NOT NULL,
+                    to_account    integer NOT NULL,
+                    amount_cents  bigint  NOT NULL,
+                    status        text,
+                    reject_reason text
+                )
+                """);
+        } catch (RuntimeException e) {
+            try {
+                restore();
+            } catch (RuntimeException notRestored) {
+                e.addSuppressed(notRestored);
+            }
+            throw e;
+        }
     }
 
     /** Fails with DuplicateKeyException for a transfer the statement has already listed. */
@@ -239,10 +251,25 @@ final class StatementComparison implements AutoCloseable {
     /** The connection goes back to the pool as it came. */
     @Override
     public void close() {
-        template.execute("DROP TABLE IF EXISTS " + LINES);
-        template.execute("RESET statement_timeout");
-        template.execute("RESET enable_nestloop");
-        template.execute("RESET enable_mergejoin");
-        template.execute("RESET work_mem");
+        restore();
+    }
+
+    /** Each step runs even when one before it failed; not RESET ALL, which would also drop the pool's search_path. */
+    private void restore() {
+        @Nullable RuntimeException failed = null;
+        for (var statement : RESTORE) {
+            try {
+                template.execute(statement);
+            } catch (RuntimeException e) {
+                if (failed == null) {
+                    failed = e;
+                } else {
+                    failed.addSuppressed(e);
+                }
+            }
+        }
+        if (failed != null) {
+            throw failed;
+        }
     }
 }

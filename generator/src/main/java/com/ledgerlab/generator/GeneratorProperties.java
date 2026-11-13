@@ -63,5 +63,13 @@ public record GeneratorProperties(
      * {@link #workMem} is Postgres's work_mem for the comparison's hash joins.
      */
     public record Reconciliation(Duration statementTimeout, DataSize workMem, int exampleLimit, int resolveConcurrency) {
+        /** Postgres refuses less, and only when the first reconciliation runs, an hour after the start. */
+        public static final DataSize MIN_WORK_MEM = DataSize.ofKilobytes(64);
+
+        public Reconciliation {
+            if (workMem.compareTo(MIN_WORK_MEM) < 0) {
+                throw new IllegalArgumentException("generator.reconciliation.work-mem must be at least " + MIN_WORK_MEM);
+            }
+        }
     }
 }
