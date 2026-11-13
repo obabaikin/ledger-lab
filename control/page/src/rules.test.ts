@@ -21,7 +21,12 @@ describe('live counts', () => {
   })
 
   it("leave the clients' counts unknown until the generator answered, the bank's known", () => {
-    expect(bankCounters(bank({ clients: null }))).toMatchObject({ accepted: 1000, requested: null, refused: null })
+    expect(bankCounters(bank({ clients: null }))).toMatchObject({ accepted: 1000, sent: null, refused: null })
+  })
+
+  it("count what the clients sent from the bank's start, and leave it unknown while the generator cannot read its journal", () => {
+    expect(bankCounters(bank()).sent).toBe(917_000)
+    expect(bankCounters(bank({ clients: { ...bank().clients!, total: null } })).sent).toBeNull()
   })
 })
 

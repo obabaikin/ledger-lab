@@ -3,7 +3,7 @@ package com.ledgerlab.control.generator;
 import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
-/** The part of the generator's load status control shows; the counts run from the generator's start. */
+/** The part of the generator's load status control shows; the counts run from the generator's start, the total from the bank's. */
 public record LoadStatus(
     @Nullable Instant startedAt,
     int baseTps,
@@ -15,6 +15,7 @@ public record LoadStatus(
     long unknown,
     long retries,
     long refused,
-    long inFlight
+    long inFlight,
+    @Nullable ClientTotals total
 ) {
 }

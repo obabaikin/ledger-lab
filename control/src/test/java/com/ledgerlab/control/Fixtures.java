@@ -115,10 +115,13 @@ final class Fixtures {
             "rejected", rejected, "postedAmountCents", POSTED_AMOUNT_CENTS, "rejectionsByReason", REASONS);
     }
 
+    /** Since the bank started: more than this generator has sent since its own start. */
+    static final Map<String, Object> TOTAL = mapOf("sent", 917_000, "acknowledged", 916_000, "gaveUp", 600, "unanswered", 400);
+
     static Map<String, Object> load() {
         return mapOf(
             "startedAt", "2026-11-10T08:00:00Z", "baseTps", 400, "targetTps", 400, "pulse", null, "requested", 5000, "acknowledged", 4980,
             "failed", 3, "unknown", 4, "retries", 9, "refused", 6, "inFlight", 13, "duplicatesSent", 2, "posted", 4500, "rejected", 480,
-            "rejectedByReason", Map.of(), "skipped", 0, "notJournaled", 0);
+            "rejectedByReason", Map.of(), "skipped", 0, "notJournaled", 0, "total", TOTAL);
     }
 }

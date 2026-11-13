@@ -1,6 +1,6 @@
 import type { PodView } from './api/client'
 import { FlowDots } from './FlowDots'
-import { count, hoursMinutes, shown } from './format'
+import { count, shown } from './format'
 import { inFlight } from './shownCounts'
 import { t } from './texts'
 import { useNarrow } from './useNarrow'
@@ -9,9 +9,9 @@ export const REPOSITORY_URL = 'https://github.com/obabaikin/ledger-lab'
 const CODE_URL = `${REPOSITORY_URL}/tree/main/`
 
 export type DiagramNumbers = {
-  requested: number | null
-  /** When the clients' own counts start: the generator counts from its start, not the bank's. */
-  clientsSince: string | null
+  /** Since the bank started, whichever generator sent. */
+  sent: number | null
+  gaveUp: number | null
   accepted: number | null
   posted: number | null
   rejected: number | null
@@ -19,8 +19,8 @@ export type DiagramNumbers = {
 }
 
 export const NO_NUMBERS: DiagramNumbers = {
-  requested: null,
-  clientsSince: null,
+  sent: null,
+  gaveUp: null,
   accepted: null,
   posted: null,
   rejected: null,
@@ -185,7 +185,7 @@ export function Diagram(props: {
   const { pods, rates } = props
   const numbers = props.numbers ?? NO_NUMBERS
   const bare = props.numbers === null
-  const { requested, accepted, posted, rejected } = numbers
+  const { sent, accepted, posted, rejected } = numbers
   const waiting = accepted === null || posted === null || rejected === null ? null : inFlight({ accepted, posted, rejected })
   const ledgerPods = pods === undefined ? undefined : (pods?.filter((p) => p.job === 'ledger') ?? null)
   const consuming = ledgerPods?.filter((p) => podState(p) === 'consuming').length
@@ -198,7 +198,7 @@ export function Diagram(props: {
           ? 'degraded'
           : ''
   const lines: Record<string, [string, string]> = bare ? {} : {
-    clients: [`${shown(requested)} sent`, numbers.clientsSince === null ? 'their own count' : t.bank.clientsSince(hoursMinutes(numbers.clientsSince))],
+    clients: [`${shown(sent)} sent`, numbers.gaveUp === null ? '' : t.bank.clientsGaveUp(count(numbers.gaveUp))],
     gateway: [`${shown(accepted)} accepted`, numbers.refused === null ? '' : `${count(numbers.refused)} refused (503)`],
     ledger: [`${shown(posted)} booked`, ledgerPods ? `${consuming} of ${ledgerPods.length} consuming` : ''],
   }

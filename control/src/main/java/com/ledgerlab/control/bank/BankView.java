@@ -3,6 +3,7 @@ package com.ledgerlab.control.bank;
 import com.ledgerlab.control.availability.MaintenanceWindow;
 import com.ledgerlab.control.availability.Slo;
 import com.ledgerlab.control.chaos.ChaosEvent;
+import com.ledgerlab.control.generator.ClientTotals;
 import com.ledgerlab.control.generator.Pulse;
 import com.ledgerlab.control.metrics.PodView;
 import com.ledgerlab.control.periods.PeriodNumbers;
@@ -45,9 +46,9 @@ public record BankView(
     public record BooksNow(long accounts, long openingTotalCents, long balanceTotalCents, boolean balanced, Instant readAt) {
     }
 
-    @Schema(description = "What the clients count, since the generator started.")
+    @Schema(description = "What the clients count: since the generator started, and in total since the bank started.")
     public record Clients(
-        @Schema(description = "When the generator started sending; null before.", nullable = true)
+        @Schema(description = "When the generator started sending; null before. The counts other than total run from it.", nullable = true)
         @Nullable Instant since,
         int baseTps,
         int targetTps,
@@ -60,7 +61,9 @@ public record BankView(
         @Schema(description = "Transfers the gateway refused as busy (503) at least once, retried or not.")
         long refused,
         long retries,
-        long inFlight
+        long inFlight,
+        @Schema(description = "Since the bank started; null while the generator cannot read its journal.", nullable = true)
+        @Nullable ClientTotals total
     ) {
     }
 

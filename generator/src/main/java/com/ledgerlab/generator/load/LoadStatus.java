@@ -1,12 +1,13 @@
 package com.ledgerlab.generator.load;
 
 import com.ledgerlab.generator.bank.RejectReason;
+import com.ledgerlab.generator.journal.ClientTotals;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
-@Schema(description = "The clients' load now and what became of their transfers since this generator started.")
+@Schema(description = "The clients' load now, what became of their transfers since this generator started, and in total since the bank started.")
 public record LoadStatus(
     @Schema(description = "When this generator began to send; null while the load is off. The counts start from zero with it.", nullable = true)
     @Nullable Instant startedAt,
@@ -38,8 +39,16 @@ public record LoadStatus(
     long skipped,
     @Schema(description = "Transfers not sent because the client journal could not store them first.")
     long notJournaled,
-    long inFlight
+    long inFlight,
+    @Schema(description = "Since the bank started, whichever generator sent; null until the journal was read, or while it cannot be.", nullable = true)
+    @Nullable ClientTotals total
 ) {
+    public LoadStatus withTotal(@Nullable ClientTotals total) {
+        return new LoadStatus(
+            startedAt, baseTps, targetTps, pulse, requested, acknowledged, posted, rejected, rejectedByReason, failed, unknown, retries, refused,
+            duplicatesSent, skipped, notJournaled, inFlight, total);
+    }
+
     @Schema(description = "A rise of the load above its base for a while.")
     public record Pulse(int tps, Instant until) {
     }

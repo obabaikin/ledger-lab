@@ -242,8 +242,35 @@
         "required" : [ "acceptedByJournal", "balanced", "breaks", "periodStart", "statement", "statementFinal", "unknownResolved" ],
         "type" : "object"
       },
+      "ClientTotals" : {
+        "description" : "What became of the clients' transfers since the bank started, whichever generator sent them.",
+        "properties" : {
+          "acknowledged" : {
+            "description" : "Transfers the bank took (any 2xx).",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gaveUp" : {
+            "description" : "Transfers whose client stopped trying: refused for good, or without an answer it could use.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sent" : {
+            "description" : "Transfers the clients sent.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unanswered" : {
+            "description" : "Sent, without an outcome yet: in flight, or given up and not yet asked about.",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "acknowledged", "gaveUp", "sent", "unanswered" ],
+        "type" : "object"
+      },
       "Clients" : {
-        "description" : "What the clients count, since the generator started.",
+        "description" : "What the clients count: since the generator started, and in total since the bank started.",
         "properties" : {
           "acknowledged" : {
             "format" : "int64",
@@ -284,16 +311,24 @@
             "type" : "integer"
           },
           "since" : {
-            "description" : "When the generator started sending; null before.",
+            "description" : "When the generator started sending; null before. The counts other than total run from it.",
             "format" : "date-time",
             "type" : [ "string", "null" ]
           },
           "targetTps" : {
             "format" : "int32",
             "type" : "integer"
+          },
+          "total" : {
+            "description" : "Since the bank started; null while the generator cannot read its journal.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ClientTotals"
+            }, {
+              "type" : "null"
+            } ]
           }
         },
-        "required" : [ "acknowledged", "baseTps", "gaveUp", "inFlight", "pulse", "refused", "requested", "retries", "since", "targetTps" ],
+        "required" : [ "acknowledged", "baseTps", "gaveUp", "inFlight", "pulse", "refused", "requested", "retries", "since", "targetTps", "total" ],
         "type" : "object"
       },
       "CreateSessionRequest" : {

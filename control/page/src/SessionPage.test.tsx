@@ -60,13 +60,21 @@ describe('the open page', () => {
     await waitFor(() => expect(screen.getByTestId('moved')).toHaveTextContent('€990.00'))
   })
 
-  it("shows the clients' counts with the time they count from, and how many transfers the clients gave up on", async () => {
+  it('shows on the scheme what the clients sent and gave up on since the bank started, and below it their own counts since they restarted', async () => {
     control()
     renderAt('/')
 
-    const since = hoursMinutes('2026-11-11T07:15:00Z')
-    expect(await screen.findByTestId('clients-note')).toHaveTextContent(en.bank.clientsSince(since))
-    expect(screen.getByTestId('clients')).toHaveTextContent(en.bank.gaveUp('3', `${dayAndMonth('2026-11-11T07:15:00Z')}, ${since}`))
+    await waitFor(() => expect(screen.getByTestId('clients-number')).toHaveTextContent('917,000 sent'))
+    expect(screen.getByTestId('clients-note')).toHaveTextContent(en.bank.clientsGaveUp('600'))
+    expect(screen.getByTestId('clients-restarted')).toHaveTextContent(en.bank.clientsRestarted(hoursMinutes('2026-11-11T07:15:00Z'), '1,100', '3'))
+  })
+
+  it('shows no line of the clients\' own counts when they started with the bank', async () => {
+    control({ 'GET /api/bank': { status: 200, body: bank({ clients: { ...bank().clients!, since: bank().startedAt } }) } })
+    renderAt('/')
+
+    expect(await screen.findByTestId('clients')).toBeInTheDocument()
+    expect(screen.queryByTestId('clients-restarted')).toBeNull()
   })
 
   it('shows every visitor a raised load and the last crash of the ledger', async () => {

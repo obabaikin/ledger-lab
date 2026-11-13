@@ -78,7 +78,7 @@ public class BankService {
                 ? null
                 : new BankView.Clients(
                     clients.startedAt(), clients.baseTps(), clients.targetTps(), clients.pulse(), clients.requested(), clients.acknowledged(),
-                    clients.failed() + clients.unknown(), clients.refused(), clients.retries(), clients.inFlight()),
+                    clients.failed() + clients.unknown(), clients.refused(), clients.retries(), clients.inFlight(), clients.total()),
             snapshot.pods(),
             availability.slo(now),
             windows.nextWindow(now),

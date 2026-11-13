@@ -43,8 +43,34 @@
         },
         "type" : "object"
       },
+      "ClientTotals" : {
+        "description" : "What became of the clients' transfers since the bank started, whichever generator sent them.",
+        "properties" : {
+          "acknowledged" : {
+            "description" : "Transfers the bank took (any 2xx).",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gaveUp" : {
+            "description" : "Transfers whose client stopped trying: refused for good, or without an answer, whatever the bank said when asked later.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sent" : {
+            "description" : "Transfers the clients sent: each intent the journal stored.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unanswered" : {
+            "description" : "Sent, without an outcome yet: in flight, or given up and not yet asked about.",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "LoadStatus" : {
-        "description" : "The clients' load now and what became of their transfers since this generator started.",
+        "description" : "The clients' load now, what became of their transfers since this generator started, and in total since the bank started.",
         "properties" : {
           "acknowledged" : {
             "description" : "Transfers the bank took (any 2xx).",
@@ -127,6 +153,13 @@
             "description" : "New transfers a second now, the highest pulse included.",
             "format" : "int32",
             "type" : "integer"
+          },
+          "total" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ClientTotals"
+            }, {
+              "type" : "null"
+            } ]
           },
           "unknown" : {
             "description" : "The client gave up without knowing whether the bank has the transfer.",
@@ -393,7 +426,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "The load now and the clients' counts since this generator started",
+        "summary" : "The load now, the clients' counts since this generator started and their totals since the bank started",
         "tags" : [ "load-controller" ]
       }
     },

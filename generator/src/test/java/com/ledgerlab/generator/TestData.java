@@ -70,6 +70,7 @@ public final class TestData {
                 new GeneratorProperties.Journal(500, Duration.ofMillis(5)),
                 new GeneratorProperties.Periods(Duration.ofHours(1), Duration.ofHours(4), Duration.ofHours(48), Duration.ofMinutes(1), Duration.ofSeconds(2), 100),
                 new GeneratorProperties.Reconciliation(Duration.ofSeconds(60), DataSize.ofMegabytes(32), 20, 16),
+                new GeneratorProperties.Totals(Duration.ofSeconds(1), Duration.ofMinutes(1)),
                 new ProfileProperties(duplicateDelays.isEmpty() ? 0.0 : 1.0, duplicateDelays, INVALID_SHARE, INVALID_SHARE));
         }
 

@@ -2,6 +2,7 @@ package com.ledgerlab.generator.load;
 
 import com.ledgerlab.generator.ApiError;
 import com.ledgerlab.generator.GeneratorErrors;
+import com.ledgerlab.generator.journal.ClientTotalsStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -31,16 +32,18 @@ public class LoadController {
 
     private final Load load;
     private final ResponseMinutes minutes;
+    private final ClientTotalsStore totals;
 
-    public LoadController(Load load, ResponseMinutes minutes) {
+    public LoadController(Load load, ResponseMinutes minutes, ClientTotalsStore totals) {
         this.load = load;
         this.minutes = minutes;
+        this.totals = totals;
     }
 
-    @Operation(summary = "The load now and the clients' counts since this generator started")
+    @Operation(summary = "The load now, the clients' counts since this generator started and their totals since the bank started")
     @GetMapping
     public LoadStatus status() {
-        return load.status();
+        return load.status().withTotal(totals.current());
     }
 
     @Operation(summary = "Raise the load for a while; of several pulses the highest sets the pace")
@@ -54,7 +57,7 @@ public class LoadController {
             throw new InvalidPulseException("a pulse needs tps and seconds");
         }
         load.pulse(tps, Duration.ofSeconds(seconds));
-        return load.status();
+        return status();
     }
 
     @Operation(summary = "The bank's answers to the clients by minute, for the minutes that are over")

@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ledgerlab.generator.GeneratorErrors;
 import com.ledgerlab.generator.IntegrationTest;
+import com.ledgerlab.generator.journal.ClientTotals;
+import com.ledgerlab.generator.journal.ClientTotalsStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
@@ -16,6 +19,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 class LoadApiTest extends IntegrationTest {
+
+    @Autowired ClientTotalsStore totals;
 
     private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT = new ParameterizedTypeReference<>() {
     };
@@ -31,6 +36,16 @@ class LoadApiTest extends IntegrationTest {
         assertThat(status.baseTps()).isEqualTo(props.load().tps());
         assertThat(status.startedAt()).as("the test profile keeps the load off").isNull();
         assertThat(status.requested()).isZero();
+    }
+
+    @Test
+    void the_load_reports_the_clients_totals_since_the_bank_started() {
+        jdbcTemplate.update("UPDATE client_totals SET sent = 100, acknowledged = 60, failed = 5, unknown_accepted = 7, unknown_not_accepted = 11");
+        totals.refresh();
+
+        var total = http.getForObject("/internal/load", LoadStatus.class).total();
+
+        assertThat(total).isEqualTo(new ClientTotals(100, 60, 5 + 7 + 11, 100 - 60 - 23));
     }
 
     @Test

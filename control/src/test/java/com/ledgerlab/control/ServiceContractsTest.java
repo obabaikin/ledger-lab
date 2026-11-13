@@ -10,6 +10,7 @@ import com.ledgerlab.control.generator.ClientReconciliation;
 import com.ledgerlab.control.generator.ClientReconciliationReport;
 import com.ledgerlab.control.generator.ClientReconciliationState;
 import com.ledgerlab.control.generator.GeneratorApi;
+import com.ledgerlab.control.generator.ClientTotals;
 import com.ledgerlab.control.generator.LoadStatus;
 import com.ledgerlab.control.generator.MinuteResponses;
 import com.ledgerlab.control.generator.MinutesPage;
@@ -120,6 +121,7 @@ class ServiceContractsTest {
         new Model(generator, TransferSide.class),
         new Model(generator, UnknownResolved.class),
         new Model(generator, LoadStatus.class),
+        new Model(generator, ClientTotals.class),
         new Model(generator, Pulse.class),
         new Model(generator, MinutesPage.class),
         new Model(generator, MinuteResponses.class),

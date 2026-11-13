@@ -89,10 +89,10 @@ export const en = {
     was: (opening: string) => `was ${opening}`,
     rejected: (total: string) => `Rejected ${total}`,
     noRejections: 'Nothing rejected',
-    clientsSince: (time: string) => `since ${time}`,
+    clientsGaveUp: (count: string) => `${count} gave up`,
     clientsSending: (tps: string) => `Clients send ${tps} transfers/s.`,
     pulse: (tps: string, until: string, base: string) => `Load raised to ${tps} transfers/s until ${until}, then back to ${base}.`,
-    gaveUp: (count: string, since: string) => `Clients gave up on ${count} transfers since ${since}.`,
+    clientsRestarted: (time: string, sent: string, gaveUp: string) => `Since clients restarted at ${time}: ${sent} sent, ${gaveUp} gave up.`,
     lastCrash: (at: string, instances: number) => `Last ledger crash: ${at}, ${instances} instances.`,
     rejectReason: {
       INVALID_AMOUNT: 'invalid amount',

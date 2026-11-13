@@ -6,7 +6,6 @@ import com.ledgerlab.generator.bank.RejectReason;
 import com.ledgerlab.generator.bank.TransferStatus;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +13,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,11 +35,17 @@ public class JournalWriter implements ClientJournal, SmartLifecycle {
 
     private static final String INSERT_INTENT =
         "INSERT INTO intents (sent_at, transfer_id, from_account, to_account, amount_cents) VALUES (?, ?, ?, ?, ?)";
-    /** The first outcome stands: one written again, or after the bank was asked, adds nothing. */
-    static final String INSERT_OUTCOME =
+    /**
+     * The first outcome stands: one written again, or after the bank was asked, adds nothing. One statement over arrays,
+     * not a batch: with reWriteBatchedInserts the driver does not tell which rows of a batch went in, and the totals
+     * count only those.
+     */
+    static final String INSERT_OUTCOMES =
         """
-        INSERT INTO outcomes (sent_at, transfer_id, outcome, bank_status, reject_reason, accepted_at) VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO outcomes (sent_at, transfer_id, outcome, bank_status, reject_reason, accepted_at)
+        SELECT * FROM unnest(CAST(? AS timestamptz[]), CAST(? AS uuid[]), CAST(? AS text[]), CAST(? AS text[]), CAST(? AS text[]), CAST(? AS timestamptz[]))
         ON CONFLICT DO NOTHING
+        RETURNING outcome
         """;
 
     private static final Logger log = LoggerFactory.getLogger(JournalWriter.class);
@@ -110,7 +116,7 @@ public class JournalWriter implements ClientJournal, SmartLifecycle {
 
     /** Written at once, for the caller that asked the bank about unknown transfers and goes on only when they are stored. */
     public void writeNow(List<Outcome> outcomes) {
-        insertOutcomes(outcomes);
+        tx.executeWithoutResult(status -> TotalsDelta.of(0, insertOutcomes(outcomes)).insert(jdbc));
     }
 
     private void write() {
@@ -142,7 +148,7 @@ public class JournalWriter implements ClientJournal, SmartLifecycle {
         try {
             tx.executeWithoutResult(status -> {
                 insertIntents(intents);
-                insertOutcomes(outcomes);
+                TotalsDelta.of(intents.size(), insertOutcomes(outcomes)).insert(jdbc);
             });
             intents.forEach(intent -> intent.written().complete(null));
             if (failedInARow > 0) {
@@ -169,18 +175,24 @@ public class JournalWriter implements ClientJournal, SmartLifecycle {
         });
     }
 
-    private void insertOutcomes(List<Outcome> outcomes) {
+    private List<JournalOutcome> insertOutcomes(List<Outcome> outcomes) {
         if (outcomes.isEmpty()) {
-            return;
+            return List.of();
         }
-        jdbc.batchUpdate(INSERT_OUTCOME, outcomes, outcomes.size(), (statement, outcome) -> {
-            statement.setObject(1, Sql.timestamptz(outcome.sentAt()));
-            statement.setObject(2, outcome.transferId());
-            statement.setString(3, outcome.outcome().name());
-            statement.setString(4, Sql.nullableName(outcome.bankStatus()));
-            statement.setString(5, Sql.nullableName(outcome.rejectReason()));
-            statement.setObject(6, Sql.nullableTimestamptz(outcome.acceptedAt()), Types.TIMESTAMP_WITH_TIMEZONE);
-        });
+        return jdbc.query(connection -> {
+            var statement = connection.prepareStatement(INSERT_OUTCOMES);
+            statement.setArray(1, connection.createArrayOf("text", texts(outcomes, outcome -> outcome.sentAt().toString())));
+            statement.setArray(2, connection.createArrayOf("text", texts(outcomes, outcome -> outcome.transferId().toString())));
+            statement.setArray(3, connection.createArrayOf("text", texts(outcomes, outcome -> outcome.outcome().name())));
+            statement.setArray(4, connection.createArrayOf("text", texts(outcomes, outcome -> Sql.nullableName(outcome.bankStatus()))));
+            statement.setArray(5, connection.createArrayOf("text", texts(outcomes, outcome -> Sql.nullableName(outcome.rejectReason()))));
+            statement.setArray(6, connection.createArrayOf("text", texts(outcomes, outcome -> Sql.nullableText(outcome.acceptedAt()))));
+            return statement;
+        }, (rs, row) -> JournalOutcome.valueOf(rs.getString("outcome")));
+    }
+
+    private static @Nullable String[] texts(List<Outcome> outcomes, Function<Outcome, @Nullable String> column) {
+        return outcomes.stream().map(column).toArray(String[]::new);
     }
 
     @Override

@@ -20,6 +20,7 @@ public record GeneratorProperties(
     Journal journal,
     Periods periods,
     Reconciliation reconciliation,
+    Totals totals,
     ProfileProperties profile
 ) {
     /**
@@ -56,6 +57,10 @@ public record GeneratorProperties(
                 throw new IllegalArgumentException("generator.periods.length must be whole minutes, at least one");
             }
         }
+    }
+
+    /** The clients' totals are read every {@link #readInterval} and their increments folded every {@link #rollupInterval}. */
+    public record Totals(Duration readInterval, Duration rollupInterval) {
     }
 
     /**

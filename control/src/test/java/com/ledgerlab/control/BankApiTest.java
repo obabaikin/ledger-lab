@@ -130,7 +130,7 @@ class BankApiTest extends BankIntegrationTest {
         var bank = bank();
         assertThat(bank.get("clients")).isEqualTo(mapOf(
             "since", "2026-11-10T08:00:00Z", "baseTps", 400, "targetTps", 400, "pulse", null, "requested", 5000, "acknowledged", 4980,
-            "gaveUp", 7, "refused", 6, "retries", 9, "inFlight", 13));
+            "gaveUp", 7, "refused", 6, "retries", 9, "inFlight", 13, "total", Fixtures.TOTAL));
         var books = (Map<?, ?>) bank.get("books");
         assertThat(Arrays.asList(books.get("accounts"), books.get("balanced"))).isEqualTo(Arrays.asList((int) Fixtures.ACCOUNTS, true));
         assertThat(bank.get("pods")).isEqualTo(List.of(

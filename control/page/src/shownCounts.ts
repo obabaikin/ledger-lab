@@ -14,7 +14,7 @@ export function inFlight(t: BankCounts): number {
   return Math.max(0, t.accepted - t.posted - t.rejected)
 }
 
-export type BankCounters = { accepted: number; posted: number; rejected: number; movedCents: number; requested: number | null; refused: number | null }
+export type BankCounters = { accepted: number; posted: number; rejected: number; movedCents: number; sent: number | null; refused: number | null }
 
 export function bankCounters(bank: BankView): BankCounters {
   const t = bank.totals
@@ -23,7 +23,7 @@ export function bankCounters(bank: BankView): BankCounters {
     posted: t.posted,
     rejected: t.rejected,
     movedCents: t.postedAmountCents,
-    requested: bank.clients?.requested ?? null,
+    sent: bank.clients?.total?.sent ?? null,
     refused: bank.clients?.refused ?? null,
   }
 }

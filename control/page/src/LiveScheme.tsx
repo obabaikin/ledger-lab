@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { BankView } from './api/client'
 import { Diagram, PodLegend } from './Diagram'
-import { clock, count, dayAndMonth, euros, hoursMinutes, shown } from './format'
+import { clock, count, euros, hoursMinutes, shown } from './format'
 import { bankCounters } from './shownCounts'
 import { useSmoothed } from './smooth'
 import { t } from './texts'
@@ -10,11 +10,17 @@ import { t } from './texts'
  * The diagram and the counters under it. The counters move every frame between two snapshots, so they live here: a frame
  * redraws this part, not the page.
  */
+/** The clients' own counts differ from the totals only when their generator started after the bank; null otherwise. */
+function restartedAfterTheBank(clientsSince: string | null, bankStartedAt: string | null): string | null {
+  return clientsSince !== null && bankStartedAt !== null && Date.parse(clientsSince) > Date.parse(bankStartedAt) ? clientsSince : null
+}
+
 export function LiveScheme(props: { bank: BankView; rates: number[] | undefined; intervalMs: number }) {
   const { bank } = props
   const target = useMemo(() => bankCounters(bank), [bank])
   const counters = useSmoothed(target, props.intervalMs)
   const { books, clients } = bank
+  const restartedAt = clients && restartedAfterTheBank(clients.since, bank.startedAt)
   const lastCrash = bank.chaos.recent.at(-1)
   const rejections = Object.entries(bank.totals.rejectionsByReason).filter(([, n]) => n > 0)
 
@@ -22,8 +28,8 @@ export function LiveScheme(props: { bank: BankView; rates: number[] | undefined;
     <>
       <Diagram
         numbers={{
-          requested: counters?.requested ?? null,
-          clientsSince: clients?.since ?? null,
+          sent: counters?.sent ?? null,
+          gaveUp: clients?.total?.gaveUp ?? null,
           accepted: counters?.accepted ?? null,
           posted: counters?.posted ?? null,
           rejected: counters?.rejected ?? null,
@@ -66,7 +72,7 @@ export function LiveScheme(props: { bank: BankView; rates: number[] | undefined;
           {clients.pulse
             ? t.bank.pulse(count(clients.pulse.tps), clock(clients.pulse.until), count(clients.baseTps))
             : t.bank.clientsSending(count(clients.targetTps))}
-          {clients.since && <> {t.bank.gaveUp(count(clients.gaveUp), `${dayAndMonth(clients.since)}, ${hoursMinutes(clients.since)}`)}</>}
+          {restartedAt && <span data-testid="clients-restarted"> {t.bank.clientsRestarted(hoursMinutes(restartedAt), count(clients.requested), count(clients.gaveUp))}</span>}
         </p>
       )}
       {lastCrash && (

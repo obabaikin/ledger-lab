@@ -15,8 +15,8 @@ public final class Sql {
         return instant.atOffset(ZoneOffset.UTC);
     }
 
-    static @Nullable OffsetDateTime nullableTimestamptz(@Nullable Instant instant) {
-        return instant == null ? null : timestamptz(instant);
+    static @Nullable String nullableText(@Nullable Object value) {
+        return value == null ? null : value.toString();
     }
 
     public static @Nullable String nullableName(@Nullable Enum<?> value) {

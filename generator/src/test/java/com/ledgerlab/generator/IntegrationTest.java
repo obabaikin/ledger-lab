@@ -22,7 +22,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * One generator with its journal for all tests of a context, and one stand-in bank: each test starts with an empty
- * journal and a bank that has seen nothing, and puts the transfers of a period it reconciles into the last ended one.
+ * journal, zero totals and a bank that has seen nothing, and puts the transfers of a period it reconciles into the last ended one.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
@@ -46,6 +46,8 @@ public abstract class IntegrationTest {
     void emptyJournalAndBank() {
         jdbcTemplate.update("DELETE FROM outcomes");
         jdbcTemplate.update("DELETE FROM intents");
+        jdbcTemplate.update("DELETE FROM client_totals_delta");
+        jdbcTemplate.update("UPDATE client_totals SET sent = 0, acknowledged = 0, failed = 0, unknown_accepted = 0, unknown_not_accepted = 0");
         gateway.reset(FakeGateway.with().periodLength(props.periods().length()));
     }
 
