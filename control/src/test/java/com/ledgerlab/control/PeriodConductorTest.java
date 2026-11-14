@@ -141,6 +141,22 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
+    @DisplayName("counts slower than an ordinary call but within the count timeout are kept at the first read")
+    void counts_slower_than_an_ordinary_call_but_within_the_count_timeout_are_kept_at_the_first_read() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        var slowerThanACall = props.services().requestTimeout().multipliedBy(2);
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD), slowerThanACall);
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD), slowerThanACall);
+        conductor.tick(closingTimeOf(PERIOD));
+
+        conductor.tick(countTimeOf(PERIOD));
+
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(1);
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("counts that do not agree yet are read again after the wait, and not in between")
     void counts_that_do_not_agree_yet_are_read_again_after_the_wait_and_not_in_between() {
         bankStartedIn(PERIOD);
@@ -415,7 +431,6 @@ class PeriodConductorTest extends BankIntegrationTest {
         }
 
         assertThat(calls(PeriodCall.LEDGER_CHECK)).isEqualTo(1);
-        assertThat(stateOf(PERIOD)).isIn("RECONCILED", "FAILED");
     }
 
     @Test

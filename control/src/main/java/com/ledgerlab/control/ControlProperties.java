@@ -42,15 +42,17 @@ public record ControlProperties(
         Duration checkWait,
         Duration retryWait,
         Duration verdictDeadline,
-        Duration detailsRetention
+        Duration detailsRetention,
+        Duration countTimeout
     ) {
         public Periods {
             if (length.isZero() || length.isNegative() || !length.equals(Duration.ofMinutes(length.toMinutes()))) {
                 throw new IllegalArgumentException("periods.length must be whole minutes, got " + length);
             }
-            if (!closeDelay.isPositive() || !checkWait.isPositive() || !retryWait.isPositive()) {
+            if (!closeDelay.isPositive() || !checkWait.isPositive() || !retryWait.isPositive() || !countTimeout.isPositive()) {
                 throw new IllegalArgumentException(
-                    "periods.close-delay, check-wait and retry-wait must be positive, got " + closeDelay + ", " + checkWait + ", " + retryWait);
+                    "periods.close-delay, check-wait, retry-wait and count-timeout must be positive, got " + closeDelay + ", " + checkWait + ", "
+                        + retryWait + ", " + countTimeout);
             }
             if (closeDelay.compareTo(settleDelay) >= 0 || settleDelay.compareTo(verdictDeadline) >= 0
                 || verdictDeadline.compareTo(length.plus(closeDelay)) >= 0) {

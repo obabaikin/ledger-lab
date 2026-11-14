@@ -44,6 +44,9 @@ control:
     verdict-deadline: 40m
     # The bank's retention of transfers: the same value as in its services.
     details-retention: 4h
+    # The counts read the whole period: the gateway's took up to 5.6 s on the server (Prometheus, 2026-11-14), over
+    # services.request-timeout, and a count not answered in time is made again only after retry-wait.
+    count-timeout: 30s
   bank:
     books-interval: 1m
     recent-chaos: 2h

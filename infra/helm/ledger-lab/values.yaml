@@ -158,6 +158,8 @@ services:
     module: generator
     port: 8082
     replicas: 1
+    # The clients go on sending while the new pod warms up; two at once share the journal's totals.
+    rollingUpdate: true
     # The bank's clients. Sized when the journals of a run stayed on the heap (at most 179 MiB live at 279,000 entries,
     # measured on the server); the journal is in Postgres now, and the heap holds the requests in flight.
     memory: 1280Mi
@@ -176,6 +178,8 @@ services:
     module: reporting
     port: 8084
     replicas: 1
+    # The page's numbers go on while the new pod catches up.
+    rollingUpdate: true
     memory: 448Mi
 
 # Mailed invites (ADR 0017). Empty in k3d: no Turnstile check, every mail logged as not sent, no operator on the

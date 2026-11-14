@@ -13,9 +13,10 @@ class ControlPropertiesTest {
     private static final Duration MINUTE = Duration.ofMinutes(1);
     private static final Duration FIVE_MINUTES = Duration.ofMinutes(5);
     private static final Duration RETENTION = Duration.ofHours(4);
+    private static final Duration COUNT_TIMEOUT = Duration.ofSeconds(30);
 
     private static ControlProperties.Periods periods(Duration length, Duration closeDelay, Duration settleDelay, Duration verdictDeadline) {
-        return new ControlProperties.Periods(length, closeDelay, settleDelay, FIVE_MINUTES, FIVE_MINUTES, verdictDeadline, RETENTION);
+        return new ControlProperties.Periods(length, closeDelay, settleDelay, FIVE_MINUTES, FIVE_MINUTES, verdictDeadline, RETENTION, COUNT_TIMEOUT);
     }
 
     @Test
@@ -38,9 +39,11 @@ class ControlPropertiesTest {
     @Test
     @DisplayName("waits that are not positive stop the start")
     void waits_that_are_not_positive_stop_the_start() {
-        assertThatThrownBy(() -> new ControlProperties.Periods(HOUR, MINUTE, Duration.ofMinutes(10), Duration.ZERO, FIVE_MINUTES, Duration.ofMinutes(40), RETENTION))
+        assertThatThrownBy(() -> new ControlProperties.Periods(HOUR, MINUTE, Duration.ofMinutes(10), Duration.ZERO, FIVE_MINUTES, Duration.ofMinutes(40), RETENTION, COUNT_TIMEOUT))
             .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ControlProperties.Periods(HOUR, MINUTE, Duration.ofMinutes(10), FIVE_MINUTES, Duration.ZERO, Duration.ofMinutes(40), RETENTION))
+        assertThatThrownBy(() -> new ControlProperties.Periods(HOUR, MINUTE, Duration.ofMinutes(10), FIVE_MINUTES, Duration.ZERO, Duration.ofMinutes(40), RETENTION, COUNT_TIMEOUT))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ControlProperties.Periods(HOUR, MINUTE, Duration.ofMinutes(10), FIVE_MINUTES, FIVE_MINUTES, Duration.ofMinutes(40), RETENTION, Duration.ZERO))
             .isInstanceOf(IllegalArgumentException.class);
     }
 }

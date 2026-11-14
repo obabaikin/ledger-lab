@@ -5,6 +5,7 @@ import static com.ledgerlab.control.http.ServiceHttp.forPeriod;
 import com.ledgerlab.control.ControlProperties;
 import com.ledgerlab.control.http.Reply;
 import com.ledgerlab.control.http.ServiceHttp;
+import java.time.Duration;
 import java.time.Instant;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -13,13 +14,15 @@ import tools.jackson.databind.ObjectMapper;
 public class LedgerClient {
 
     private final ServiceHttp http;
+    private final Duration countTimeout;
 
     public LedgerClient(ControlProperties props, ObjectMapper objectMapper) {
         this.http = new ServiceHttp(props.ledger().baseUrl(), props.services().requestTimeout(), objectMapper);
+        this.countTimeout = props.periods().countTimeout();
     }
 
     public Reply<LedgerReconciliation> reconciliation(Instant periodStart) throws InterruptedException {
-        return http.call("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, periodStart), LedgerReconciliation.class);
+        return http.call("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, periodStart), LedgerReconciliation.class, countTimeout);
     }
 
     public Reply<LedgerCheckState> check(Instant periodStart) throws InterruptedException {
