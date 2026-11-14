@@ -3,6 +3,7 @@ package com.ledgerlab.gateway;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ledgerlab.gateway.service.ExpiredKeys;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -17,6 +18,7 @@ class IdempotencyWindowTest extends IntegrationTest {
     private static final Duration MARGIN = Duration.ofMinutes(1);
 
     @Autowired ExpiredKeys expiredKeys;
+    @Autowired MeterRegistry registry;
 
     private Instant justInsideTheWindow() {
         return Instant.now().minus(props.periods().retention()).plus(MARGIN);
@@ -82,5 +84,19 @@ class IdempotencyWindowTest extends IntegrationTest {
         }
 
         assertThat(expiredKeys.delete(Instant.now())).isEqualTo(count);
+    }
+
+    @Test
+    void a_cleanup_records_its_time_and_counts_the_keys_it_deleted() {
+        acceptedAt(justPastTheWindow());
+        acceptedAt(justPastTheWindow());
+        acceptedAt(justInsideTheWindow());
+        var cleanups = registry.get(ExpiredKeys.CLEANUP_METRIC).timer().count();
+        var deletedBefore = registry.get(ExpiredKeys.DELETED_METRIC).counter().count();
+
+        var deleted = expiredKeys.delete(Instant.now());
+
+        assertThat(registry.get(ExpiredKeys.CLEANUP_METRIC).timer().count()).isEqualTo(cleanups + 1);
+        assertThat(registry.get(ExpiredKeys.DELETED_METRIC).counter().count() - deletedBefore).isEqualTo((double) deleted).isEqualTo(2);
     }
 }
