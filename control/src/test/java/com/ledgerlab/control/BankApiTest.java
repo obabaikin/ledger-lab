@@ -16,7 +16,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ledgerlab.control.gateway.GatewayApi;
 import com.ledgerlab.control.generator.GeneratorApi;
 import com.ledgerlab.control.ledger.LedgerApi;
+import com.ledgerlab.control.bank.SeriesName;
+import com.ledgerlab.control.bank.SeriesService;
 import com.ledgerlab.control.metrics.BankMetrics;
+import com.ledgerlab.control.metrics.PrometheusClient;
 import com.ledgerlab.control.metrics.PrometheusApi;
 import com.ledgerlab.control.periods.Period;
 import com.ledgerlab.control.reporting.ReportingApi;
@@ -33,6 +36,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 class BankApiTest extends BankIntegrationTest {
 
     @Autowired DatabaseClock clock;
+    @Autowired PrometheusClient prometheusClient;
 
     private Map<String, Object> bank() {
         var answer = get("/api/bank");
@@ -243,13 +247,18 @@ class BankApiTest extends BankIntegrationTest {
     void the_bank_shows_the_budget_of_bad_minutes_and_how_much_of_it_is_used() {
         jdbc.sql(
             """
-            INSERT INTO availability_hours (hour, measured_minutes, bad_minutes, planned_minutes, total, errors, busy)
-            VALUES (date_trunc('hour', now() - interval '2 days', 'UTC'), 60, 13, 5, 1000000, 0, 20000)
+            INSERT INTO availability_hours (hour, measured_minutes, bad_minutes, planned_minutes, outside_minutes, total, errors, busy,
+                                            fresh_measured, fresh_bad, fresh_planned, fresh_outside)
+            VALUES (date_trunc('hour', now() - interval '2 days', 'UTC'), 60, 13, 5, 3, 1000000, 0, 20000, 58, 7, 2, 4)
             """).update();
 
-        assertThat(bank().get("slo")).isEqualTo(mapOf(
+        var bank = bank();
+
+        assertThat(bank.get("slo")).isEqualTo(mapOf(
             "target", 0.999, "windowDays", 30, "measuredMinutes", 60, "badMinutes", 13, "budgetMinutes", 43, "plannedMinutes", 5,
-            "availability", 42.0 / 55, "busyShare", 0.02));
+            "outsideMinutes", 3, "availability", 39.0 / 52, "busyShare", 0.02));
+        assertThat(bank.get("freshness")).isEqualTo(mapOf(
+            "target", 0.999, "thresholdMs", 2000, "badMinutes", 7, "budgetMinutes", 43, "plannedMinutes", 2, "outsideMinutes", 4));
     }
 
     @Test
@@ -300,9 +309,57 @@ class BankApiTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("a range other than the one served is refused with its code")
-    void a_range_other_than_the_one_served_is_refused_with_its_code() {
-        List.of("24h", "soon").forEach(range -> {
+    @DisplayName("each range has its own step, number of points and window of the rates; without a range the charts cover 2 hours")
+    void each_range_has_its_own_step_number_of_points_and_window_of_the_rates_without_a_range_the_charts_cover_2_hours() {
+        prometheus.answer("GET", PrometheusApi.QUERY_RANGE_PATH, 200, mapOf("status", "success", "data", mapOf("resultType", "matrix", "result", List.of())));
+        record Served(String path, int stepSeconds, int points, String window) {
+        }
+
+        for (var served : List.of(
+            new Served("/api/bank/series?range=5m", 5, 61, "[15s]"),
+            new Served("/api/bank/series?range=30m", 15, 121, "[30s]"),
+            new Served("/api/bank/series", 30, 241, "[1m]"))) {
+            prometheus.calls.clear();
+
+            var charts = get(served.path()).getBody();
+
+            assertThat(charts.get("stepSeconds")).as(served.path()).isEqualTo(served.stepSeconds());
+            assertThat(charts.get("points")).as(served.path()).isEqualTo(served.points());
+            assertThat(prometheus.callsTo("GET", PrometheusApi.QUERY_RANGE_PATH)).as(served.path()).hasSize(SeriesName.values().length).allSatisfy(call -> {
+                assertThat(call.params().get("query")).contains(served.window());
+                assertThat(call.params().get("step")).isEqualTo(String.valueOf(served.stepSeconds()));
+            });
+        }
+    }
+
+    @Test
+    @DisplayName("the latency is read from the gateway's histogram, as p50 and p99 over its buckets")
+    void the_latency_is_read_from_the_gateways_histogram_as_p50_and_p99_over_its_buckets() {
+        assertThat(SeriesName.BANK_LATENCY_P50_MS.query(Duration.ofMinutes(1)))
+            .isEqualTo("1000 * histogram_quantile(0.5, sum by (le) (rate(gateway_transfer_latency_seconds_bucket[1m])))");
+        assertThat(SeriesName.BANK_LATENCY_P99_MS.query(Duration.ofSeconds(15)))
+            .isEqualTo("1000 * histogram_quantile(0.99, sum by (le) (rate(gateway_transfer_latency_seconds_bucket[15s])))");
+    }
+
+    @Test
+    @DisplayName("each range keeps its own answer: a short range asked right after the long one is read from monitoring")
+    void each_range_keeps_its_own_answer_a_short_range_asked_right_after_the_long_one_is_read_from_monitoring() throws Exception {
+        prometheus.answer("GET", PrometheusApi.QUERY_RANGE_PATH, 200, mapOf("status", "success", "data", mapOf("resultType", "matrix", "result", List.of())));
+        var kept = new SeriesService(prometheusClient, new ControlProperties.Series(props.series().ranges(), Duration.ofHours(2), Duration.ofHours(1)));
+        var reads = SeriesName.values().length;
+
+        kept.series("2h");
+        kept.series("2h");
+        assertThat(prometheus.callsTo("GET", PrometheusApi.QUERY_RANGE_PATH)).hasSize(reads);
+
+        assertThat(kept.series("5m").stepSeconds()).isEqualTo(5);
+        assertThat(prometheus.callsTo("GET", PrometheusApi.QUERY_RANGE_PATH)).hasSize(2 * reads);
+    }
+
+    @Test
+    @DisplayName("a range other than those served is refused with its code")
+    void a_range_other_than_those_served_is_refused_with_its_code() {
+        List.of("24h", "1d", "soon").forEach(range -> {
             var answer = get("/api/bank/series?range=" + range);
             assertThat(answer.getStatusCode().value()).as(range).isEqualTo(400);
             assertThat(answer.getBody().get("error")).as(range).isEqualTo("invalid-range");

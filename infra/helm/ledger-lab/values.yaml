@@ -40,6 +40,10 @@ load:
 maintenance:
   # A window declared this long before its start keeps its bad minutes out of the error budget.
   noticeHours: 3
+slo:
+  # A transfer slower than this from acceptance to result is slow: the gateway's histogram has a bucket at it, and
+  # control counts a minute with more than 1 % of them as bad (docs/guides/slo.md).
+  freshnessThreshold: 2s
 
 # The services' roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand
 # in Postgres. The monitor role is created or updated on every install and upgrade.

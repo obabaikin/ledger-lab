@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { bank, fakeControl, series, type Answer } from './test/fakeControl'
+import { bank, fakeControl, series, SERIES, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
 import { en } from './texts/en'
 
@@ -32,7 +32,7 @@ function bankThatMoves() {
       }
     },
     'GET /api/bank/periods?limit=10': { status: 200, body: { periods: [] } },
-    'GET /api/bank/series': { status: 200, body: series() },
+    [SERIES]: { status: 200, body: series() },
   })
   return state
 }

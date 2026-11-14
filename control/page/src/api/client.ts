@@ -14,6 +14,11 @@ export type SiteView = Schemas['SiteView']
 
 const PERIODS_LISTED = 10
 
+/** The ranges control serves its charts for (`control.series.ranges`). */
+export const CHART_RANGES = ['5m', '30m', '2h'] as const
+export type ChartRange = (typeof CHART_RANGES)[number]
+export const DEFAULT_CHART_RANGE: ChartRange = '2h'
+
 export class ApiFailure extends Error {
   constructor(
     readonly status: number,
@@ -48,7 +53,7 @@ export const api = {
   bank: () => call<BankView>('/api/bank'),
   periods: () => call<Schemas['PeriodList']>(`/api/bank/periods?limit=${PERIODS_LISTED}`),
   period: (start: string) => call<PeriodDetails>(`/api/bank/periods/${encodeURIComponent(start)}`),
-  series: () => call<SeriesView>('/api/bank/series'),
+  series: (range: ChartRange) => call<SeriesView>(`/api/bank/series?range=${range}`),
   site: () => call<SiteView>('/api/site'),
   requestInvite: (request: Schemas['InviteRequest']) => call<unknown>('/api/invite-requests', post(request)),
   deleteAddress: (token: string) => call<Schemas['AddressDeletionAccepted']>('/api/address-deletions', post({ token })),

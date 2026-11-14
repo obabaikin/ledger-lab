@@ -1,6 +1,7 @@
 package com.ledgerlab.control.bank;
 
 import com.ledgerlab.control.metrics.BankMetrics;
+import java.time.Duration;
 
 public enum SeriesName {
     ACCEPTED_PER_SECOND(BankMetrics.ACCEPTED_RATE),
@@ -16,7 +17,7 @@ public enum SeriesName {
         this.query = query;
     }
 
-    public String query() {
-        return query;
+    public String query(Duration window) {
+        return query.formatted(BankMetrics.window(window));
     }
 }

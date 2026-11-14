@@ -22,7 +22,8 @@ class TransferAdmissionTest {
             Duration.ofSeconds(5), new GatewayProperties.Inflight(1), new GatewayProperties.Admission(1, Duration.ofMillis(10)), accept,
             new GatewayProperties.WarmUp(0, Duration.ZERO, Duration.ZERO),
             new GatewayProperties.Periods(
-                Duration.ofHours(1), Duration.ofHours(4), Duration.ofHours(48), Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofHours(1), 100, 100));
+                Duration.ofHours(1), Duration.ofHours(4), Duration.ofHours(48), Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofHours(1), 100, 100),
+            new GatewayProperties.Latency(Duration.ofSeconds(2)));
     }
 
     @Test

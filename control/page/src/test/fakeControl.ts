@@ -58,7 +58,8 @@ export const bank = (changes: Partial<BankView> = {}): BankView => ({
     restarted: true,
   },
   pods: null,
-  slo: { target: 0.999, windowDays: 30, measuredMinutes: 1000, badMinutes: 17, budgetMinutes: 43, plannedMinutes: 12, availability: 0.9983, busyShare: 0.004 },
+  slo: { target: 0.999, windowDays: 30, measuredMinutes: 1000, badMinutes: 17, budgetMinutes: 43, plannedMinutes: 12, outsideMinutes: 2, availability: 0.9983, busyShare: 0.004 },
+  freshness: { target: 0.999, thresholdMs: 2000, badMinutes: 5, budgetMinutes: 43, plannedMinutes: 1, outsideMinutes: 3 },
   maintenance: null,
   chaos: { available: true, readyInSeconds: 0, recent: [] },
   readAt: '2026-11-11T10:30:00Z',
@@ -128,8 +129,10 @@ export const series = (changes: Partial<SeriesView> = {}): SeriesView => ({
   ...changes,
 })
 
+export const SERIES = 'GET /api/bank/series?range=2h'
+
 export const bankAnswers = (): Record<string, Answer> => ({
   'GET /api/bank': { status: 200, body: bank() },
   'GET /api/bank/periods?limit=10': { status: 200, body: { periods: [] } },
-  'GET /api/bank/series': { status: 200, body: series() },
+  [SERIES]: { status: 200, body: series() },
 })

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -45,5 +46,14 @@ class ControlPropertiesTest {
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new ControlProperties.Periods(HOUR, MINUTE, Duration.ofMinutes(10), FIVE_MINUTES, FIVE_MINUTES, Duration.ofMinutes(40), RETENTION, Duration.ZERO))
             .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a default range of the charts that is not one of the ranges stops the start")
+    void a_default_range_of_the_charts_that_is_not_one_of_the_ranges_stops_the_start() {
+        var ranges = List.of(new ControlProperties.Range(Duration.ofMinutes(5), Duration.ofSeconds(5), Duration.ofSeconds(15)));
+
+        assertThatCode(() -> new ControlProperties.Series(ranges, Duration.ofMinutes(5), Duration.ofSeconds(15))).doesNotThrowAnyException();
+        assertThatThrownBy(() -> new ControlProperties.Series(ranges, HOUR, Duration.ofSeconds(15))).isInstanceOf(IllegalArgumentException.class);
     }
 }

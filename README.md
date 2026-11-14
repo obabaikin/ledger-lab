@@ -38,6 +38,8 @@ duplicated when consumers crash?* Work in progress: what is done and what comes 
   could not be completed.
 - A **chaos button** crashes every ledger instance in the middle of a run, as `kill -9` would.
   Reconciliation must still pass.
+- **Service levels**: availability and time to posting, each 99.9 % of minutes over 30 days, with
+  their error budgets on the page; how they are measured and what is left out: [SLO](docs/guides/slo.md).
 
 ## How it fits together
 

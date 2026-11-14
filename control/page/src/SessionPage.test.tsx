@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { clock, count, dayAndMonth, hoursMinutes } from './format'
-import { bank, fakeControl, period, PERIOD_START, report, series, session, SESSION_ID, type Answer } from './test/fakeControl'
+import { bank, fakeControl, period, PERIOD_START, report, series, SERIES, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
 import { en } from './texts/en'
 
@@ -15,7 +15,7 @@ function control(extra: Answers = {}) {
   return fakeControl({
     'GET /api/bank': { status: 200, body: bank() },
     [`GET ${PERIODS}`]: { status: 200, body: { periods: [] } },
-    'GET /api/bank/series': { status: 200, body: series() },
+    [SERIES]: { status: 200, body: series() },
     [`GET ${SESSION}`]: { status: 200, body: session() },
     ...extra,
   })
@@ -124,7 +124,19 @@ describe('the open page', () => {
 
     expect(await screen.findByTestId('budget')).toHaveTextContent(en.availability.budget(17, 43))
     expect(screen.getByRole('meter', { name: en.availability.budget(17, 43) })).toHaveAttribute('aria-valuenow', '17')
-    expect(screen.getByLabelText(en.availability.heading)).toHaveTextContent(en.availability.planned(12))
+    expect(screen.getByTestId('budget-split')).toHaveTextContent(en.availability.split(17, 12, 2))
+  })
+
+  it('shows a second budget for the time to posting, with its threshold, and links to how both are measured', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('freshness-budget')).toHaveTextContent(en.availability.budget(5, 43))
+    expect(screen.getByText(en.availability.freshnessTitle(2))).toBeInTheDocument()
+    expect(screen.getByRole('meter', { name: en.availability.budget(5, 43) })).toHaveAttribute('aria-valuenow', '5')
+    expect(screen.getByTestId('freshness-budget-split')).toHaveTextContent(en.availability.split(5, 1, 3))
+    expect(screen.getByRole('link', { name: en.availability.howMeasured })).toHaveAttribute(
+      'href', 'https://github.com/obabaikin/ledger-lab/blob/main/docs/guides/slo.md')
   })
 
   it('shows the planned update in the visitor\'s time, and says when none is planned', async () => {
@@ -157,7 +169,7 @@ describe('the open page', () => {
   })
 
   it('says when the charts or the periods could not be read, instead of leaving them out', async () => {
-    control({ 'GET /api/bank/series': { status: 502 }, [`GET ${PERIODS}`]: { status: 502 } })
+    control({ [SERIES]: { status: 502 }, [`GET ${PERIODS}`]: { status: 502 } })
     renderAt('/')
 
     expect(await screen.findByText(en.charts.unavailable)).toBeInTheDocument()

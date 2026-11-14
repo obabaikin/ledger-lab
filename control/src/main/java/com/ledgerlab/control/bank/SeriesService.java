@@ -8,12 +8,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.convert.DurationStyle;
 import org.springframework.stereotype.Service;
 
@@ -26,24 +29,27 @@ public class SeriesService {
 
     private final PrometheusClient prometheus;
     private final ControlProperties.Series props;
-    private @Nullable Kept kept;
+    private final Map<Duration, Kept> kept = new HashMap<>();
 
+    @Autowired
     public SeriesService(PrometheusClient prometheus, ControlProperties props) {
-        this.prometheus = prometheus;
-        this.props = props.series();
+        this(prometheus, props.series());
     }
 
-    /** One range is served; the parameter names it, so that another can be added without changing the address. */
+    public SeriesService(PrometheusClient prometheus, ControlProperties.Series props) {
+        this.prometheus = prometheus;
+        this.props = props;
+    }
+
     public synchronized SeriesView series(@Nullable String range) throws InterruptedException, ExecutionException {
-        if (range != null && !props.range().equals(parsed(range))) {
-            throw new InvalidRangeException();
-        }
-        var last = kept;
+        var wanted = range == null ? props.defaultRange() : parsed(range);
+        var served = props.ranges().stream().filter(it -> it.range().equals(wanted)).findFirst().orElseThrow(InvalidRangeException::new);
+        var last = kept.get(served.range());
         if (last != null && System.nanoTime() - last.readAtNanos() < props.cache().toNanos()) {
             return last.view();
         }
-        var view = read(Instant.now());
-        kept = new Kept(view, System.nanoTime());
+        var view = read(served, Instant.now());
+        kept.put(served.range(), new Kept(view, System.nanoTime()));
         return view;
     }
 
@@ -55,16 +61,16 @@ public class SeriesService {
         }
     }
 
-    private SeriesView read(Instant now) throws InterruptedException, ExecutionException {
-        var stepSeconds = props.step().toSeconds();
+    private SeriesView read(ControlProperties.Range range, Instant now) throws InterruptedException, ExecutionException {
+        var stepSeconds = range.step().toSeconds();
         var end = Instant.ofEpochSecond(Math.floorDiv(now.getEpochSecond(), stepSeconds) * stepSeconds);
-        var start = end.minus(props.range());
-        var points = Math.toIntExact(props.range().toSeconds() / stepSeconds) + 1;
+        var start = end.minus(range.range());
+        var points = Math.toIntExact(range.range().toSeconds() / stepSeconds) + 1;
         var series = new ArrayList<SeriesView.Series>();
         try (var reads = Executors.newVirtualThreadPerTaskExecutor()) {
             var answers = new LinkedHashMap<SeriesName, Future<@Nullable List<PrometheusRange>>>();
             for (var name : SeriesName.values()) {
-                answers.put(name, reads.submit(() -> prometheus.queryRange(name.query(), start, end, props.step())));
+                answers.put(name, reads.submit(() -> prometheus.queryRange(name.query(range.window()), start, end, range.step())));
             }
             for (var answer : answers.entrySet()) {
                 var ranges = answer.getValue().get();

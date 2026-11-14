@@ -66,6 +66,7 @@ public class BankService {
         var books = snapshot.books();
         var booksReadAt = snapshot.booksReadAt();
         var clients = snapshot.clients();
+        var objectives = availability.objectives(now);
         return new BankView(
             periods.bankStartedAt(),
             props.periods().length().toMinutes(),
@@ -80,7 +81,8 @@ public class BankService {
                     clients.startedAt(), clients.baseTps(), clients.targetTps(), clients.pulse(), clients.requested(), clients.acknowledged(),
                     clients.failed() + clients.unknown(), clients.refused(), clients.retries(), clients.inFlight(), clients.total(), clients.restarted()),
             snapshot.pods(),
-            availability.slo(now),
+            objectives.slo(),
+            objectives.freshness(),
             windows.nextWindow(now),
             new BankView.Chaos(
                 props.chaos().enabled(), chaos.readyInSeconds(), chaosEvents.since(now.minus(props.bank().recentChaos()))),

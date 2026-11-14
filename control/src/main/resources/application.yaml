@@ -56,11 +56,28 @@ control:
     minutes-retention: 48h
     slo-target: 0.999
     slo-window: 30d
+  freshness:
+    # The same value as the gateway's gateway.latency.slo-threshold: its histogram has a bucket at it.
+    threshold: 2s
+    bad-share-percent: 1
+    # Prometheus has a minute's last samples a scrape after its end; the margin covers a late scrape.
+    lag: 30s
+    catch-up: 1h
+    slo-target: 0.999
+  outside:
+    # Pulses up to this speed are promised and judged; above it the clients test the bank past its limits (docs/guides/slo.md).
+    guaranteed-tps: 1300
+    chaos-aftermath: 60s
+    load-aftermath: 30s
   maintenance:
     notice: 3h
   series:
-    range: 2h
-    step: 30s
+    # Prometheus scrapes the pods every second; each window holds at least 15 scrapes.
+    ranges:
+      - {range: 5m, step: 5s, window: 15s}
+      - {range: 30m, step: 15s, window: 30s}
+      - {range: 2h, step: 30s, window: 1m}
+    default-range: 2h
     # Every visitor's page asks for the same charts.
     cache: 15s
   ledger:

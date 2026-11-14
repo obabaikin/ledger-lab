@@ -35,7 +35,7 @@ public class BankController {
         this.series = series;
     }
 
-    @Operation(summary = "The bank now: totals, clients, instances, availability")
+    @Operation(summary = "The bank now: totals, clients, instances, objectives")
     @ApiResponse(responseCode = "200", description = "The bank")
     @GetMapping
     public BankView bank() {
@@ -60,10 +60,10 @@ public class BankController {
 
     @Operation(summary = "The bank's charts from monitoring")
     @ApiResponse(responseCode = "200", description = "The charts; without series if monitoring could not be read")
-    @ApiResponse(responseCode = "400", description = "A range other than the one served", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "400", description = "A range other than those served", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @GetMapping("/series")
     public SeriesView series(
-        @Parameter(description = "The time the charts cover, as 2h; omit for the one range served")
+        @Parameter(description = "The time the charts cover: 5m, 30m or 2h; omit for 2h")
         @RequestParam(required = false) @Nullable String range
     ) throws InterruptedException, ExecutionException {
         return series.series(range);

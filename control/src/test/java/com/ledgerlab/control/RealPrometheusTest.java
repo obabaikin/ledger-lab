@@ -1,6 +1,10 @@
 package com.ledgerlab.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+
+import com.ledgerlab.control.metrics.BankMetrics;
+import com.ledgerlab.control.metrics.PrometheusClient;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -22,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -31,7 +36,8 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
 
 /** Control's queries against a real Prometheus scraping fake services: a canned answer cannot show what PromQL does (E97). */
-@TestPropertySource(properties = {"control.series.range=1m", "control.series.step=1s"})
+@TestPropertySource(properties = {
+    "control.series.ranges[0].range=1m", "control.series.ranges[0].step=1s", "control.series.ranges[0].window=5s", "control.series.default-range=1m"})
 class RealPrometheusTest extends IntegrationTest {
 
     private static final String LEDGER = "ledger";
@@ -102,6 +108,8 @@ class RealPrometheusTest extends IntegrationTest {
             () -> "http://" + RealPrometheus.CONTAINER.getHost() + ":" + RealPrometheus.CONTAINER.getMappedPort(PROMETHEUS_PORT));
     }
 
+    @Autowired PrometheusClient prometheusClient;
+
     private Map<Object, Map<?, ?>> podsByJob() {
         conductor.tick();
         var pods = new HashMap<Object, Map<?, ?>>();
@@ -162,13 +170,14 @@ class RealPrometheusTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("the charts show the rate of accepted transfers over the gateway's instances and the bank's latency in milliseconds")
-    void the_charts_show_the_rate_of_accepted_transfers_over_the_gateways_instances_and_the_banks_latency_in_milliseconds() throws Exception {
-        exporter.serve(LEDGER, "reporting_bank_latency_seconds{quantile=\"0.99\"} 0.25");
-        for (var accepted = 100; accepted <= 400; accepted += 100) {
-            var counters = "gateway_transfers_total{outcome=\"accepted\"} " + accepted + "\ngateway_transfers_total{outcome=\"refused\"} 7";
-            gatewayExporter.serve(GATEWAY, counters);
-            secondGateway.serve(GATEWAY, counters);
+    @DisplayName("the charts show the rate of accepted transfers over the gateway's instances and p50 and p99 from its histogram in milliseconds")
+    void the_charts_show_the_rate_of_accepted_transfers_over_the_gateways_instances_and_p50_and_p99_from_its_histogram_in_milliseconds()
+        throws Exception {
+        for (var round = 1; round <= 4; round++) {
+            var metrics = "gateway_transfers_total{outcome=\"accepted\"} " + round * 110 + "\ngateway_transfers_total{outcome=\"refused\"} 7\n"
+                + histogram(round * 100, round * 100, round * 110);
+            gatewayExporter.serve(GATEWAY, metrics);
+            secondGateway.serve(GATEWAY, metrics);
             gatewayExporter.awaitScrapes(SCRAPES_TO_SETTLE);
         }
 
@@ -178,8 +187,49 @@ class RealPrometheusTest extends IntegrationTest {
             Thread.sleep(POLL);
         }
 
-        assertThat(valuesOf("BANK_LATENCY_P99_MS").getLast()).isEqualTo(250.0);
+        assertThat(valuesOf("BANK_LATENCY_P50_MS").getLast()).isCloseTo(55.0, within(0.001));
+        assertThat(valuesOf("BANK_LATENCY_P99_MS").getLast()).isCloseTo(2000.0, within(0.001));
         assertThat(valuesOf("BUSY_PER_SECOND")).allMatch(it -> it == 0.0);
+        var transfers = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.TRANSFERS_IN_MINUTE))).number();
+        var fast = single(Objects.requireNonNull(prometheusClient.query(
+            BankMetrics.FAST_IN_MINUTE.formatted(BankMetrics.bucketBound(Duration.ofSeconds(2)))))).number();
+        assertThat(transfers).isPositive();
+        assertThat(fast / transfers).isCloseTo(100.0 / 110, within(0.001));
+    }
+
+    /** As the gateway's timer publishes it, with a bucket at 2 s: {@code fast} up to 0.1 s, {@code withinThreshold} up to 2 s. */
+    private static String histogram(long fast, long withinThreshold, long count) {
+        return """
+            # TYPE gateway_transfer_latency_seconds histogram
+            gateway_transfer_latency_seconds_bucket{le="0.1"} %d
+            gateway_transfer_latency_seconds_bucket{le="2.0"} %d
+            gateway_transfer_latency_seconds_bucket{le="+Inf"} %d
+            gateway_transfer_latency_seconds_count %d
+            gateway_transfer_latency_seconds_sum %d
+            """.formatted(fast, withinThreshold, count, count, count);
+    }
+
+    @Test
+    @DisplayName("a process of a project's service started again under the same pod counts as a restart; a new pod and an exporter do not")
+    void a_process_of_a_projects_service_started_again_under_the_same_pod_counts_as_a_restart_a_new_pod_and_an_exporter_do_not()
+        throws Exception {
+        exporter.serve(LEDGER, "process_start_time_seconds 1000");
+        exporter.serve(SECOND_LEDGER, "process_start_time_seconds 3000");
+        exporter.serve(NODE_EXPORTER, "process_start_time_seconds 5000");
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
+        assertThat(restarts()).isZero();
+
+        exporter.serve(NODE_EXPORTER, "process_start_time_seconds 6000");
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
+        assertThat(restarts()).isZero();
+
+        exporter.serve(LEDGER, "process_start_time_seconds 2000");
+        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
+        assertThat(restarts()).isEqualTo(1.0);
+    }
+
+    private double restarts() throws InterruptedException {
+        return single(Objects.requireNonNull(prometheusClient.query(BankMetrics.RESTARTED_IN_MINUTE))).number();
     }
 
     /** Serves each job's metrics as text and counts the scrapes, so a test knows Prometheus has seen what it serves. */

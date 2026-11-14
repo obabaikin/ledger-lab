@@ -71,7 +71,8 @@ class PartitionsTest extends IntegrationTest {
         var shorter = new GatewayProperties(p.transfersTopic(), p.resultsTopic(), p.outbox(), p.consumer(), p.maxWait(), p.waitRead(),
             p.retryAfter(), p.closeLockTimeout(), p.inflight(), p.admission(), p.accept(), p.warmUp(),
             new GatewayProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout(),
-                q.keyCleanupInterval(), q.keyCleanupBatch(), q.unpartitionedDeleteBatch()));
+                q.keyCleanupInterval(), q.keyCleanupBatch(), q.unpartitionedDeleteBatch()),
+            p.latency());
         var restarted = new Partitions(partitionRepository, periodRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
 
         assertThatThrownBy(restarted::afterPropertiesSet)

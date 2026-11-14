@@ -1,5 +1,6 @@
 package com.ledgerlab.control.bank;
 
+import com.ledgerlab.control.availability.Freshness;
 import com.ledgerlab.control.availability.MaintenanceWindow;
 import com.ledgerlab.control.availability.Slo;
 import com.ledgerlab.control.chaos.ChaosEvent;
@@ -27,6 +28,7 @@ public record BankView(
     @Schema(description = "null until Prometheus answered once.", nullable = true)
     @Nullable List<PodView> pods,
     Slo slo,
+    Freshness freshness,
     @Schema(description = "The maintenance window that is on, else the next one; null if none is declared.", nullable = true)
     @Nullable MaintenanceWindow maintenance,
     Chaos chaos,

@@ -19,8 +19,13 @@ public record GatewayProperties(
     Admission admission,
     Accept accept,
     WarmUp warmUp,
-    Periods periods
+    Periods periods,
+    Latency latency
 ) {
+    /** The time from acceptance to result is counted in buckets with one bound at {@link #sloThreshold}. */
+    public record Latency(Duration sloThreshold) {
+    }
+
     /**
      * Up to {@link #rounds} rounds of the submission path. The gateway takes traffic after at most {@link #duration}; the rounds go
      * on behind it for at most {@link #maxDuration}, and only then does it report itself warm.

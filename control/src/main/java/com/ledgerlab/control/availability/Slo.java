@@ -17,7 +17,9 @@ public record Slo(
     long budgetMinutes,
     @Schema(description = "Bad minutes within a maintenance window declared in time; they do not use up the budget.")
     long plannedMinutes,
-    @Schema(description = "Share of good minutes among the measured ones, the planned left out; null before the first measured minute.", nullable = true)
+    @Schema(description = "Bad minutes during a crash or a load above the promised one, with their aftermath; they do not use up the budget.")
+    long outsideMinutes,
+    @Schema(description = "Share of good minutes among the measured ones, the planned and outside left out; null before the first measured minute.", nullable = true)
     @Nullable Double availability,
     @Schema(description = "Share of requests refused as busy; null before the first request.", nullable = true)
     @Nullable Double busyShare

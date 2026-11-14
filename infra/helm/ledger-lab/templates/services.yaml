@@ -124,6 +124,9 @@ spec:
             # The hot accounts' surplus goes to the pool once a period.
             - {name: LEDGER_POOL_HOTSWEEPINTERVAL, value: {{ $periodLength | quote }}}
             {{- end }}
+            {{- if eq $name "gateway" }}
+            - {name: GATEWAY_LATENCY_SLOTHRESHOLD, value: {{ $root.Values.slo.freshnessThreshold | quote }}}
+            {{- end }}
             {{- if eq $name "generator" }}
             - {name: GENERATOR_GATEWAYURL, value: "http://gateway:{{ $root.Values.services.gateway.port }}"}
             - {name: GENERATOR_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
@@ -142,6 +145,7 @@ spec:
             - {name: CONTROL_LOAD_DEFAULTTPS, value: {{ int64 $root.Values.load.defaultPulseTps | quote }}}
             # Read back by infra/server/maintenance.sh, which tells whether a window is declared in time.
             - {name: CONTROL_MAINTENANCE_NOTICE, value: "{{ int $root.Values.maintenance.noticeHours }}h"}
+            - {name: CONTROL_FRESHNESS_THRESHOLD, value: {{ $root.Values.slo.freshnessThreshold | quote }}}
             - {name: CONTROL_SITE_VERSION, value: {{ $root.Values.version | quote }}}
             {{- with $root.Values.ingress.host }}
             - {name: CONTROL_SITE_BASEURL, value: "https://{{ . }}"}

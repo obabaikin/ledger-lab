@@ -83,6 +83,9 @@
           "currentPeriod" : {
             "$ref" : "#/components/schemas/CurrentPeriod"
           },
+          "freshness" : {
+            "$ref" : "#/components/schemas/Freshness"
+          },
           "maintenance" : {
             "description" : "The maintenance window that is on, else the next one; null if none is declared.",
             "oneOf" : [ {
@@ -120,7 +123,7 @@
             "description" : "Transfers since the bank started: the reconciled periods and the live numbers of those still open."
           }
         },
-        "required" : [ "books", "chaos", "clients", "currentPeriod", "maintenance", "periodMinutes", "pods", "readAt", "slo", "startedAt", "totals" ],
+        "required" : [ "books", "chaos", "clients", "currentPeriod", "freshness", "maintenance", "periodMinutes", "pods", "readAt", "slo", "startedAt", "totals" ],
         "type" : "object"
       },
       "Books" : {
@@ -363,6 +366,42 @@
           }
         },
         "required" : [ "closesAt", "end", "start" ],
+        "type" : "object"
+      },
+      "Freshness" : {
+        "description" : "How soon the bank posts transfers, by minute: a minute is bad if more than a small share of its transfers took longer than the threshold from acceptance to result.",
+        "properties" : {
+          "badMinutes" : {
+            "description" : "Bad minutes that use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "budgetMinutes" : {
+            "description" : "Bad minutes the target allows in a full window.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "outsideMinutes" : {
+            "description" : "Bad minutes during a crash or a load above the promised one, with their aftermath; they do not use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "plannedMinutes" : {
+            "description" : "Bad minutes within a maintenance window declared in time; they do not use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "target" : {
+            "description" : "Share of good minutes the bank aims for.",
+            "type" : "number"
+          },
+          "thresholdMs" : {
+            "description" : "Longest time from acceptance to result a transfer may take to count as fast.",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "badMinutes", "budgetMinutes", "outsideMinutes", "plannedMinutes", "target", "thresholdMs" ],
         "type" : "object"
       },
       "GatewayCounts" : {
@@ -994,7 +1033,7 @@
         "description" : "The bank's availability to its clients over the last days, by minute: a minute is good if nearly every request got an answer; busy (503) is an answer.",
         "properties" : {
           "availability" : {
-            "description" : "Share of good minutes among the measured ones, the planned left out; null before the first measured minute.",
+            "description" : "Share of good minutes among the measured ones, the planned and outside left out; null before the first measured minute.",
             "format" : "double",
             "type" : [ "number", "null" ]
           },
@@ -1018,6 +1057,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "outsideMinutes" : {
+            "description" : "Bad minutes during a crash or a load above the promised one, with their aftermath; they do not use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "plannedMinutes" : {
             "description" : "Bad minutes within a maintenance window declared in time; they do not use up the budget.",
             "format" : "int64",
@@ -1032,7 +1076,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "availability", "badMinutes", "budgetMinutes", "busyShare", "measuredMinutes", "plannedMinutes", "target", "windowDays" ],
+        "required" : [ "availability", "badMinutes", "budgetMinutes", "busyShare", "measuredMinutes", "outsideMinutes", "plannedMinutes", "target", "windowDays" ],
         "type" : "object"
       },
       "StatementTotals" : {
@@ -1206,7 +1250,7 @@
             "description" : "The bank"
           }
         },
-        "summary" : "The bank now: totals, clients, instances, availability",
+        "summary" : "The bank now: totals, clients, instances, objectives",
         "tags" : [ "bank-controller" ]
       }
     },
@@ -1291,7 +1335,7 @@
       "get" : {
         "operationId" : "series",
         "parameters" : [ {
-          "description" : "The time the charts cover, as 2h; omit for the one range served",
+          "description" : "The time the charts cover: 5m, 30m or 2h; omit for 2h",
           "in" : "query",
           "name" : "range",
           "required" : false,
@@ -1318,7 +1362,7 @@
                 }
               }
             },
-            "description" : "A range other than the one served"
+            "description" : "A range other than those served"
           }
         },
         "summary" : "The bank's charts from monitoring",

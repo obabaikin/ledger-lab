@@ -1,6 +1,5 @@
 package com.ledgerlab.gateway.service;
 
-import com.ledgerlab.common.Observability;
 import com.ledgerlab.gateway.GatewayProperties;
 import com.ledgerlab.gateway.domain.Transfer;
 import com.ledgerlab.gateway.persistence.PeriodRepository;
@@ -44,10 +43,7 @@ public class TransferService {
         this.clock = clock;
         this.accepted = Counter.builder("gateway.transfers").tag("outcome", "accepted").register(registry);
         this.repeated = Counter.builder("gateway.transfers").tag("outcome", "repeated").register(registry);
-        this.latency = Timer.builder("gateway.transfer.latency")
-            .description("accepted at the edge to result known")
-            .publishPercentiles(Observability.latencyPercentiles())
-            .register(registry);
+        this.latency = TransferLatency.timer(registry, props.latency().sloThreshold());
     }
 
     /**

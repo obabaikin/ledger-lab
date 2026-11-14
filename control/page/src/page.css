@@ -54,6 +54,10 @@ a.node:hover rect.box { stroke: var(--flow); }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
 .chart h3 { margin: 0 0 4px; font-size: 14px; }
+.chartsHead { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+.chart svg { touch-action: pan-y; }
+.readout { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
+.card h4 { margin: 12px 0 4px; font-size: 14px; }
 .legend { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
 .verdict { text-align: center; padding: 28px 16px; }

@@ -13,6 +13,8 @@ public record ControlProperties(
     Periods periods,
     Bank bank,
     Availability availability,
+    Freshness freshness,
+    Outside outside,
     Maintenance maintenance,
     Series series,
     Ledger ledger,
@@ -74,11 +76,38 @@ public record ControlProperties(
     ) {
     }
 
+    /**
+     * A minute is bad if more than {@link #badSharePercent} of its transfers took longer than {@link #threshold} from
+     * acceptance to result. A minute is read from monitoring once it ended {@link #lag} ago, and no later than
+     * {@link #catchUp} after; one not read by then stays without data.
+     */
+    public record Freshness(Duration threshold, int badSharePercent, Duration lag, Duration catchUp, BigDecimal sloTarget) {
+    }
+
+    /**
+     * Bad minutes during a crash and {@link #chaosAftermath} after it, and during a pulse above {@link #guaranteedTps}
+     * and {@link #loadAftermath} after it, are outside the bounds the bank promises, unless a service restarted in place
+     * then: that is the bank falling over, judged as any other minute.
+     */
+    public record Outside(int guaranteedTps, Duration chaosAftermath, Duration loadAftermath) {
+    }
+
     /** A window declared later than {@link #notice} before its start does not excuse its bad minutes. */
     public record Maintenance(Duration notice) {
     }
 
-    public record Series(Duration range, Duration step, Duration cache) {
+    /** Each answer is kept for {@link #cache}, one per range. */
+    public record Series(List<Range> ranges, Duration defaultRange, Duration cache) {
+        public Series {
+            ranges = List.copyOf(ranges);
+            if (ranges.stream().noneMatch(it -> it.range().equals(defaultRange))) {
+                throw new IllegalArgumentException("series.default-range " + defaultRange + " is not one of the ranges");
+            }
+        }
+    }
+
+    /** A chart of {@link #range} has a point every {@link #step}; each rate is taken over {@link #window}. */
+    public record Range(Duration range, Duration step, Duration window) {
     }
 
     public record Ledger(String baseUrl) {

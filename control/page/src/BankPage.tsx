@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
-import { api, type BankView, type PeriodView, type SeriesView } from './api/client'
+import { api, DEFAULT_CHART_RANGE, type BankView, type ChartRange, type PeriodView, type SeriesView } from './api/client'
 import { Availability } from './Availability'
 import { BuildInfo } from './BuildInfo'
 import { ClientsSpeed } from './ClientsSpeed'
@@ -54,6 +54,8 @@ export function BankPage(props: {
   const [series, setSeries] = useState<SeriesView | null>(null)
   const [periodsLost, setPeriodsLost] = useState(false)
   const [seriesLost, setSeriesLost] = useState(false)
+  const [range, setRange] = useState<ChartRange>(DEFAULT_CHART_RANGE)
+  const shownRange = useRef(range)
   const previous = useRef<Snapshot | null>(null)
 
   const pollBank = useCallback(async () => {
@@ -87,17 +89,27 @@ export function BankPage(props: {
     }
   }, [])
   const pollSeries = useCallback(async () => {
+    const asked = shownRange.current
     try {
-      setSeries(await api.series())
+      const view = await api.series(asked)
+      // An answer for the range shown before the visitor picked another is dropped.
+      if (asked !== shownRange.current) return
+      setSeries(view)
       setSeriesLost(false)
     } catch {
-      setSeriesLost(true)
+      if (asked === shownRange.current) setSeriesLost(true)
     }
   }, [])
 
   usePolling(pollBank, BANK_POLL_MS, true)
   usePolling(pollPeriods, PERIODS_POLL_MS, true)
-  usePolling(pollSeries, SERIES_POLL_MS, true)
+  const pollSeriesNow = usePolling(pollSeries, SERIES_POLL_MS, true)
+  const pickRange = (picked: ChartRange) => {
+    shownRange.current = picked
+    setRange(picked)
+    setSeries(null)
+    void pollSeriesNow()
+  }
 
   const lost = bankLost || props.sessionLost === true
   const bank = live?.bank ?? null
@@ -132,7 +144,7 @@ export function BankPage(props: {
             <LiveScheme bank={bank} rates={rates ?? undefined} intervalMs={BANK_POLL_MS} />
           </section>
           {seriesLost && <p className="hint">{t.charts.unavailable}</p>}
-          <Charts view={series} chaos={bank.chaos.recent} />
+          <Charts view={series} chaos={bank.chaos.recent} range={range} onRange={pickRange} />
           <Availability bank={bank} />
           <Periods bank={bank} periods={periods} lost={periodsLost} />
         </>
