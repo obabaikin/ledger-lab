@@ -46,13 +46,13 @@ describe('the dots of the scheme', () => {
     const bankState = bankThatMoves()
     renderAt('/')
     await waitFor(() => expect(moving()).toBe(true), { timeout: POLLS_UNTIL_CHANGE_MS })
-    const sent = screen.getByTestId('clients').textContent
+    const sent = screen.getByTestId('clients-number').textContent
 
     bankState.up = false
 
     expect(await screen.findByText(en.connection.lost, {}, { timeout: POLLS_UNTIL_CHANGE_MS })).toBeInTheDocument()
     expect(still()).toBe(true)
-    expect(screen.getByTestId('clients').textContent).toBe(sent)
+    expect(screen.getByTestId('clients-number').textContent).toBe(sent)
   })
 
   it('move again from the second fresh reading after the connection is back, not at the rate across the gap', async () => {

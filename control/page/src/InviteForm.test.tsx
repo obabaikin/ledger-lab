@@ -20,6 +20,12 @@ const site = (changes: Partial<SiteView> = {}): SiteView => ({
   ...changes,
 })
 
+/** The form opens under the line at the top of the page. */
+async function openLanding() {
+  renderAt('/')
+  fireEvent.click(await screen.findByRole('button', { name: en.landing.tryIt }))
+}
+
 function ask(email: string) {
   fireEvent.change(screen.getByLabelText(en.inviteForm.emailLabel), { target: { value: email } })
   fireEvent.click(screen.getByRole('button', { name: en.inviteForm.submit }))
@@ -28,7 +34,7 @@ function ask(email: string) {
 describe('the link form', () => {
   it('sends the address and says the same for any address once it is taken, and that each mail can delete it', async () => {
     const calls = fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 202, body: {} } })
-    renderAt('/')
+    await openLanding()
     await screen.findByText(/The link works for 7 days\. Your address is deleted after 30 days without use\./)
 
     ask('visitor@example.org')
@@ -50,7 +56,7 @@ describe('the link form', () => {
     ['no answer', () => { throw new TypeError('Failed to fetch') }, COULD_NOT_SEND],
   ])('names a %s in its own words and lets the visitor try again', async (_, answer, message) => {
     fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: answer })
-    renderAt('/')
+    await openLanding()
 
     ask('visitor@example.org')
 
@@ -60,7 +66,7 @@ describe('the link form', () => {
 
   it('says a malformed address is no address without asking control', async () => {
     const calls = fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 202, body: {} } })
-    renderAt('/')
+    await openLanding()
 
     ask('with space@example.org')
 
@@ -73,7 +79,7 @@ describe('the link form', () => {
     ['by control', () => ask('visitor@example.org')],
   ])('marks the field when the address is refused %s, puts the cursor back in it and clears the mark once it looks right', async (_, refuse) => {
     fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: { status: 400, body: { error: 'invalid-email' } } })
-    renderAt('/')
+    await openLanding()
     const field = screen.getByLabelText(en.inviteForm.emailLabel)
 
     refuse()
@@ -92,7 +98,7 @@ describe('the link form', () => {
     ['a 400 with another code', { status: 400, body: { error: 'invalid request body' } }],
   ])('leaves the field unmarked when the refusal is not about the address: %s', async (_, answer) => {
     fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site() }, [REQUEST]: answer })
-    renderAt('/')
+    await openLanding()
 
     ask('visitor@example.org')
 
@@ -113,7 +119,7 @@ describe('the link form', () => {
     const original = globalThis.fetch
     globalThis.fetch = (input, init) => (String(input) === '/api/invite-requests' ? pending : original(input, init))
     try {
-      renderAt('/')
+      await openLanding()
       ask('visitor@example.org')
 
       await waitFor(() => expect(screen.getByRole('button', { name: en.inviteForm.submit })).toBeDisabled())
@@ -147,7 +153,7 @@ describe('the link form with the bot check on', () => {
 
   async function renderWithKey() {
     const calls = fakeControl({ ...bankAnswers(), 'GET /api/site': { status: 200, body: site({ turnstileSiteKey: 'site-key' }) }, [REQUEST]: { status: 202, body: {} } })
-    renderAt('/')
+    await openLanding()
     await screen.findByText(/The link works for 7 days/)
     return calls
   }
@@ -257,7 +263,7 @@ describe('the link form with the bot check on', () => {
       [REQUEST]: { status: 403, body: { error: 'verification-failed' } },
     })
     try {
-      renderAt('/')
+      await openLanding()
       await screen.findByText(/The link works for 7 days/)
       fireEvent.change(field(), { target: { value: 'visitor@example.org' } })
       await waitFor(() => expect(callbacks.length).toBeGreaterThan(0))

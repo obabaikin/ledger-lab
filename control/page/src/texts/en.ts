@@ -69,6 +69,7 @@ export const en = {
   },
   landing: {
     inviteRefused: 'This invite link is not valid or has expired; get a new one below.',
+    tryIt: 'Try it',
   },
   sessionEnded: {
     message: 'This session has ended or the link is wrong. Open your invite link again to start a new one, or get a link below.',
@@ -91,8 +92,9 @@ export const en = {
     noRejections: 'Nothing rejected',
     clientsSent: (count: string) => `${count} sent`,
     clientsGaveUp: (count: string) => `${count} gave up`,
-    clientsSending: (tps: string) => `Clients send ${tps} transfers/s.`,
-    pulse: (tps: string, until: string, base: string) => `Load raised to ${tps} transfers/s until ${until}, then back to ${base}.`,
+    speed: (tps: string) => `${tps} transfers/s`,
+    speedNow: 'clients now',
+    speedUntil: (until: string, base: string) => `until ${until}, then ${base}`,
     clientsRestarted: (time: string, sent: string, gaveUp: string) => `Since clients restarted at ${time}: ${sent} sent, ${gaveUp} gave up.`,
     lastCrash: (at: string, instances: number) => `Last ledger crash: ${at}, ${instances} instances.`,
     rejectReason: {

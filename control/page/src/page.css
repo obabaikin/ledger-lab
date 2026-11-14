@@ -100,6 +100,13 @@ button .why { display: block; font-size: 12px; font-weight: 400; }
 .invite .form-status { min-height: 21px; margin-top: 8px; }
 .invite .form-status p { margin: 0; }
 .invite-sent { margin: 0; }
+.intro { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
+.teaser { flex: 1 1 320px; min-width: 0; }
+.teaser h2 { font-size: 20px; margin: 0 0 12px; max-width: 560px; }
+.teaser .invite { margin-top: 4px; }
+.teaser [tabindex="-1"]:focus { outline: none; }
+.speed { margin: 0; font-variant-numeric: tabular-nums; }
+.speed b { display: block; font-size: 32px; line-height: 1.1; }
 .legal h3 { font-size: 15px; margin: 16px 0 4px; }
 .legal address { font-style: normal; margin: 8px 0; }
 .build a { color: inherit; }

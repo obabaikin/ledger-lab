@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { api, type BankView, type PeriodView, type SeriesView } from './api/client'
 import { Availability } from './Availability'
 import { BuildInfo } from './BuildInfo'
+import { ClientsSpeed } from './ClientsSpeed'
 import { Charts } from './Charts'
 import { flowRates, NO_FLOW, stopLedgerWires, type Flow } from './FlowDots'
 import { dayAndMonth, hoursMinutes, MS_PER_SECOND } from './format'
@@ -39,7 +40,14 @@ export function age(fromMs: number, nowMs: number): string {
   return t.bank.age(Math.floor(hours / HOURS_PER_DAY), hours % HOURS_PER_DAY, minutes % MINUTES_PER_HOUR)
 }
 
-export function BankPage(props: { controls?: ReactNode; top?: ReactNode; after?: ReactNode; sessionLost?: boolean; pressedCrashAt?: number | null }) {
+export function BankPage(props: {
+  controls?: ReactNode
+  top?: ReactNode
+  invite?: ReactNode
+  after?: ReactNode
+  sessionLost?: boolean
+  pressedCrashAt?: number | null
+}) {
   const [live, setLive] = useState<Live | null>(null)
   const [bankLost, setBankLost] = useState(false)
   const [periods, setPeriods] = useState<PeriodView[] | null>(null)
@@ -101,6 +109,12 @@ export function BankPage(props: { controls?: ReactNode; top?: ReactNode; after?:
     <main aria-busy={bank === null}>
       <Hero />
       {props.top}
+      {(props.invite || bank?.clients) && (
+        <section className="intro">
+          {props.invite}
+          {bank?.clients && <ClientsSpeed clients={bank.clients} />}
+        </section>
+      )}
       {props.controls}
       {lost && (
         <p role="status" className="banner">

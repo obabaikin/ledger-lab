@@ -36,7 +36,7 @@ function messageOf(e: unknown): string {
   return text.couldNotSend
 }
 
-export function InviteForm() {
+export function InviteForm(props: { withHeading?: boolean } = {}) {
   const site = useSite()
   const [email, setEmail] = useState('')
   const [token, setToken] = useState<string | null>(null)
@@ -113,7 +113,7 @@ export function InviteForm() {
 
   return (
     <form className="invite" onSubmit={submit} noValidate>
-      <h2>{text.heading}</h2>
+      {props.withHeading !== false && <h2>{text.heading}</h2>}
       <div className="controls">
         <label>
           {text.emailLabel}{' '}

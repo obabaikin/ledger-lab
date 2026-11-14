@@ -62,12 +62,9 @@ export function LiveScheme(props: { bank: BankView; rates: number[] | undefined;
           ? t.bank.noRejections
           : `${t.bank.rejected(count(bank.totals.rejected))}: ${rejections.map(([reason, n]) => `${t.bank.rejectReason[reason] ?? reason} ${count(n)}`).join(', ')}`}
       </p>
-      {clients && (
-        <p className="hint center" data-testid="clients">
-          {clients.pulse
-            ? t.bank.pulse(count(clients.pulse.tps), clock(clients.pulse.until), count(clients.baseTps))
-            : t.bank.clientsSending(count(clients.targetTps))}
-          {restartedAt && <span data-testid="clients-restarted"> {t.bank.clientsRestarted(hoursMinutes(restartedAt), count(clients.requested), count(clients.gaveUp))}</span>}
+      {clients && restartedAt && (
+        <p className="hint center" data-testid="clients-restarted">
+          {t.bank.clientsRestarted(hoursMinutes(restartedAt), count(clients.requested), count(clients.gaveUp))}
         </p>
       )}
       {lastCrash && (

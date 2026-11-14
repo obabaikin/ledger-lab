@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { api } from './api/client'
 import { BankPage } from './BankPage'
-import { InviteForm } from './InviteForm'
+import { InviteTeaser } from './InviteTeaser'
 import { t } from './texts'
 
 export function Landing() {
@@ -36,11 +36,7 @@ export function Landing() {
           </p>
         )
       }
-      after={
-        <section className="card">
-          <InviteForm />
-        </section>
-      }
+      invite={<InviteTeaser />}
     />
   )
 }

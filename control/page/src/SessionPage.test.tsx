@@ -26,7 +26,7 @@ const crash = () => screen.findByRole('button', { name: /Crash the ledger/ })
 const follows = (first: Element, second: Element) => (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
 
 describe('the open page', () => {
-  it('shows the bank to a visitor without a session, with no buttons and the field for a link below the bank', async () => {
+  it('shows the bank to a visitor without a session, with no buttons and the line that offers a link above the bank', async () => {
     control()
     renderAt('/')
 
@@ -35,12 +35,35 @@ describe('the open page', () => {
     expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted')
     expect(screen.queryByRole('button', { name: new RegExp(en.controls.raise) })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Crash the ledger/ })).not.toBeInTheDocument()
-    const form = screen.getByRole('heading', { level: 2, name: en.inviteForm.heading })
-    expect(follows(screen.getByLabelText(en.periods.heading), form)).toBe(true)
+    expect(follows(screen.getByRole('heading', { level: 2, name: en.inviteForm.heading }), screen.getByTestId('bank-status'))).toBe(true)
     expect(screen.getByRole('link', { name: 'Oleksii Babaikin' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
     expect(screen.getAllByRole('link', { name: en.footer.privacy })[0]).toHaveAttribute('href', '/privacy')
     expect(screen.getByRole('link', { name: en.footer.impressum })).toHaveAttribute('href', '/impressum')
     expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', expect.stringContaining('#what-it-does'))
+  })
+
+  it('opens the form for a link in place under the line at the top, and keeps no form below the bank', async () => {
+    control()
+    renderAt('/')
+    await screen.findByTestId('bank-status')
+    expect(screen.queryByLabelText(en.inviteForm.emailLabel)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: en.landing.tryIt }))
+
+    const opened = screen.getByTestId('invite-opened')
+    expect(opened).toHaveFocus()
+    expect(screen.getByLabelText(en.inviteForm.emailLabel)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: en.landing.tryIt })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 2, name: en.inviteForm.heading })).toHaveLength(1)
+    expect(follows(opened, screen.getByTestId('bank-status'))).toBe(true)
+  })
+
+  it('shows how fast the clients send now, large, at the top', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(`${en.bank.speed('400')} ${en.bank.speedNow}`)
+    expect(follows(screen.getByTestId('clients-speed'), screen.getByTestId('bank-status'))).toBe(true)
   })
 
   it('says the bank has not started before control placed its first period', async () => {
@@ -73,7 +96,7 @@ describe('the open page', () => {
     control({ 'GET /api/bank': { status: 200, body: bank({ clients: { ...bank().clients!, restarted: false } }) } })
     renderAt('/')
 
-    expect(await screen.findByTestId('clients')).toBeInTheDocument()
+    expect(await screen.findByTestId('clients-number')).toBeInTheDocument()
     expect(screen.queryByTestId('clients-restarted')).toBeNull()
   })
 
@@ -91,7 +114,7 @@ describe('the open page', () => {
     })
     renderAt('/')
 
-    expect(await screen.findByTestId('clients')).toHaveTextContent(en.bank.pulse('1,500', clock(until), '400'))
+    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(`${en.bank.speed('1,500')} ${en.bank.speedUntil(clock(until), '400')}`)
     expect(screen.getByTestId('last-crash')).toHaveTextContent(en.bank.lastCrash(clock(crashedAt), 2))
   })
 
@@ -296,6 +319,14 @@ describe('session page', () => {
     expect(await screen.findByRole('button', { name: 'Get a link' })).toBeInTheDocument()
     expect(await raise()).toBeDisabled()
     expect(await crash()).toBeDisabled()
+  })
+
+  it('shows the clients\' speed but no line offering a link on a session page', async () => {
+    control()
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(en.bank.speed('400'))
+    expect(screen.queryByRole('button', { name: en.landing.tryIt })).not.toBeInTheDocument()
   })
 
   it('shows no link form while the invite is valid', async () => {
