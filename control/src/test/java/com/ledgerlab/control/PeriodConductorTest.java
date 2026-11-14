@@ -393,6 +393,32 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
+    @DisplayName("counts that agree only at the deadline are asked about once, by the instance that counted them")
+    void counts_that_agree_only_at_the_deadline_are_asked_about_once_by_the_instance_that_counted_them() throws Exception {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 503);
+        tickUpToTheDeadline(PERIOD);
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD));
+        ledger.answer("GET", forPeriod(LedgerApi.CHECK_PATH, PERIOD), 200, mapOf("check", check(true)), Duration.ofSeconds(1));
+        var other = new PeriodConductor(
+            periodRepository, ledgerClient, gatewayClient, generatorClient, reportingClient, bankLive, chaosRepository, availabilityRepository,
+            databaseClock, props, meters);
+
+        try (var both = Executors.newVirtualThreadPerTaskExecutor()) {
+            var counting = both.submit(() -> conductor.tick(deadlineOf(PERIOD)));
+            while (checkRequests(PERIOD) == 0) {
+                Thread.onSpinWait();
+            }
+            other.tick(deadlineOf(PERIOD));
+            counting.get();
+        }
+
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isEqualTo(1);
+        assertThat(stateOf(PERIOD)).isIn("RECONCILED", "FAILED");
+    }
+
+    @Test
     @DisplayName("a period control left half settled when it went down is settled after the restart, with its deadline started again")
     void a_period_control_left_half_settled_when_it_went_down_is_settled_after_the_restart_with_its_deadline_started_again() {
         bankStartedIn(PERIOD);

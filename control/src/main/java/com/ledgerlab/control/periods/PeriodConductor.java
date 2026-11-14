@@ -251,8 +251,9 @@ public class PeriodConductor {
         }
         // The ledger's check is asked for only on books that are final: it is made once and kept, and a transfer booked
         // after it would show as a difference of the next period.
-        var askAt = now.plus(props.checkWait());
-        if (periods.markCounted(start, bank, inLedger, now, pastDeadline || askAt.isAfter(deadlineOf(period)) ? deadlineOf(period) : askAt) != 1) {
+        // Past the deadline this instance asks at once; the next action stays in the future, so no other instance takes it meanwhile.
+        var askAt = pastDeadline ? now.plus(props.retryWait()) : earlier(now.plus(props.checkWait()), deadlineOf(period));
+        if (periods.markCounted(start, bank, inLedger, now, askAt) != 1) {
             return;
         }
         called(PeriodCall.LEDGER_REQUEST_CHECK, () -> ledger.requestCheck(start));
@@ -335,6 +336,10 @@ public class PeriodConductor {
     private Instant deadlineOf(BankPeriod period) {
         var closingStartedAt = Objects.requireNonNull(period.closingStartedAt(), "closingStartedAt of a period past OPEN");
         return closingStartedAt.minus(props.closeDelay()).plus(props.verdictDeadline());
+    }
+
+    private static Instant earlier(Instant one, Instant other) {
+        return one.isBefore(other) ? one : other;
     }
 
     private boolean pastDeadline(BankPeriod period, Instant now) {
