@@ -2,6 +2,7 @@ package com.ledgerlab.ledger.service;
 
 import com.ledgerlab.ledger.domain.Books;
 import com.ledgerlab.ledger.domain.Period;
+import com.ledgerlab.ledger.domain.PeriodCheckState;
 import com.ledgerlab.ledger.domain.PeriodReconciliation;
 import com.ledgerlab.ledger.persistence.AccountRepository;
 import com.ledgerlab.ledger.persistence.PeriodRepository;
@@ -59,6 +60,10 @@ public class PeriodService {
             counts.rejectionsByReason(),
             counts.poolPostings(),
             periods.findCheck(period.start()).orElse(null));
+    }
+
+    public PeriodCheckState check(Instant periodStart) {
+        return new PeriodCheckState(periods.findCheck(endedPeriod(periodStart).start()).orElse(null));
     }
 
     @Transactional(readOnly = true)

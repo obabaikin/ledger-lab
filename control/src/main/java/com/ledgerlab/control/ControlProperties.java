@@ -31,19 +31,32 @@ public record ControlProperties(
 ) {
     /**
      * {@link #length} is the bank's: every service cuts its periods by the same setting. {@link #detailsRetention} is the
-     * bank's too: a period older than it cannot be reconciled any more.
+     * bank's too: a period older than it cannot be reconciled any more. The other times count from a period's end: the
+     * next period closes at {@code length + closeDelay}, and control settles the oldest period first, so a period's verdict
+     * is due before that.
      */
     public record Periods(
         Duration length,
         Duration closeDelay,
-        Duration drainStallTimeout,
-        Duration drainTimeout,
-        Duration requestRetry,
+        Duration settleDelay,
+        Duration checkWait,
+        Duration retryWait,
+        Duration verdictDeadline,
         Duration detailsRetention
     ) {
         public Periods {
             if (length.isZero() || length.isNegative() || !length.equals(Duration.ofMinutes(length.toMinutes()))) {
                 throw new IllegalArgumentException("periods.length must be whole minutes, got " + length);
+            }
+            if (!closeDelay.isPositive() || !checkWait.isPositive() || !retryWait.isPositive()) {
+                throw new IllegalArgumentException(
+                    "periods.close-delay, check-wait and retry-wait must be positive, got " + closeDelay + ", " + checkWait + ", " + retryWait);
+            }
+            if (closeDelay.compareTo(settleDelay) >= 0 || settleDelay.compareTo(verdictDeadline) >= 0
+                || verdictDeadline.compareTo(length.plus(closeDelay)) >= 0) {
+                throw new IllegalArgumentException(
+                    "periods need close-delay < settle-delay < verdict-deadline < length + close-delay, got " + closeDelay + " < " + settleDelay
+                        + " < " + verdictDeadline + " < " + length.plus(closeDelay));
             }
         }
     }

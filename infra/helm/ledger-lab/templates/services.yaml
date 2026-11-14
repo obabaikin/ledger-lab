@@ -99,6 +99,10 @@ spec:
             {{- if eq $name "control" }}
             - {name: CONTROL_PERIODS_LENGTH, value: {{ $periodLength | quote }}}
             - {name: CONTROL_PERIODS_DETAILSRETENTION, value: {{ $retention | quote }}}
+            - {name: CONTROL_PERIODS_SETTLEDELAY, value: {{ $root.Values.closing.settleDelay | quote }}}
+            - {name: CONTROL_PERIODS_CHECKWAIT, value: {{ $root.Values.closing.checkWait | quote }}}
+            - {name: CONTROL_PERIODS_RETRYWAIT, value: {{ $root.Values.closing.retryWait | quote }}}
+            - {name: CONTROL_PERIODS_VERDICTDEADLINE, value: {{ $root.Values.closing.verdictDeadline | quote }}}
             {{- else }}
             - {name: {{ upper $name }}_PERIODS_LENGTH, value: {{ $periodLength | quote }}}
             - {name: {{ upper $name }}_PERIODS_RETENTION, value: {{ $retention | quote }}}

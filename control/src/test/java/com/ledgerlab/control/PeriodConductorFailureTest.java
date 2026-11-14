@@ -15,6 +15,7 @@ import com.ledgerlab.control.ledger.LedgerClient;
 import com.ledgerlab.control.periods.PeriodConductor;
 import com.ledgerlab.control.periods.PeriodRepository;
 import com.ledgerlab.control.reporting.ReportingClient;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeoutException;
@@ -32,7 +33,9 @@ class PeriodConductorFailureTest {
     private static ControlProperties props() {
         var second = Duration.ofSeconds(1);
         return new ControlProperties(
-            new ControlProperties.Periods(Duration.ofHours(1), second, second, second, second, Duration.ofHours(4)),
+            new ControlProperties.Periods(
+                Duration.ofHours(1), Duration.ofMinutes(1), Duration.ofMinutes(10), Duration.ofMinutes(5), Duration.ofMinutes(5),
+                Duration.ofMinutes(40), Duration.ofHours(4)),
             null, null, null, null, null, null, null, null, null, new ControlProperties.Reporting("http://localhost", second),
             null, null, null, null, null, null, null);
     }
@@ -47,7 +50,7 @@ class PeriodConductorFailureTest {
         });
         var conductor = new PeriodConductor(
             periods, mock(LedgerClient.class), mock(GatewayClient.class), mock(GeneratorClient.class), mock(ReportingClient.class), live,
-            mock(ChaosRepository.class), mock(AvailabilityRepository.class), mock(DatabaseClock.class), props());
+            mock(ChaosRepository.class), mock(AvailabilityRepository.class), mock(DatabaseClock.class), props(), new SimpleMeterRegistry());
 
         conductor.tick(NOW);
 

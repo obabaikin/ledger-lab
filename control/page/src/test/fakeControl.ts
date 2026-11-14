@@ -98,6 +98,8 @@ export const report = (changes: Partial<PeriodReport> = {}): PeriodReport => ({
     accountsCompared: true,
     accountsOutOfBalance: 0,
     accountExamples: [],
+    startedAt: '2026-11-11T11:10:02Z',
+    madeAt: '2026-11-11T11:10:09Z',
   },
   books: { accounts: 100_000, openingTotalCents: 10_000_000, balanceTotalCents: 10_000_000, balanced: true },
   client: {

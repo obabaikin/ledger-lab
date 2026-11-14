@@ -98,9 +98,28 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "madeAt" : {
+            "description" : "When the ledger kept the check",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "startedAt" : {
+            "description" : "When the ledger began the check",
+            "format" : "date-time",
+            "type" : "string"
+          },
           "transfersWithInvalidJournal" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PeriodCheckState" : {
+        "properties" : {
+          "check" : {
+            "$ref" : "#/components/schemas/PeriodCheck",
+            "description" : "Absent until the check asked for by POST has finished"
           }
         },
         "type" : "object"
@@ -177,6 +196,42 @@
       }
     },
     "/internal/periods/{periodStart}/check" : {
+      "get" : {
+        "operationId" : "checkState",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "periodStart",
+          "required" : true,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PeriodCheckState"
+                }
+              }
+            },
+            "description" : "The check once finished, else none"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not a period, not ended yet, or older than the ledger keeps"
+          }
+        },
+        "summary" : "Whether the period's check is made, without counting its transfers",
+        "tags" : [ "period-controller" ]
+      },
       "post" : {
         "operationId" : "check",
         "parameters" : [ {
@@ -190,7 +245,7 @@
         } ],
         "responses" : {
           "202" : {
-            "description" : "Started, running or already made; the reconciliation shows it when finished"
+            "description" : "Started, running or already made; GET shows it when finished"
           },
           "404" : {
             "content" : {

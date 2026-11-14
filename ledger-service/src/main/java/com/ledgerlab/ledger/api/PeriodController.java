@@ -1,6 +1,7 @@
 package com.ledgerlab.ledger.api;
 
 import com.ledgerlab.ledger.domain.Books;
+import com.ledgerlab.ledger.domain.PeriodCheckState;
 import com.ledgerlab.ledger.domain.PeriodReconciliation;
 import com.ledgerlab.ledger.persistence.ReconciliationProperties;
 import com.ledgerlab.ledger.service.PeriodCheckStarter;
@@ -51,8 +52,16 @@ public class PeriodController {
         return periods.reconciliation(periodStart);
     }
 
+    @Operation(summary = "Whether the period's check is made, without counting its transfers")
+    @ApiResponse(responseCode = "200", description = "The check once finished, else none")
+    @ApiResponse(responseCode = "404", description = "Not a period, not ended yet, or older than the ledger keeps", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @GetMapping("/periods/{periodStart}/check")
+    public PeriodCheckState checkState(@PathVariable Instant periodStart) {
+        return periods.check(periodStart);
+    }
+
     @Operation(summary = "Start the period's check in the background; call once all its transfers are booked")
-    @ApiResponse(responseCode = "202", description = "Started, running or already made; the reconciliation shows it when finished")
+    @ApiResponse(responseCode = "202", description = "Started, running or already made; GET shows it when finished")
     @ApiResponse(responseCode = "404", description = "Not a period, not ended yet, or older than the ledger keeps", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @PostMapping("/periods/{periodStart}/check")
     @ResponseStatus(HttpStatus.ACCEPTED)

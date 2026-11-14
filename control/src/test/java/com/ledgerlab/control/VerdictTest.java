@@ -45,7 +45,7 @@ class VerdictTest {
     private static PeriodCheck check(boolean balanced) {
         return new PeriodCheck(
             1800, 5000, 5000, 0, List.of(), true, balanced ? 0 : 1, balanced ? List.of() : List.of(new AccountMismatch(17, -500, -400)),
-            balanced ? List.of() : List.of(LedgerCheck.EVERY_ACCOUNT_MATCHES_JOURNAL), balanced);
+            balanced ? List.of() : List.of(LedgerCheck.EVERY_ACCOUNT_MATCHES_JOURNAL), balanced, null, null);
     }
 
     private static Books books(boolean balanced) {
@@ -139,7 +139,7 @@ class VerdictTest {
     @DisplayName("a check that could not compare the accounts with the period before is noted and does not change the verdict")
     void a_check_that_could_not_compare_the_accounts_with_the_period_before_is_noted_and_does_not_change_the_verdict() {
         var gateway = gateway(1000, 900, 100);
-        var notCompared = new PeriodCheck(1800, 5000, 5000, 0, List.of(), false, 0, List.of(), List.of(), true);
+        var notCompared = new PeriodCheck(1800, 5000, 5000, 0, List.of(), false, 0, List.of(), List.of(), true, null, null);
 
         var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), notCompared, books(true), client(), stats(1000, 900, 100), List.of());
 

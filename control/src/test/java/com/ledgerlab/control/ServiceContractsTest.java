@@ -27,6 +27,7 @@ import com.ledgerlab.control.ledger.AccountMismatch;
 import com.ledgerlab.control.ledger.Books;
 import com.ledgerlab.control.ledger.LedgerApi;
 import com.ledgerlab.control.ledger.LedgerCheck;
+import com.ledgerlab.control.ledger.LedgerCheckState;
 import com.ledgerlab.control.ledger.LedgerReconciliation;
 import com.ledgerlab.control.ledger.PeriodCheck;
 import com.ledgerlab.control.reporting.PeriodStats;
@@ -107,6 +108,7 @@ class ServiceContractsTest {
     private final List<Model> answers = List.of(
         new Model(ledger, LedgerReconciliation.class, "PeriodReconciliation"),
         new Model(ledger, PeriodCheck.class),
+        new Model(ledger, LedgerCheckState.class, "PeriodCheckState"),
         new Model(ledger, AccountMismatch.class),
         new Model(ledger, Books.class),
         new Model(gateway, PeriodSummary.class),
@@ -144,6 +146,7 @@ class ServiceContractsTest {
     void every_call_control_makes_is_in_the_spec_of_its_service_with_its_parameters() {
         var calls = List.of(
             new Call(ledger, HttpMethod.GET, LedgerApi.RECONCILIATION_PATH),
+            new Call(ledger, HttpMethod.GET, LedgerApi.CHECK_PATH),
             new Call(ledger, HttpMethod.POST, LedgerApi.CHECK_PATH),
             new Call(ledger, HttpMethod.GET, LedgerApi.BOOKS_PATH),
             new Call(gateway, HttpMethod.GET, GatewayApi.SUMMARY_PATH),
@@ -183,6 +186,7 @@ class ServiceContractsTest {
     void every_answer_control_tells_apart_is_a_code_the_service_declares() {
         var declared = List.of(
             new Answers(ledger, HttpMethod.GET, LedgerApi.RECONCILIATION_PATH, List.of("200", "404")),
+            new Answers(ledger, HttpMethod.GET, LedgerApi.CHECK_PATH, List.of("200", "404")),
             new Answers(ledger, HttpMethod.POST, LedgerApi.CHECK_PATH, List.of("202")),
             new Answers(ledger, HttpMethod.GET, LedgerApi.BOOKS_PATH, List.of("200")),
             new Answers(gateway, HttpMethod.GET, GatewayApi.SUMMARY_PATH, List.of("200", "404")),

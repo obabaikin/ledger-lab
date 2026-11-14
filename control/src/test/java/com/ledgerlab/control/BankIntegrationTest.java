@@ -1,8 +1,10 @@
 package com.ledgerlab.control;
 
 import static com.ledgerlab.control.Fixtures.books;
+import static com.ledgerlab.control.Fixtures.check;
 import static com.ledgerlab.control.Fixtures.clientReconciliation;
 import static com.ledgerlab.control.Fixtures.closed;
+import static com.ledgerlab.control.Fixtures.mapOf;
 import static com.ledgerlab.control.Fixtures.reconciliation;
 import static com.ledgerlab.control.Fixtures.stats;
 import static com.ledgerlab.control.Fixtures.summary;
@@ -11,11 +13,14 @@ import static com.ledgerlab.control.http.ServiceHttp.forPeriod;
 import com.ledgerlab.control.gateway.GatewayApi;
 import com.ledgerlab.control.generator.GeneratorApi;
 import com.ledgerlab.control.ledger.LedgerApi;
+import com.ledgerlab.control.periods.PeriodCall;
 import com.ledgerlab.control.reporting.ReportingApi;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /** The tests pass the conductor the time of each tick, so a period's hour takes them no time. */
@@ -26,9 +31,55 @@ abstract class BankIntegrationTest extends IntegrationTest {
     protected static final Instant PERIOD = Instant.parse("2026-11-10T11:00:00Z");
     protected static final Instant NEXT_PERIOD = PERIOD.plus(LENGTH);
     protected static final Duration CLOSE_DELAY = Duration.ofSeconds(60);
+    protected static final Duration SETTLE_DELAY = Duration.ofMinutes(10);
+    protected static final Duration CHECK_WAIT = Duration.ofMinutes(5);
+    protected static final Duration RETRY_WAIT = Duration.ofMinutes(5);
+    protected static final Duration VERDICT_DEADLINE = Duration.ofMinutes(40);
+
+    private final Map<PeriodCall, Double> callsBefore = new EnumMap<>(PeriodCall.class);
+
+    @BeforeEach
+    void rememberCalls() {
+        for (var call : PeriodCall.values()) {
+            callsBefore.put(call, callCount(call));
+        }
+    }
+
+    private double callCount(PeriodCall call) {
+        var counter = meters.find(PeriodCall.METRIC).tag(PeriodCall.CALL_TAG, call.tag()).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    /** The calls of this kind control made in this test, by every instance of it. */
+    protected int calls(PeriodCall call) {
+        return (int) (callCount(call) - callsBefore.getOrDefault(call, 0.0));
+    }
+
+    protected static Instant endOf(Instant period) {
+        return period.plus(LENGTH);
+    }
 
     protected static Instant closingTimeOf(Instant period) {
-        return period.plus(LENGTH).plus(CLOSE_DELAY);
+        return endOf(period).plus(CLOSE_DELAY);
+    }
+
+    protected static Instant countTimeOf(Instant period) {
+        return endOf(period).plus(SETTLE_DELAY);
+    }
+
+    protected static Instant askTimeOf(Instant period) {
+        return countTimeOf(period).plus(CHECK_WAIT);
+    }
+
+    protected static Instant deadlineOf(Instant period) {
+        return endOf(period).plus(VERDICT_DEADLINE);
+    }
+
+    /** A tick every {@code step} from {@code from} up to, not including, {@code to}. */
+    protected void ticks(Instant from, Instant to, Duration step) {
+        for (var at = from; at.isBefore(to); at = at.plus(step)) {
+            conductor.tick(at);
+        }
     }
 
     /** The bank starts in the period: control opens the one its first tick falls in. */
@@ -40,14 +91,18 @@ abstract class BankIntegrationTest extends IntegrationTest {
         gateway.answer("POST", forPeriod(GatewayApi.CLOSE_PATH, period), 200, closed(period, Fixtures.ACCEPTED));
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, period), 200, summary(period));
         ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, period), 200, reconciliation(period));
+        ledger.answer("GET", forPeriod(LedgerApi.CHECK_PATH, period), 200, mapOf("check", check(true)));
+        ledger.answer("POST", forPeriod(LedgerApi.CHECK_PATH, period), 202);
         ledger.answer("GET", LedgerApi.BOOKS_PATH, 200, books(true));
         generator.answer("GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, period), 200, clientReconciliation(period, "DONE"));
+        generator.answer("POST", forPeriod(GeneratorApi.RECONCILIATION_PATH, period), 202, clientReconciliation(period, "RUNNING"));
         reporting.answer("GET", forPeriod(ReportingApi.STATS_PATH, period), 200, stats(period));
     }
 
     protected void closeAndReconcile(Instant period) {
         conductor.tick(closingTimeOf(period));
-        conductor.tick(closingTimeOf(period).plusSeconds(1));
+        conductor.tick(countTimeOf(period));
+        conductor.tick(askTimeOf(period));
     }
 
     /** A new instance of control knows nothing of the period the one before it was settling. */

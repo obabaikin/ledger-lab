@@ -17,27 +17,45 @@ import static com.ledgerlab.control.Fixtures.summary;
 import static com.ledgerlab.control.http.ServiceHttp.forPeriod;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ledgerlab.control.availability.AvailabilityRepository;
+import com.ledgerlab.control.chaos.ChaosRepository;
 import com.ledgerlab.control.gateway.GatewayApi;
+import com.ledgerlab.control.gateway.GatewayClient;
 import com.ledgerlab.control.generator.GeneratorApi;
+import com.ledgerlab.control.generator.GeneratorClient;
 import com.ledgerlab.control.ledger.LedgerApi;
+import com.ledgerlab.control.ledger.LedgerClient;
+import com.ledgerlab.control.periods.PeriodCall;
+import com.ledgerlab.control.periods.PeriodConductor;
+import com.ledgerlab.control.periods.PeriodRepository;
 import com.ledgerlab.control.reporting.ReportingApi;
+import com.ledgerlab.control.reporting.ReportingClient;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 class PeriodConductorTest extends BankIntegrationTest {
 
     private static final Instant THIRD_PERIOD = NEXT_PERIOD.plus(LENGTH);
-    private static final Duration DRAIN_TIMEOUT = Duration.ofMinutes(10);
-    private static final Duration DRAIN_STALL_TIMEOUT = Duration.ofSeconds(60);
-    private static final Duration REQUEST_RETRY = Duration.ofSeconds(30);
-    private static final Duration CATCH_UP_WAIT = Duration.ofSeconds(60);
     private static final Duration DETAILS_RETENTION = Duration.ofHours(4);
+    /** Fine enough to see a call made too early, coarse enough to keep a period's closing short. */
+    private static final Duration STEP = Duration.ofSeconds(5);
+
+    @Autowired PeriodRepository periodRepository;
+    @Autowired LedgerClient ledgerClient;
+    @Autowired GatewayClient gatewayClient;
+    @Autowired GeneratorClient generatorClient;
+    @Autowired ReportingClient reportingClient;
+    @Autowired ChaosRepository chaosRepository;
+    @Autowired AvailabilityRepository availabilityRepository;
+    @Autowired DatabaseClock databaseClock;
 
     private int closeCalls(Instant period) {
         return gateway.callsTo("POST", forPeriod(GatewayApi.CLOSE_PATH, period)).size();
@@ -57,6 +75,30 @@ class PeriodConductorTest extends BankIntegrationTest {
         return view;
     }
 
+    private void checkNotMade(Instant period) {
+        ledger.answer("GET", forPeriod(LedgerApi.CHECK_PATH, period), 200, mapOf("check", null));
+    }
+
+    private void notDrained(Instant period, long posted) {
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, period), 200, summary(period, ACCEPTED, posted, REJECTED, REASONS));
+    }
+
+    /** Every action from the close to the deadline, each when it is due. */
+    private void tickUpToTheDeadline(Instant period) {
+        conductor.tick(closingTimeOf(period));
+        ticks(countTimeOf(period), deadlineOf(period), RETRY_WAIT);
+        conductor.tick(deadlineOf(period).minusSeconds(1));
+    }
+
+    private void failsAtTheDeadlineWith(String failure) {
+        tickUpToTheDeadline(PERIOD);
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+
+        conductor.tick(deadlineOf(PERIOD));
+
+        assertThat(periodView(PERIOD).get("failure")).isEqualTo(failure);
+    }
+
     @Test
     @DisplayName("a period is closed a minute after its end, not before, and only once")
     void a_period_is_closed_a_minute_after_its_end_not_before_and_only_once() {
@@ -71,10 +113,115 @@ class PeriodConductorTest extends BankIntegrationTest {
         assertThat(closeCalls(PERIOD)).isEqualTo(1);
         assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
-        conductor.tick(closingTimeOf(PERIOD).plusSeconds(1));
-        conductor.tick(closingTimeOf(PERIOD).plusSeconds(2));
+        conductor.tick(countTimeOf(PERIOD));
+        conductor.tick(askTimeOf(PERIOD));
         assertThat(stateOf(PERIOD)).isEqualTo("RECONCILED");
         assertThat(closeCalls(PERIOD)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("until its counts are due nothing is asked about a closed period, and then the gateway, the ledger and reporting once each")
+    void until_its_counts_are_due_nothing_is_asked_about_a_closed_period_and_then_the_gateway_the_ledger_and_reporting_once_each() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+
+        ticks(closingTimeOf(PERIOD), countTimeOf(PERIOD), STEP);
+
+        assertThat(calls(PeriodCall.GATEWAY_CLOSE)).isEqualTo(1);
+        for (var call : PeriodCall.values()) {
+            if (call != PeriodCall.GATEWAY_CLOSE) {
+                assertThat(calls(call)).as(call.tag()).isZero();
+            }
+        }
+
+        conductor.tick(countTimeOf(PERIOD));
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_RECONCILIATION)).isEqualTo(1);
+        assertThat(calls(PeriodCall.REPORTING_STATS)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("counts that do not agree yet are read again after the wait, and not in between")
+    void counts_that_do_not_agree_yet_are_read_again_after_the_wait_and_not_in_between() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        notDrained(PERIOD, POSTED - 10);
+        conductor.tick(closingTimeOf(PERIOD));
+
+        ticks(countTimeOf(PERIOD), countTimeOf(PERIOD).plus(RETRY_WAIT), STEP);
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_RECONCILIATION)).isEqualTo(1);
+        assertThat(checkRequests(PERIOD)).isZero();
+
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT));
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(2);
+        assertThat(calls(PeriodCall.LEDGER_RECONCILIATION)).isEqualTo(2);
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("once the counts agree, the check and the clients' reconciliation start at once and are asked about after the wait, then every wait")
+    void once_the_counts_agree_the_check_and_the_clients_reconciliation_start_at_once_and_are_asked_about_after_the_wait_then_every_wait() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        checkNotMade(PERIOD);
+        generator.answer("GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD), 200, clientReconciliation(PERIOD, "RUNNING"));
+        conductor.tick(closingTimeOf(PERIOD));
+
+        conductor.tick(countTimeOf(PERIOD));
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+        assertThat(clientRequests(PERIOD)).isEqualTo(1);
+
+        ticks(countTimeOf(PERIOD).plus(STEP), askTimeOf(PERIOD), STEP);
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isZero();
+        assertThat(calls(PeriodCall.GENERATOR_RECONCILIATION)).isZero();
+
+        ticks(askTimeOf(PERIOD), askTimeOf(PERIOD).plus(RETRY_WAIT), STEP);
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isEqualTo(1);
+        assertThat(calls(PeriodCall.GENERATOR_RECONCILIATION)).isEqualTo(1);
+        assertThat(clientRequests(PERIOD)).isEqualTo(1);
+
+        ledger.answer("GET", forPeriod(LedgerApi.CHECK_PATH, PERIOD), 200, mapOf("check", check(true)));
+        generator.answer("GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD), 200, clientReconciliation(PERIOD, "DONE"));
+        conductor.tick(askTimeOf(PERIOD).plus(RETRY_WAIT));
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isEqualTo(2);
+        assertThat(stateOf(PERIOD)).isEqualTo("RECONCILED");
+    }
+
+    @Test
+    @DisplayName("an ordinary closing reads the period's transfers once in the gateway and once in the ledger")
+    void an_ordinary_closing_reads_the_periods_transfers_once_in_the_gateway_and_once_in_the_ledger() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+
+        ticks(closingTimeOf(PERIOD), askTimeOf(PERIOD).plus(RETRY_WAIT), STEP);
+
+        assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_RECONCILIATION)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_BOOKS)).isEqualTo(1);
+        assertThat(ledger.callsTo("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD))).hasSize(1);
+        assertThat(gateway.callsTo("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD))).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("the verdict rests on the counts kept when they agreed, not on the bank's counts at the verdict")
+    void the_verdict_rests_on_the_counts_kept_when_they_agreed_not_on_the_banks_counts_at_the_verdict() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
+
+        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED + 5, POSTED + 5, REJECTED, REASONS));
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED + 5, REJECTED, REASONS, null));
+        conductor.tick(askTimeOf(PERIOD));
+
+        assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
+        var report = reportOf(PERIOD);
+        assertThat(((Map<?, ?>) report.get("gateway")).get("accepted")).isEqualTo((int) ACCEPTED);
+        assertThat(((Map<?, ?>) report.get("ledger")).get("postedTransfers")).isEqualTo((int) POSTED);
     }
 
     @Test
@@ -131,7 +278,7 @@ class PeriodConductorTest extends BankIntegrationTest {
         bankAnswersFor(PERIOD);
         gateway.answer("POST", forPeriod(GatewayApi.CLOSE_PATH, PERIOD), 200, closed(PERIOD, 0));
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, 0, 0, 0, Map.of()));
-        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, 0, 0, Map.of(), check(true)));
+        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, 0, 0, Map.of(), null));
         reporting.answer("GET", forPeriod(ReportingApi.STATS_PATH, PERIOD), 200, stats(PERIOD, 0, 0, 0));
 
         closeAndReconcile(PERIOD);
@@ -142,27 +289,39 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("a bank that does not answer past the limit fails the period with the reason, and the next period is closed and reconciled")
-    void a_bank_that_does_not_answer_past_the_limit_fails_the_period_with_the_reason_and_the_next_period_is_closed_and_reconciled() {
+    @DisplayName("a bank that does not answer by the deadline fails the period with the reason, and the next period is closed and reconciled")
+    void a_bank_that_does_not_answer_by_the_deadline_fails_the_period_with_the_reason_and_the_next_period_is_closed_and_reconciled() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 503);
-        var closing = closingTimeOf(PERIOD);
 
-        conductor.tick(closing);
-        conductor.tick(closing.plus(DRAIN_TIMEOUT).minusSeconds(1));
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
-
-        conductor.tick(closing.plus(DRAIN_TIMEOUT));
+        failsAtTheDeadlineWith("BANK_UNAVAILABLE");
         var failed = periodView(PERIOD);
         assertThat(failed.get("state")).isEqualTo("FAILED");
-        assertThat(failed.get("failure")).isEqualTo("BANK_UNAVAILABLE");
         assertThat(failed.get("verdict")).isNull();
         assertThat(reportOf(PERIOD)).isNull();
 
         bankAnswersFor(NEXT_PERIOD);
         closeAndReconcile(NEXT_PERIOD);
         assertThat(stateOf(NEXT_PERIOD)).isEqualTo("RECONCILED");
+    }
+
+    @Test
+    @DisplayName("a gateway that does not close the period is asked again after the wait and fails it at the deadline")
+    void a_gateway_that_does_not_close_the_period_is_asked_again_after_the_wait_and_fails_it_at_the_deadline() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        gateway.answer("POST", forPeriod(GatewayApi.CLOSE_PATH, PERIOD), 503);
+
+        ticks(closingTimeOf(PERIOD), closingTimeOf(PERIOD).plus(RETRY_WAIT), STEP);
+        assertThat(closeCalls(PERIOD)).isEqualTo(1);
+        conductor.tick(closingTimeOf(PERIOD).plus(RETRY_WAIT));
+        assertThat(closeCalls(PERIOD)).isEqualTo(2);
+
+        conductor.tick(deadlineOf(PERIOD).minusSeconds(1));
+        assertThat(stateOf(PERIOD)).isEqualTo("CLOSING");
+        conductor.tick(deadlineOf(PERIOD));
+        assertThat(periodView(PERIOD).get("failure")).isEqualTo("PERIOD_NOT_CLOSED");
     }
 
     @Test
@@ -173,56 +332,102 @@ class PeriodConductorTest extends BankIntegrationTest {
         var restarted = closingTimeOf(THIRD_PERIOD);
 
         conductor.tick(restarted);
-        conductor.tick(restarted.plusSeconds(1));
-        assertThat(periodsInOrder()).containsExactly("RECONCILED", "OPEN", "OPEN", "OPEN");
+        assertThat(periodsInOrder()).containsExactly("DRAINING", "OPEN", "OPEN", "OPEN");
 
-        for (var second = 2; second <= 5; second++) {
-            conductor.tick(restarted.plusSeconds(second));
-        }
+        ticks(restarted.plusSeconds(1), restarted.plus(Duration.ofMinutes(20)), Duration.ofSeconds(30));
         assertThat(periodsInOrder()).containsExactly("RECONCILED", "RECONCILED", "RECONCILED", "OPEN");
         assertThat(gateway.calls.stream().filter(it -> it.method().equals("POST")).map(StubService.Call::path).toList()).containsExactly(
             forPeriod(GatewayApi.CLOSE_PATH, PERIOD), forPeriod(GatewayApi.CLOSE_PATH, NEXT_PERIOD), forPeriod(GatewayApi.CLOSE_PATH, THIRD_PERIOD));
     }
 
     @Test
-    @DisplayName("a period control left half settled when it went down is settled after the restart, with its limit started again")
-    void a_period_control_left_half_settled_when_it_went_down_is_settled_after_the_restart_with_its_limit_started_again() {
+    @DisplayName("a restarted control takes the next action when it is due, not before and not twice")
+    void a_restarted_control_takes_the_next_action_when_it_is_due_not_before_and_not_twice() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
-        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED, REJECTED, REASONS, null));
         conductor.tick(closingTimeOf(PERIOD));
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
         controlRestarts();
-        var back = closingTimeOf(PERIOD).plus(DRAIN_TIMEOUT).plusSeconds(60);
-        conductor.tick(back);
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
-        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+        ticks(endOf(PERIOD).plus(Duration.ofMinutes(5)), countTimeOf(PERIOD), STEP);
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isZero();
+        conductor.tick(countTimeOf(PERIOD));
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(1);
 
-        conductor.tick(back.plus(DRAIN_TIMEOUT).minusSeconds(1));
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
-        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD));
-        conductor.tick(back.plus(DRAIN_TIMEOUT).minusSeconds(1));
+        controlRestarts();
+        ticks(countTimeOf(PERIOD).plusSeconds(30), askTimeOf(PERIOD), STEP);
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isZero();
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+        conductor.tick(askTimeOf(PERIOD));
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isEqualTo(1);
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(1);
         assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
     }
 
     @Test
-    @DisplayName("a drain that did not move while control was down is given its minute again after the restart")
-    void a_drain_that_did_not_move_while_control_was_down_is_given_its_minute_again_after_the_restart() {
+    @DisplayName("two instances of control on one database take every action once")
+    void two_instances_of_control_on_one_database_take_every_action_once() throws Exception {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
-        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 10, REJECTED, REASONS));
-        var closing = closingTimeOf(PERIOD);
-        conductor.tick(closing);
-        conductor.tick(closing.plusSeconds(1));
+        var other = new PeriodConductor(
+            periodRepository, ledgerClient, gatewayClient, generatorClient, reportingClient, bankLive, chaosRepository, availabilityRepository,
+            databaseClock, props, meters);
+
+        for (var at = closingTimeOf(PERIOD); at.isBefore(askTimeOf(PERIOD).plus(RETRY_WAIT)); at = at.plus(STEP)) {
+            var now = at;
+            try (var both = Executors.newVirtualThreadPerTaskExecutor()) {
+                var first = both.submit(() -> conductor.tick(now));
+                var second = both.submit(() -> other.tick(now));
+                first.get();
+                second.get();
+            }
+        }
+
+        assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
+        assertThat(closeCalls(PERIOD)).isEqualTo(1);
+        assertThat(calls(PeriodCall.GATEWAY_SUMMARY)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_RECONCILIATION)).isEqualTo(1);
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+        assertThat(clientRequests(PERIOD)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_CHECK)).isEqualTo(1);
+        assertThat(calls(PeriodCall.LEDGER_BOOKS)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a period control left half settled when it went down is settled after the restart, with its deadline started again")
+    void a_period_control_left_half_settled_when_it_went_down_is_settled_after_the_restart_with_its_deadline_started_again() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        checkNotMade(PERIOD);
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
 
         controlRestarts();
-        var back = closing.plusSeconds(300);
+        var back = deadlineOf(PERIOD).plusSeconds(60);
         conductor.tick(back);
-        conductor.tick(back.plus(DRAIN_STALL_TIMEOUT).minusSeconds(1));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+        assertThat(checkRequests(PERIOD)).isEqualTo(2);
+
+        ledger.answer("GET", forPeriod(LedgerApi.CHECK_PATH, PERIOD), 200, mapOf("check", check(true)));
+        conductor.tick(back.plus(RETRY_WAIT));
+        assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
+    }
+
+    @Test
+    @DisplayName("after a restart a count is not compared with one made before it: the time between says nothing about the bank")
+    void after_a_restart_a_count_is_not_compared_with_one_made_before_it_the_time_between_says_nothing_about_the_bank() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        notDrained(PERIOD, POSTED - 10);
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
+
+        controlRestarts();
+        conductor.tick(countTimeOf(PERIOD).plusSeconds(60));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT));
         assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
-        conductor.tick(back.plus(DRAIN_STALL_TIMEOUT));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT.multipliedBy(2)));
         assertThat(periodView(PERIOD).get("failure")).isEqualTo("DRAIN_STALLED");
     }
 
@@ -245,20 +450,20 @@ class PeriodConductorTest extends BankIntegrationTest {
         window(closing.minusSeconds(120), windowEnd);
 
         conductor.tick(closing);
-        conductor.tick(closing.plus(DRAIN_TIMEOUT));
+        ticks(countTimeOf(PERIOD), windowEnd, RETRY_WAIT);
         conductor.tick(windowEnd.minusSeconds(1));
+        conductor.tick(windowEnd.plus(Duration.ofMinutes(30)));
         assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
-        conductor.tick(windowEnd.plus(DRAIN_TIMEOUT).minusSeconds(2));
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
         bankAnswersFor(PERIOD);
-        conductor.tick(windowEnd.plus(DRAIN_TIMEOUT).minusSeconds(2));
+        conductor.tick(windowEnd.plus(Duration.ofMinutes(35)));
+        conductor.tick(windowEnd.minusSeconds(1).plus(VERDICT_DEADLINE).minus(CLOSE_DELAY));
         assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
     }
 
     @Test
-    @DisplayName("after the maintenance window the limit runs again, and a cancelled window does not hold it")
-    void after_the_maintenance_window_the_limit_runs_again_and_a_cancelled_window_does_not_hold_it() {
+    @DisplayName("after the maintenance window the deadline runs again, and a cancelled window does not hold it")
+    void after_the_maintenance_window_the_deadline_runs_again_and_a_cancelled_window_does_not_hold_it() {
         bankStartedIn(PERIOD);
         List.of(PERIOD, NEXT_PERIOD).forEach(this::bankAnswersFor);
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 503);
@@ -268,7 +473,7 @@ class PeriodConductorTest extends BankIntegrationTest {
         conductor.tick(closing);
         conductor.tick(windowEnd.minusSeconds(1));
 
-        conductor.tick(windowEnd.minusSeconds(1).plus(DRAIN_TIMEOUT));
+        conductor.tick(windowEnd.minusSeconds(1).plus(VERDICT_DEADLINE).minus(CLOSE_DELAY));
         assertThat(periodView(PERIOD).get("failure")).isEqualTo("BANK_UNAVAILABLE");
 
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, NEXT_PERIOD), 503);
@@ -278,7 +483,7 @@ class PeriodConductorTest extends BankIntegrationTest {
             .param("from", Timestamp.from(nextClosing.minusSeconds(120)))
             .update();
         conductor.tick(nextClosing);
-        conductor.tick(nextClosing.plus(DRAIN_TIMEOUT));
+        conductor.tick(deadlineOf(NEXT_PERIOD));
         assertThat(periodView(NEXT_PERIOD).get("failure")).isEqualTo("BANK_UNAVAILABLE");
     }
 
@@ -306,70 +511,77 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("the ledger's check is asked for once the period is drained, and again only after a while without it")
-    void the_ledgers_check_is_asked_for_once_the_period_is_drained_and_again_only_after_a_while_without_it() {
+    @DisplayName("a period the ledger does not know when asked about its check fails at once")
+    void a_period_the_ledger_does_not_know_when_asked_about_its_check_fails_at_once() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
-        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED, REJECTED, REASONS, null));
-        var closing = closingTimeOf(PERIOD);
+        ledger.answer("GET", forPeriod(LedgerApi.CHECK_PATH, PERIOD), 404, mapOf("error", "unknown-period"));
 
-        conductor.tick(closing);
-        assertThat(checkRequests(PERIOD)).isZero();
-        conductor.tick(closing.plusSeconds(1));
-        conductor.tick(closing.plusSeconds(2));
-        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+        closeAndReconcile(PERIOD);
 
-        conductor.tick(closing.plusSeconds(1).plus(REQUEST_RETRY));
-        assertThat(checkRequests(PERIOD)).isEqualTo(2);
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
-
-        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD));
-        conductor.tick(closing.plusSeconds(2).plus(REQUEST_RETRY));
-        assertThat(stateOf(PERIOD)).isEqualTo("RECONCILED");
+        assertThat(periodView(PERIOD).get("failure")).isEqualTo("PERIOD_UNKNOWN_TO_BANK");
     }
 
     @Test
-    @DisplayName("the clients' reconciliation is asked for, and again after a while when the generator forgot it or failed at it")
-    void the_clients_reconciliation_is_asked_for_and_again_after_a_while_when_the_generator_forgot_it_or_failed_at_it() {
+    @DisplayName("a check not there when asked about is asked for again in the same question")
+    void a_check_not_there_when_asked_about_is_asked_for_again_in_the_same_question() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        checkNotMade(PERIOD);
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
+        assertThat(checkRequests(PERIOD)).isEqualTo(1);
+
+        conductor.tick(askTimeOf(PERIOD));
+        assertThat(checkRequests(PERIOD)).isEqualTo(2);
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+
+        ledger.answer("GET", forPeriod(LedgerApi.CHECK_PATH, PERIOD), 200, mapOf("check", check(true)));
+        conductor.tick(askTimeOf(PERIOD).plus(RETRY_WAIT));
+        assertThat(stateOf(PERIOD)).isEqualTo("RECONCILED");
+        assertThat(checkRequests(PERIOD)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("the clients' reconciliation is started again when asked about and the generator forgot it or failed at it, not while it runs")
+    void the_clients_reconciliation_is_started_again_when_asked_about_and_the_generator_forgot_it_or_failed_at_it_not_while_it_runs() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
         var path = forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD);
         generator.answer("GET", path, 200, clientReconciliation(PERIOD, "NOT_STARTED"));
-        var closing = closingTimeOf(PERIOD);
-
-        conductor.tick(closing);
-        conductor.tick(closing.plusSeconds(1));
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
         assertThat(clientRequests(PERIOD)).isEqualTo(1);
 
-        generator.answer("GET", path, 200, clientReconciliation(PERIOD, "RUNNING"));
-        conductor.tick(closing.plusSeconds(1).plus(REQUEST_RETRY));
-        assertThat(clientRequests(PERIOD)).isEqualTo(1);
-
-        generator.answer("GET", path, 200, mapOf("periodStart", PERIOD, "state", "FAILED", "failure", "GATEWAY_UNAVAILABLE", "report", null));
-        conductor.tick(closing.plusSeconds(2).plus(REQUEST_RETRY));
+        conductor.tick(askTimeOf(PERIOD));
         assertThat(clientRequests(PERIOD)).isEqualTo(2);
 
+        generator.answer("GET", path, 200, clientReconciliation(PERIOD, "RUNNING"));
+        conductor.tick(askTimeOf(PERIOD).plus(RETRY_WAIT));
+        assertThat(clientRequests(PERIOD)).isEqualTo(2);
+
+        generator.answer("GET", path, 200, mapOf("periodStart", PERIOD, "state", "FAILED", "failure", "GATEWAY_UNAVAILABLE", "report", null));
+        conductor.tick(askTimeOf(PERIOD).plus(RETRY_WAIT.multipliedBy(2)));
+        assertThat(clientRequests(PERIOD)).isEqualTo(3);
+
         generator.answer("GET", path, 200, clientReconciliation(PERIOD, "DONE"));
-        conductor.tick(closing.plusSeconds(3).plus(REQUEST_RETRY));
+        conductor.tick(askTimeOf(PERIOD).plus(RETRY_WAIT.multipliedBy(3)));
         assertThat(stateOf(PERIOD)).isEqualTo("RECONCILED");
     }
 
     @Test
-    @DisplayName("a drain that stops moving for a minute fails the period with its counts, and the ledger is not asked to check books still open")
-    void a_drain_that_stops_moving_for_a_minute_fails_the_period_with_its_counts_and_the_ledger_is_not_asked_to_check_books_still_open() {
+    @DisplayName("two counts in a row without progress fail the period with its counts, and the ledger is not asked to check books still open")
+    void two_counts_in_a_row_without_progress_fail_the_period_with_its_counts_and_the_ledger_is_not_asked_to_check_books_still_open() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
-        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 10, REJECTED, REASONS));
+        notDrained(PERIOD, POSTED - 10);
         ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED - 1, REJECTED, REASONS, null));
-        generator.answer("GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD), 200, clientReconciliation(PERIOD, "NOT_STARTED"));
-        var closing = closingTimeOf(PERIOD);
+        conductor.tick(closingTimeOf(PERIOD));
 
-        conductor.tick(closing);
-        conductor.tick(closing.plusSeconds(1));
-        conductor.tick(closing.plusSeconds(1).plus(DRAIN_STALL_TIMEOUT).minusSeconds(1));
+        ticks(countTimeOf(PERIOD), countTimeOf(PERIOD).plus(RETRY_WAIT), STEP);
         assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
-        conductor.tick(closing.plusSeconds(1).plus(DRAIN_STALL_TIMEOUT));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT));
         var view = periodView(PERIOD);
         assertThat(view.get("failure")).isEqualTo("DRAIN_STALLED");
         assertThat(view.get("numbers")).isEqualTo(mapOf(
@@ -386,26 +598,22 @@ class PeriodConductorTest extends BankIntegrationTest {
         bankAnswersFor(PERIOD);
         ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED + 1, REJECTED, REASONS, null));
 
-        closeAndReconcile(PERIOD);
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
 
         assertThat(periodView(PERIOD).get("failure")).isEqualTo("MORE_RESULTS_THAN_ACCEPTED");
         assertThat(checkRequests(PERIOD)).isZero();
     }
 
     @Test
-    @DisplayName("a clients' reconciliation that says it is done and carries no report fails the period at the limit, and the next period goes on")
-    void a_clients_reconciliation_that_says_it_is_done_and_carries_no_report_fails_the_period_at_the_limit_and_the_next_period_goes_on() {
+    @DisplayName("a clients' reconciliation that says it is done and carries no report fails the period at the deadline, and the next period goes on")
+    void a_clients_reconciliation_that_says_it_is_done_and_carries_no_report_fails_the_period_at_the_deadline_and_the_next_period_goes_on() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
         generator.answer(
             "GET", forPeriod(GeneratorApi.RECONCILIATION_PATH, PERIOD), 200, mapOf("periodStart", PERIOD, "state", "DONE", "failure", null, "report", null));
-        var closing = closingTimeOf(PERIOD);
 
-        conductor.tick(closing);
-        conductor.tick(closing.plusSeconds(1));
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
-        conductor.tick(closing.plus(DRAIN_TIMEOUT));
-        assertThat(periodView(PERIOD).get("failure")).isEqualTo("CLIENT_RECONCILIATION_UNAVAILABLE");
+        failsAtTheDeadlineWith("CLIENT_RECONCILIATION_UNAVAILABLE");
 
         bankAnswersFor(NEXT_PERIOD);
         closeAndReconcile(NEXT_PERIOD);
@@ -413,37 +621,41 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("a drain that moves again is waited for")
-    void a_drain_that_moves_again_is_waited_for() {
+    @DisplayName("a drain that moves between counts is waited for")
+    void a_drain_that_moves_between_counts_is_waited_for() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
-        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 10, REJECTED, REASONS));
-        var closing = closingTimeOf(PERIOD);
-        conductor.tick(closing);
-        conductor.tick(closing.plusSeconds(1));
+        notDrained(PERIOD, POSTED - 10);
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
 
-        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 5, REJECTED, REASONS));
-        conductor.tick(closing.plus(DRAIN_STALL_TIMEOUT));
-        conductor.tick(closing.plusSeconds(1).plus(DRAIN_STALL_TIMEOUT));
+        notDrained(PERIOD, POSTED - 5);
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT));
         assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD));
-        conductor.tick(closing.plusSeconds(2).plus(DRAIN_STALL_TIMEOUT));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT.multipliedBy(2)));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT.multipliedBy(2)).plus(CHECK_WAIT));
         assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
     }
 
     @Test
-    @DisplayName("a drain that still moves at the limit fails as a drain timed out and keeps its counts")
-    void a_drain_that_still_moves_at_the_limit_fails_as_a_drain_timed_out_and_keeps_its_counts() {
+    @DisplayName("a drain that still moves at the deadline fails as a drain timed out, forty minutes after the period's end, and keeps its counts")
+    void a_drain_that_still_moves_at_the_deadline_fails_as_a_drain_timed_out_forty_minutes_after_the_periods_end_and_keeps_its_counts() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
-        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 10, REJECTED, REASONS));
-        var closing = closingTimeOf(PERIOD);
+        conductor.tick(closingTimeOf(PERIOD));
+        var posted = POSTED - 100;
+        for (var at = countTimeOf(PERIOD); at.isBefore(deadlineOf(PERIOD)); at = at.plus(RETRY_WAIT)) {
+            notDrained(PERIOD, posted++);
+            conductor.tick(at);
+        }
+        notDrained(PERIOD, posted++);
+        conductor.tick(deadlineOf(PERIOD).minusSeconds(1));
+        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
 
-        conductor.tick(closing);
-        conductor.tick(closing.plus(DRAIN_TIMEOUT).minusSeconds(30));
-        gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD, ACCEPTED, POSTED - 5, REJECTED, REASONS));
-        conductor.tick(closing.plus(DRAIN_TIMEOUT));
+        notDrained(PERIOD, posted);
+        conductor.tick(deadlineOf(PERIOD));
 
         var view = periodView(PERIOD);
         assertThat(view.get("failure")).isEqualTo("DRAIN_TIMED_OUT");
@@ -451,52 +663,52 @@ class PeriodConductorTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("a drained period whose check never comes fails at the limit as check unavailable")
-    void a_drained_period_whose_check_never_comes_fails_at_the_limit_as_check_unavailable() {
+    @DisplayName("a drained period whose check never comes fails at the deadline as check unavailable")
+    void a_drained_period_whose_check_never_comes_fails_at_the_deadline_as_check_unavailable() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
-        ledger.answer("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, PERIOD), 200, reconciliation(PERIOD, POSTED, REJECTED, REASONS, null));
-        var closing = closingTimeOf(PERIOD);
+        checkNotMade(PERIOD);
 
-        conductor.tick(closing);
-        conductor.tick(closing.plus(DRAIN_TIMEOUT));
-
-        assertThat(periodView(PERIOD).get("failure")).isEqualTo("LEDGER_CHECK_UNAVAILABLE");
+        failsAtTheDeadlineWith("LEDGER_CHECK_UNAVAILABLE");
     }
 
     @Test
-    @DisplayName("results that arrive between the gateway's two reads are not taken for a difference in the reasons")
-    void results_that_arrive_between_the_gateways_two_reads_are_not_taken_for_a_difference_in_the_reasons() {
+    @DisplayName("books the ledger does not sum by the deadline fail the period as books unavailable")
+    void books_the_ledger_does_not_sum_by_the_deadline_fail_the_period_as_books_unavailable() {
+        bankStartedIn(PERIOD);
+        bankAnswersFor(PERIOD);
+        ledger.answer("GET", LedgerApi.BOOKS_PATH, 503);
+
+        failsAtTheDeadlineWith("BOOKS_UNAVAILABLE");
+    }
+
+    @Test
+    @DisplayName("results that arrive between the gateway's two reads are not taken for a difference in the reasons: the period is counted again")
+    void results_that_arrive_between_the_gateways_two_reads_are_not_taken_for_a_difference_in_the_reasons_the_period_is_counted_again() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
         gateway.answer(
             "GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200,
             summary(PERIOD, ACCEPTED, POSTED, REJECTED, Map.of("INSUFFICIENT_FUNDS", 60L, "BLOCKED_ACCOUNT", 39L)));
-        var closing = closingTimeOf(PERIOD);
-
-        conductor.tick(closing);
-        conductor.tick(closing.plusSeconds(1));
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+        conductor.tick(closingTimeOf(PERIOD));
+        conductor.tick(countTimeOf(PERIOD));
+        assertThat(checkRequests(PERIOD)).isZero();
 
         gateway.answer("GET", forPeriod(GatewayApi.SUMMARY_PATH, PERIOD), 200, summary(PERIOD));
-        conductor.tick(closing.plusSeconds(2));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT));
+        conductor.tick(countTimeOf(PERIOD).plus(RETRY_WAIT).plus(CHECK_WAIT));
         assertThat(periodView(PERIOD).get("verdict")).isEqualTo("BALANCED");
     }
 
     @Test
-    @DisplayName("without the reporting service the period waits for it a while, then is reconciled with a note and no turnover")
-    void without_the_reporting_service_the_period_waits_for_it_a_while_then_is_reconciled_with_a_note_and_no_turnover() {
+    @DisplayName("without the reporting service the period is reconciled with a note and no turnover")
+    void without_the_reporting_service_the_period_is_reconciled_with_a_note_and_no_turnover() {
         bankStartedIn(PERIOD);
         bankAnswersFor(PERIOD);
         reporting.answer("GET", forPeriod(ReportingApi.STATS_PATH, PERIOD), 503);
-        var closing = closingTimeOf(PERIOD);
 
-        conductor.tick(closing);
-        conductor.tick(closing.plusSeconds(1));
-        conductor.tick(closing.plusSeconds(1).plus(CATCH_UP_WAIT).minusSeconds(1));
-        assertThat(stateOf(PERIOD)).isEqualTo("DRAINING");
+        closeAndReconcile(PERIOD);
 
-        conductor.tick(closing.plusSeconds(1).plus(CATCH_UP_WAIT));
         var view = periodView(PERIOD);
         assertThat(view.get("verdict")).isEqualTo("BALANCED");
         assertThat(((Map<?, ?>) view.get("numbers")).get("postedAmountCents")).isEqualTo(0);

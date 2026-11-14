@@ -1,8 +1,10 @@
 package com.ledgerlab.control.ledger;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 @Schema(description = "The ledger's check of a period's books, as the ledger reported it.")
 public record PeriodCheck(
@@ -17,7 +19,11 @@ public record PeriodCheck(
     long accountsOutOfBalance,
     List<AccountMismatch> accountExamples,
     List<LedgerCheck> failedChecks,
-    boolean balanced
+    boolean balanced,
+    @Schema(description = "When the ledger began the check; null in reports kept before the ledger told it.", nullable = true)
+    @Nullable Instant startedAt,
+    @Schema(description = "When the ledger kept the check; null in reports kept before the ledger told it.", nullable = true)
+    @Nullable Instant madeAt
 ) {
 
     public PeriodCheck {

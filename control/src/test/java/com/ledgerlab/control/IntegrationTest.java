@@ -4,6 +4,7 @@ import static com.ledgerlab.control.Fixtures.mapOf;
 
 import com.ledgerlab.control.bank.BankLive;
 import com.ledgerlab.control.periods.PeriodConductor;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +62,7 @@ abstract class IntegrationTest {
     @Autowired BankLive bankLive;
     @Autowired PeriodConductor conductor;
     @Autowired DataSource dataSource;
+    @Autowired MeterRegistry meters;
 
     static final StubService ledger = new StubService();
     static final StubService gateway = new StubService();

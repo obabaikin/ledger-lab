@@ -244,7 +244,7 @@ class PeriodCheckTest extends IntegrationTest {
         for (var start : new Instant[] {expired, held}) {
             jdbc.sql("INSERT INTO account_snapshots (period_start, account_no, balance_cents) VALUES (:start, 1, 0)")
                 .param("start", Timestamp.from(start)).update();
-            jdbc.sql("INSERT INTO period_checks (period_start, report) VALUES (:start, '{}')").param("start", Timestamp.from(start)).update();
+            jdbc.sql("INSERT INTO period_checks (period_start, started_at, made_at, report) VALUES (:start, now(), now(), '{}')").param("start", Timestamp.from(start)).update();
         }
 
         check();

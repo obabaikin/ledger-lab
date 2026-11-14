@@ -17,12 +17,15 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Every query names the period's bounds on accepted_at, so it reads the period's partition and no other. */
 @Repository
 public class PeriodRepository {
 
     private static final String CHECK_LOCK_PREFIX = "ledger.period-check.";
+    private static final String STARTED_AT = "startedAt";
+    private static final String MADE_AT = "madeAt";
 
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
@@ -76,17 +79,30 @@ public class PeriodRepository {
     }
 
     public Optional<PeriodCheck> findCheck(Instant periodStart) {
-        return jdbc.sql("SELECT report FROM period_checks WHERE period_start = :start")
+        return jdbc.sql("SELECT report, started_at, made_at FROM period_checks WHERE period_start = :start")
             .param("start", Sql.timestamptz(periodStart))
-            .query(String.class)
-            .optional()
-            .map(report -> objectMapper.readValue(report, PeriodCheck.class));
+            .query((rs, rowNum) -> {
+                var report = (ObjectNode) objectMapper.readTree(rs.getString("report"));
+                report.put(STARTED_AT, rs.getTimestamp("started_at").toInstant().toString());
+                report.put(MADE_AT, rs.getTimestamp("made_at").toInstant().toString());
+                return objectMapper.treeToValue(report, PeriodCheck.class);
+            })
+            .optional();
     }
 
     public void saveCheck(Instant periodStart, PeriodCheck check) {
-        jdbc.sql("INSERT INTO period_checks (period_start, report) VALUES (:start, CAST(:report AS jsonb))")
+        var report = (ObjectNode) objectMapper.valueToTree(check);
+        report.remove(STARTED_AT);
+        report.remove(MADE_AT);
+        jdbc.sql(
+            """
+            INSERT INTO period_checks (period_start, started_at, made_at, report)
+            VALUES (:start, :startedAt, :madeAt, CAST(:report AS jsonb))
+            """)
             .param("start", Sql.timestamptz(periodStart))
-            .param("report", objectMapper.writeValueAsString(check))
+            .param("startedAt", Sql.timestamptz(check.startedAt()))
+            .param("madeAt", Sql.timestamptz(check.madeAt()))
+            .param("report", objectMapper.writeValueAsString(report))
             .update();
     }
 

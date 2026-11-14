@@ -1,5 +1,7 @@
 package com.ledgerlab.control.periods;
 
+import com.ledgerlab.control.gateway.PeriodSummary;
+import com.ledgerlab.control.ledger.LedgerReconciliation;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -20,7 +22,7 @@ public class PeriodRepository {
     private static final String COLUMNS = """
         period_start, period_end, state, closing_started_at, closed_at, entry_count, drain_progress_at, books_final_at,
         check_requested_at, client_requested_at, verdict, failure, finished_at, accepted, posted, rejected, posted_amount_cents,
-        rejections::text AS rejections""";
+        rejections::text AS rejections, next_action_at, gateway_counts::text AS gateway_counts, ledger_counts::text AS ledger_counts""";
     private static final String FINAL_STATES = "('RECONCILED', 'FAILED')";
     private static final TypeReference<Map<String, Long>> COUNTS_BY_REASON = new TypeReference<>() {
     };
@@ -119,19 +121,44 @@ public class PeriodRepository {
             .single();
     }
 
-    public int markClosing(Instant start, Instant now) {
-        return jdbc.sql("UPDATE periods SET state = :closing, closing_started_at = :now WHERE period_start = :start AND state = :open")
+    /** Also takes the close: {@code retryAt} is when another try is due if this one does not close the period. */
+    public int markClosing(Instant start, Instant now, Instant retryAt) {
+        return jdbc.sql(
+            """
+            UPDATE periods SET state = :closing, closing_started_at = :now, next_action_at = :retryAt
+            WHERE period_start = :start AND state = :open
+            """)
             .param("closing", PeriodState.CLOSING.name())
             .param("open", PeriodState.OPEN.name())
             .param("now", Timestamp.from(now))
+            .param("retryAt", Timestamp.from(retryAt))
             .param("start", Timestamp.from(start))
             .update();
     }
 
+    /**
+     * 1 for the one instance of control that takes the period's next action, due by {@code now}; 0 for the others and
+     * before it is due. {@code retryAt} is when the action is due again if this one does not move the period on.
+     */
+    public int takeNextAction(Instant start, PeriodState state, Instant now, Instant retryAt) {
+        return jdbc.sql(
+            """
+            UPDATE periods SET next_action_at = :retryAt
+            WHERE period_start = :start AND state = :state AND (next_action_at IS NULL OR next_action_at <= :now)
+            """)
+            .param("retryAt", Timestamp.from(retryAt))
+            .param("start", Timestamp.from(start))
+            .param("state", state.name())
+            .param("now", Timestamp.from(now))
+            .update();
+    }
+
+    /** The next count is not compared with the one before: the time between says nothing about the bank. */
     public int restartLimits(Instant start, Instant now) {
         return jdbc.sql(
             """
-            UPDATE periods SET closing_started_at = :now, drain_progress_at = CASE WHEN drain_progress_at IS NOT NULL THEN CAST(:now AS timestamptz) END
+            UPDATE periods SET closing_started_at = :now, drain_progress = NULL,
+                   drain_progress_at = CASE WHEN drain_progress_at IS NOT NULL THEN CAST(:now AS timestamptz) END
             WHERE period_start = :start
             """)
             .param("now", Timestamp.from(now))
@@ -139,16 +166,17 @@ public class PeriodRepository {
             .update();
     }
 
-    public int markClosed(Instant start, Instant closedAt, long entryCount) {
+    public int markClosed(Instant start, Instant closedAt, long entryCount, Instant countAt) {
         return jdbc.sql(
             """
-            UPDATE periods SET state = :draining, closed_at = :closedAt, entry_count = :entryCount
+            UPDATE periods SET state = :draining, closed_at = :closedAt, entry_count = :entryCount, next_action_at = :countAt
             WHERE period_start = :start AND state = :closing
             """)
             .param("draining", PeriodState.DRAINING.name())
             .param("closing", PeriodState.CLOSING.name())
             .param("closedAt", Timestamp.from(closedAt))
             .param("entryCount", entryCount)
+            .param("countAt", Timestamp.from(countAt))
             .param("start", Timestamp.from(start))
             .update();
     }
@@ -170,6 +198,22 @@ public class PeriodRepository {
         return jdbc.sql("UPDATE periods SET books_final_at = :now WHERE period_start = :start AND books_final_at IS NULL")
             .param("now", Timestamp.from(now))
             .param("start", Timestamp.from(start))
+            .update();
+    }
+
+    public int markCounted(Instant start, PeriodSummary gatewayCounts, LedgerReconciliation ledgerCounts, Instant now, Instant askAt) {
+        return jdbc.sql(
+            """
+            UPDATE periods SET gateway_counts = CAST(:gatewayCounts AS jsonb), ledger_counts = CAST(:ledgerCounts AS jsonb),
+                   check_requested_at = :now, client_requested_at = :now, next_action_at = :askAt
+            WHERE period_start = :start AND state = :draining
+            """)
+            .param("gatewayCounts", objectMapper.writeValueAsString(gatewayCounts))
+            .param("ledgerCounts", objectMapper.writeValueAsString(ledgerCounts))
+            .param("now", Timestamp.from(now))
+            .param("askAt", Timestamp.from(askAt))
+            .param("start", Timestamp.from(start))
+            .param("draining", PeriodState.DRAINING.name())
             .update();
     }
 
@@ -231,6 +275,8 @@ public class PeriodRepository {
         var verdict = rs.getString("verdict");
         var failure = rs.getString("failure");
         var rejections = rs.getString("rejections");
+        var gatewayCounts = rs.getString("gateway_counts");
+        var ledgerCounts = rs.getString("ledger_counts");
         var entryCount = rs.getLong("entry_count");
         var entryCountKnown = !rs.wasNull();
         var numbers = rejections == null
@@ -252,7 +298,10 @@ public class PeriodRepository {
             verdict == null ? null : Verdict.valueOf(verdict),
             failure == null ? null : PeriodFailure.valueOf(failure),
             instantOrNull(rs, "finished_at"),
-            numbers);
+            numbers,
+            instantOrNull(rs, "next_action_at"),
+            gatewayCounts == null ? null : objectMapper.readValue(gatewayCounts, PeriodSummary.class),
+            ledgerCounts == null ? null : objectMapper.readValue(ledgerCounts, LedgerReconciliation.class));
     }
 
     private static @Nullable Instant instantOrNull(ResultSet rs, String column) throws SQLException {

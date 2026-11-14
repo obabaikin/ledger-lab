@@ -541,12 +541,22 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "madeAt" : {
+            "description" : "When the ledger kept the check; null in reports kept before the ledger told it.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "startedAt" : {
+            "description" : "When the ledger began the check; null in reports kept before the ledger told it.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
           "transfersWithInvalidJournal" : {
             "format" : "int64",
             "type" : "integer"
           }
         },
-        "required" : [ "accountExamples", "accountsCompared", "accountsOutOfBalance", "balanced", "creditsCents", "debitsCents", "failedChecks", "invalidJournalExamples", "journalEntries", "transfersWithInvalidJournal" ],
+        "required" : [ "accountExamples", "accountsCompared", "accountsOutOfBalance", "balanced", "creditsCents", "debitsCents", "failedChecks", "invalidJournalExamples", "journalEntries", "madeAt", "startedAt", "transfersWithInvalidJournal" ],
         "type" : "object"
       },
       "PeriodDetails" : {

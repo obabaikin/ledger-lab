@@ -34,10 +34,14 @@ control:
     # The gateway closes a period only once no transfer accepted in it is still being written.
     close-delay: 60s
     tick-interval: 1s
-    drain-stall-timeout: 60s
-    drain-timeout: 10m
-    # A check or a client reconciliation asked for and not there after this is asked for again: its service may have restarted.
-    request-retry: 30s
+    # From the period's end: the bank's counts of a period are read once, when its transfers are long written.
+    settle-delay: 10m
+    # From the request: the ledger's check and the clients' reconciliation take minutes on a full period.
+    check-wait: 5m
+    # Counts that do not agree yet and a check or reconciliation not there yet are asked about again after this.
+    retry-wait: 5m
+    # From the period's end: without a verdict by then the period fails with the reason.
+    verdict-deadline: 40m
     # The bank's retention of transfers: the same value as in its services.
     details-retention: 4h
   bank:

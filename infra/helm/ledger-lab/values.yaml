@@ -14,6 +14,15 @@ initMemory: 64Mi
 # The bank's clock, the same in every service: they cut time at the same instants (ADR 0021). A changed length needs
 # empty databases: the services refuse to start beside partitions cut for another one.
 periodMinutes: 60
+# Control's closing of a period, counted from its end: the bank's counts are read once at settleDelay; the ledger's
+# check and the clients' reconciliation are asked about checkWait after they were started, then every retryWait; a
+# period without a verdict at verdictDeadline fails. Control refuses to start unless settleDelay < verdictDeadline <
+# periodMinutes + its close delay of a minute: a shorter period needs shorter times.
+closing:
+  settleDelay: 10m
+  checkWait: 5m
+  retryWait: 5m
+  verdictDeadline: 40m
 # How long a period's transfers, journals and keys are held after it ends: also the idempotency window and the
 # retention of the Kafka topics (ADR 0022).
 retentionHours: 4

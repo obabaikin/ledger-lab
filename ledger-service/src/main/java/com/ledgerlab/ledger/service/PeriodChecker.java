@@ -5,6 +5,10 @@ import com.ledgerlab.ledger.domain.PeriodCheck;
 import com.ledgerlab.ledger.persistence.PeriodRepository;
 import com.ledgerlab.ledger.persistence.PeriodRepository.AccountMismatches;
 import com.ledgerlab.ledger.persistence.ReconciliationProperties;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -13,14 +17,26 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class PeriodChecker {
 
+    public static final String DURATION_METRIC = "ledger.period.check.duration";
+
     private final PeriodRepository periods;
     private final PeriodsProperties props;
     private final ReconciliationProperties reconciliation;
+    private final Clock clock;
+    private final Timer duration;
 
-    public PeriodChecker(PeriodRepository periods, PeriodsProperties props, ReconciliationProperties reconciliation) {
+    public PeriodChecker(
+        PeriodRepository periods,
+        PeriodsProperties props,
+        ReconciliationProperties reconciliation,
+        Clock clock,
+        MeterRegistry registry
+    ) {
         this.periods = periods;
         this.props = props;
         this.reconciliation = reconciliation;
+        this.clock = clock;
+        this.duration = Timer.builder(DURATION_METRIC).description("Time the check of a period took, from its start until it was kept").register(registry);
     }
 
     /**
@@ -33,6 +49,7 @@ public class PeriodChecker {
         if (!periods.tryLockCheck(period.start()) || periods.findCheck(period.start()).isPresent()) {
             return false;
         }
+        var startedAt = clock.instant();
         periods.limitStatements(reconciliation.checkTimeout());
         var comparable = periods.hasSnapshot(period.previous().start());
         periods.snapshotBalancesAtEndOf(period);
@@ -41,6 +58,7 @@ public class PeriodChecker {
             : new AccountMismatches(0, List.of());
         var journal = periods.journalTotals(period);
         var invalid = periods.transfersWithInvalidJournal(period, reconciliation.exampleLimit());
+        var madeAt = clock.instant();
         periods.saveCheck(period.start(), new PeriodCheck(
             journal.entries(),
             journal.debitsCents(),
@@ -49,8 +67,11 @@ public class PeriodChecker {
             invalid.examples(),
             comparable,
             accounts.total(),
-            accounts.examples()));
+            accounts.examples(),
+            startedAt,
+            madeAt));
         periods.deleteChecksBefore(period.start().minus(props.snapshotRetention()));
+        duration.record(Duration.between(startedAt, madeAt));
         return true;
     }
 }

@@ -67,13 +67,13 @@ class PeriodControllerTest extends IntegrationTest {
         applyOne(ledger, transfer(1, 2, 100));
         http.postForEntity(checkOf(period.start()), null, Void.class);
         await().atMost(Duration.ofSeconds(10)).until(() -> periodRepository.findCheck(period.start()).isPresent());
-        var finishedAt = jdbc.sql("SELECT finished_at FROM period_checks").query(Timestamp.class).single();
+        var madeAt = jdbc.sql("SELECT made_at FROM period_checks").query(Timestamp.class).single();
 
         assertThat(http.postForEntity(checkOf(period.start()), null, Void.class).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
 
         // The second request works beside the answer: it gets the time a check takes before the kept one is looked at.
         await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-            assertThat(jdbc.sql("SELECT finished_at FROM period_checks").query(Timestamp.class).list()).containsExactly(finishedAt));
+            assertThat(jdbc.sql("SELECT made_at FROM period_checks").query(Timestamp.class).list()).containsExactly(madeAt));
     }
 
     @Test

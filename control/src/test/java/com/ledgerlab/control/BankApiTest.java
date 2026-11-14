@@ -90,7 +90,7 @@ class BankApiTest extends BankIntegrationTest {
         closeAndReconcile(PERIOD);
         reporting.answer("GET", forPeriod(ReportingApi.STATS_PATH, NEXT_PERIOD), 200, stats(NEXT_PERIOD, 50, 40, 5));
 
-        conductor.tick(closingTimeOf(PERIOD).plusSeconds(2));
+        conductor.tick(askTimeOf(PERIOD).plusSeconds(1));
 
         assertThat(bank().get("totals")).isEqualTo(mapOf(
             "accepted", (int) ACCEPTED + 50, "posted", (int) POSTED + 40, "rejected", (int) REJECTED + 5,

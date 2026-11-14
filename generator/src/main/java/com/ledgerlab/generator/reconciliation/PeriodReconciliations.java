@@ -5,7 +5,10 @@ import com.ledgerlab.generator.gateway.BadGatewayAnswerException;
 import com.ledgerlab.generator.gateway.GatewayUnavailableException;
 import com.ledgerlab.generator.gateway.PeriodNotClosedException;
 import com.ledgerlab.generator.journal.Period;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -24,18 +27,23 @@ import org.springframework.transaction.TransactionException;
 @Component
 public class PeriodReconciliations implements DisposableBean {
 
+    public static final String DURATION_METRIC = "generator.reconciliation.duration";
+    public static final String STATE_TAG = "state";
+
     private static final Logger log = LoggerFactory.getLogger(PeriodReconciliations.class);
 
     private final ClientReconciliation reconciliation;
     private final GeneratorProperties.Periods periods;
     private final Clock clock;
+    private final MeterRegistry registry;
     private final ConcurrentHashMap<Instant, PeriodReconciliation> byPeriod = new ConcurrentHashMap<>();
     private final ExecutorService runner = Executors.newSingleThreadExecutor(Thread.ofVirtual().name("client-reconciliation").factory());
 
-    public PeriodReconciliations(ClientReconciliation reconciliation, GeneratorProperties props, Clock clock) {
+    public PeriodReconciliations(ClientReconciliation reconciliation, GeneratorProperties props, Clock clock, MeterRegistry registry) {
         this.reconciliation = reconciliation;
         this.periods = props.periods();
         this.clock = clock;
+        this.registry = registry;
     }
 
     /** Starts the reconciliation, also one that was done or failed before; one that is running is not started twice. */
@@ -45,7 +53,7 @@ public class PeriodReconciliations implements DisposableBean {
             if (known != null && known.state() == ReconciliationState.RUNNING) {
                 return known;
             }
-            runner.execute(() -> byPeriod.put(start, run(period)));
+            runner.execute(() -> byPeriod.put(start, timed(period)));
             return PeriodReconciliation.of(start, ReconciliationState.RUNNING);
         });
     }
@@ -54,6 +62,17 @@ public class PeriodReconciliations implements DisposableBean {
         ended(periodStart);
         byPeriod.keySet().removeIf(start -> isExpired(start, clock.instant()));
         return byPeriod.getOrDefault(periodStart, PeriodReconciliation.of(periodStart, ReconciliationState.NOT_STARTED));
+    }
+
+    private PeriodReconciliation timed(Period period) {
+        var started = clock.instant();
+        var result = run(period);
+        Timer.builder(DURATION_METRIC)
+            .description("Time a client reconciliation of a period took, by how it ended")
+            .tag(STATE_TAG, result.state().name())
+            .register(registry)
+            .record(Duration.between(started, clock.instant()));
+        return result;
     }
 
     private PeriodReconciliation run(Period period) {

@@ -22,6 +22,10 @@ public class LedgerClient {
         return http.call("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, periodStart), LedgerReconciliation.class);
     }
 
+    public Reply<LedgerCheckState> check(Instant periodStart) throws InterruptedException {
+        return http.call("GET", forPeriod(LedgerApi.CHECK_PATH, periodStart), LedgerCheckState.class);
+    }
+
     public Reply<Object> requestCheck(Instant periodStart) throws InterruptedException {
         return http.send("POST", forPeriod(LedgerApi.CHECK_PATH, periodStart));
     }

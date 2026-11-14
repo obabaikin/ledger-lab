@@ -3,6 +3,7 @@ package com.ledgerlab.ledger.domain;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -18,7 +19,9 @@ public record PeriodCheck(
     @Schema(description = "False when the period before has no snapshot of the balances: the accounts were not compared")
     boolean accountsCompared,
     long accountsOutOfBalance,
-    @Schema(description = "The first of them, up to the configured number") List<AccountMismatch> accountExamples
+    @Schema(description = "The first of them, up to the configured number") List<AccountMismatch> accountExamples,
+    @Schema(description = "When the ledger began the check") Instant startedAt,
+    @Schema(description = "When the ledger kept the check") Instant madeAt
 ) {
     @JsonProperty
     public List<ReconciliationCheck> failedChecks() {

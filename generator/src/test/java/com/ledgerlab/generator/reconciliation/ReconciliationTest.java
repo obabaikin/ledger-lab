@@ -13,6 +13,7 @@ import com.ledgerlab.generator.bank.TransferStatus;
 import com.ledgerlab.generator.journal.JournalOutcome;
 import com.ledgerlab.generator.journal.Period;
 import com.ledgerlab.generator.journal.UnknownResolved;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -30,6 +32,8 @@ class ReconciliationTest extends IntegrationTest {
 
     private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT = new ParameterizedTypeReference<>() {
     };
+
+    @Autowired MeterRegistry registry;
 
     private Period period;
     /** A time in the period; each call of {@link #next()} moves it on, so transfers have an order. */
@@ -305,6 +309,25 @@ class ReconciliationTest extends IntegrationTest {
 
         bankBehaves(FakeGateway.with());
         assertThat(report().balanced()).isTrue();
+    }
+
+    private long timedRuns(ReconciliationState state) {
+        var timer = registry.find(PeriodReconciliations.DURATION_METRIC).tag(PeriodReconciliations.STATE_TAG, state.name()).timer();
+        return timer == null ? 0 : timer.count();
+    }
+
+    @Test
+    void the_time_of_every_reconciliation_is_recorded_once_it_has_ended_by_how_it_ended() {
+        var done = timedRuns(ReconciliationState.DONE);
+        var failed = timedRuns(ReconciliationState.FAILED);
+        agreed(next());
+
+        report();
+        assertThat(timedRuns(ReconciliationState.DONE)).isEqualTo(done + 1);
+
+        bankBehaves(FakeGateway.with().periodNotClosed());
+        assertFailed(ReconciliationFailure.PERIOD_NOT_CLOSED);
+        assertThat(timedRuns(ReconciliationState.FAILED)).isEqualTo(failed + 1);
     }
 
     @Test
