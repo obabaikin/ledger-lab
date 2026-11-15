@@ -22,9 +22,9 @@ is in the [Roadmap](#roadmap).
 
 ## What it does
 
-- **One bank that never stops.** 100,000 client accounts and a pool account; the total in all accounts must never
-  change. The last 100 accounts are blocked, so some transfers are rejected as in a real bank. Like merchants, 5 hot
-  accounts receive about 30 % of all transfers, so their rows are the most contended
+- **One bank that never stops.** **100,000 client accounts** and a pool account; the total in all accounts must never
+  change. **The last 100 accounts are blocked**, so some transfers are rejected as in a real bank. Like merchants,
+  **5 hot accounts receive about 30 % of all transfers**, so their rows are the most contended
   ([ADR 0018](docs/adr/0018-deferred-credits.md), [ADR 0021](docs/adr/0021-one-bank-around-the-clock.md)).
 - A **gateway** accepts transfers over a client-facing API with a client-supplied idempotency key,
   stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate. When too
@@ -96,8 +96,9 @@ from its own events ([ADR 0015](docs/adr/0015-live-numbers-from-the-banks-events
 
 Crashes from the page, loads above 1300 per second and maintenance windows declared 3 hours ahead stay out of the
 budget, unless a service restarts beyond what the event explains. How each is measured: [SLO](docs/guides/slo.md).
-The second objective came from a measurement: the time gateway to ledger stalled behind the outbox publisher, and with
-the publisher on a thread of its own the share of time with p99 above 1 s fell from 18 % to none
+The second objective came from a measurement: every scheduled task of a service shared one thread, so the outbox
+publisher waited while a cleanup deleted expired idempotency keys, and nothing reached Kafka meanwhile. With the
+publishers on threads of their own the share of time with p99 above 1 s fell from 18 % to none
 ([p99 analysis](docs/results/2026-11-14-p99-analysis.md)).
 
 ## Limits measured on the server
@@ -247,7 +248,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash the ledger; closed periods reconciled hourly, service levels and verdicts on the page | done |
 | Dashboards | Grafana: latency by segment, node, database | planned |
 | Writes in batches, overload shed at the edge | 1000–1600 TPS on the server in steps of 30 s without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | done |
-| The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)), then the outbox publisher behind the p99 ([p99 analysis](docs/results/2026-11-14-p99-analysis.md)) | done |
+| The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)), then a key cleanup that held up the outbox publisher on a shared scheduler thread ([p99 analysis](docs/results/2026-11-14-p99-analysis.md)) | done |
 | Gateway deploys without downtime | replaced during a 400 TPS run: no transfer lost or duplicated, the run `BALANCED` | done |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
