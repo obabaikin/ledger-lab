@@ -1,6 +1,6 @@
 # ADR 0013: Orchestrating a run and the verdict
 
-Status: accepted · Date: 2026-10-12
+Status: superseded by [ADR 0021](0021-one-bank-around-the-clock.md) · Date: 2026-10-12 · Superseded: 2026-11-15
 
 ## Context
 

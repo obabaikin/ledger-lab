@@ -1,0 +1,281 @@
+> Archived README of version 1 (runs), as of the release [`v0.9.0`](https://github.com/obabaikin/ledger-lab/tree/v0.9.0); the system it describes is replaced by one bank that runs around the clock. Current README: [../../README.md](../../README.md).
+
+# Ledger Lab
+
+[![CI](https://github.com/obabaikin/ledger-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/obabaikin/ledger-lab/actions/workflows/ci.yml)
+
+An event-driven double-entry ledger under load, with chaos testing and three-way reconciliation.
+
+**Live demo: [ledger-lab.de](https://ledger-lab.de)** — enter your email to get a link and run it yourself.
+
+Pick a transaction rate, run it for up to half a minute, kill the ledger mid-run, and watch the books
+still balance. Built to answer one question properly: *how do you prove no money was lost or
+duplicated when consumers crash?* Work in progress: what is done and what comes next is in the
+[Roadmap](#roadmap).
+
+**Contents:** [What it does](#what-it-does) · [How it fits together](#how-it-fits-together) ·
+[A run and its verdict](#a-run-and-its-verdict) · [One hour on the server](#one-hour-on-the-server) ·
+[Limits measured on the server](#limits-measured-on-the-server) ·
+[Stack](#stack) · [Modules](#modules) · [Running locally](#running-locally) · [How it is tested](#how-it-is-tested) ·
+[Deployment](#deployment) · [Failure model](#failure-model) · [Scope and non-goals](#scope-and-non-goals) · [Roadmap](#roadmap) · [Design notes](#design-notes)
+
+## What it does
+
+- A **gateway** accepts transfers over a client-facing API with a client-supplied idempotency key,
+  stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate. When too
+  many are in progress, it refuses one with `503 busy` before writing anything, and the client retries later.
+- The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
+  at-least-once; processing is idempotent, so crashes and rebalances cannot double-post. The money
+  reaches the receiver's balance a moment after the posting (p99 0.65 s), and until then the
+  receiver cannot spend it.
+- A **generator** plays the bank's clients: it calls the gateway at 100 to 2000
+  transactions per second, in steps of 100, and counts what was acknowledged.
+- Transfers can be **rejected** for domain reasons: insufficient funds, blocked account,
+  daily limit. Rejections are recorded and reconciled too.
+- Every run gets its own **isolated set of accounts**, so several people can run experiments
+  at the same time against the same cluster.
+- **Reconciliation** cross-checks what the clients were told, what the gateway accepted,
+  what Kafka carried and what the ledger posted, and inside the ledger the balances, the
+  journal and the transfer log. Any disagreement turns the run red, and so does a verdict that
+  could not be completed.
+- A **chaos button** crashes every ledger instance in the middle of a run, as `kill -9` would.
+  Reconciliation must still pass.
+- **Service levels**: availability and time to posting, each 99.9 % of minutes over 30 days, with
+  their error budgets on the page; how they are measured and what is left out: [SLO](../guides/slo.md).
+
+## How it fits together
+
+```mermaid
+flowchart LR
+    visitor([Visitor]) -->|HTTPS| control
+    control -->|start, stop, client reconciliation| generator
+    generator -->|transfers, statement| gateway
+    gateway -->|outbox| transfers[[Kafka: transfers]]
+    transfers --> ledger["ledger × 2"]
+    ledger -->|outbox| results[[Kafka: transfer-results]]
+    results --> gateway
+    transfers --> reporting
+    results --> reporting
+    control -->|accounts, reconciliation, crash| ledger
+    control -->|run summary| gateway
+    control -->|run numbers| reporting
+    control -->|live metrics| prometheus[(Prometheus)]
+```
+
+Gateway, ledger, reporting and control each own a schema in one PostgreSQL; the generator keeps its
+journal of what the clients were told in memory. Only control is reachable from outside.
+
+## A run and its verdict
+
+On the page, choose a rate and a duration and press Start. The page shows the run in four phases:
+queued, clients sending, bank finishing, verdict. While it runs, you see the way a transfer takes from
+the clients through the gateway and Kafka to the ledger, with live counts and the state of each
+instance; transfers per second; the time from the gateway to the ledger; and the crash button. Every live number comes from a named
+source, and a number not read yet shows as "—" ([ADR 0014](../adr/0014-the-control-page.md)); they
+are projected from the bank's own events ([ADR 0015](../adr/0015-live-numbers-from-the-banks-events.md)).
+
+A run ends with a report: `BALANCED`, `BREAKS` or `INCOMPLETE` with the reasons, and only `BALANCED`
+is green ([ADR 0013](../adr/0013-orchestrating-a-run-and-the-verdict.md)). It shows the sums of the
+books: debits against credits and the total of all accounts before and after.
+
+### One hour on the server
+
+A trial run on the server: 300 transfers per second for one hour, on 6 vCPU with the bank capped at
+8 GB RAM and the load generator beside it. The ledger ran three instances then; each was crashed twice. Of 1,080,000
+transfers sent, the gateway accepted 1,079,295 and the ledger booked 1,068,504 and rejected 10,791 by
+its rules. The verdict is `BALANCED`: none lost or doubled, debits equal credits, and the total of all
+accounts did not change.
+
+- 2,895 transfers met a `503 busy` from the gateway at least once; 703 met it three times, and the
+  client gave up on them as failed. The gateway refuses before it writes anything, and the statement
+  confirms none of them was booked.
+- The gateway-to-ledger p99 of 25.9 s is the crashes: transfers waited in Kafka while the ledger was
+  down. The median is 0.12 s.
+- Runs on the page last up to 30 s; this hour ran with limits raised for the trial.
+
+![The run page after the hour: the way through the bank, transfers per second and the time from the gateway to the ledger](../images/soak-1h-run.png)
+
+![The verdict of the hour: every accounting invariant checked after the run](../images/soak-1h-verdict.png)
+
+## Limits measured on the server
+
+On one node with the whole bank and the load generator, the current version takes **about 1600 transfers per
+second** in steps of 30 seconds without a refusal, where the October version refused from 300–400 on; every such run
+of both ends `BALANCED`. Held for 5 minutes by day, the same server already refuses at 1300
+([comparison](../results/2026-11-10-kotlin-vs-java.md)).
+How it was measured, how the bottlenecks were found and what was tried and rejected:
+[optimizations](../results/2026-11-06-optimizations.md).
+
+On the public demo a run takes 100 to 2000 transactions per second, so a visitor can go past the limit and watch
+the bank fall behind; at most three runs at once, together at most 2000
+([ADR 0012](../adr/0012-invites-quota-and-the-run-queue.md)).
+
+## Stack
+
+Java 25 · Spring Boot 4 · Apache Kafka · PostgreSQL · Flyway · Testcontainers ·
+Micrometer / Prometheus · Helm · k3s · cert-manager · Terraform (firewall, DNS); planned: Grafana
+
+Ported from Kotlin in v0.9.0 with the behaviour unchanged; the two versions
+[measured side by side](../results/2026-11-10-kotlin-vs-java.md).
+
+## Modules
+
+| Module | Purpose |
+|---|---|
+| `common` | The bank's internal Kafka messages, shared by the bank's services; no logic |
+| `ledger-service` | Double-entry ledger, Kafka consumer, reconciliation, internal API |
+| `gateway` | Client-facing transfer API, idempotency keys, transactional outbox, result status, optional wait |
+| `generator` | Load simulator acting as the bank's clients (virtual threads, retries with the same key) |
+| `reporting` | The bank's numbers per run, projected from its Kafka events, internal API |
+| `control` | Operations console: invites, the run queue, reconciliation, chaos button, UI |
+
+## Running locally
+
+Requirements: JDK 25, Docker.
+
+```bash
+docker compose up -d                      # Postgres (one schema per service), Kafka and its topics, Prometheus :9090
+./gradlew test                            # integration tests with Testcontainers
+./gradlew check                           # tests plus dead-code checks: Error Prone, knip (compiler warnings fail every build)
+./gradlew :ledger-service:bootRun         # :8080
+./gradlew :gateway:bootRun                # :8081, the bank's client-facing API
+./gradlew :generator:bootRun              # :8082
+./gradlew :reporting:bootRun              # :8084, the run's numbers from the bank's events
+./gradlew :control:bootRun                # :8083, the page, invites, the run queue and orchestration (needs the other four)
+```
+
+A run through control, once an [invite](../guides/operations.md#invites) exists:
+
+```bash
+SESSION=$(curl -s -X POST localhost:8083/api/sessions -H 'content-type: application/json' \
+  -d '{"token":"<invite token>"}' | jq -r .sessionId)
+RUN=$(curl -s -X POST localhost:8083/api/sessions/$SESSION/runs -H 'content-type: application/json' \
+  -d "{\"requestId\":\"$(uuidgen)\",\"tps\":100,\"durationSeconds\":10}" | jq -r .runId)
+curl -s localhost:8083/api/sessions/$SESSION/runs/$RUN          # QUEUED, CREATED, RUNNING, DRAINING, RECONCILED
+curl -s -X POST localhost:8083/api/sessions/$SESSION/runs/$RUN/stop # optional: stop the clients early
+curl -s localhost:8083/api/sessions/$SESSION/runs/$RUN/report   # the verdict and what it rests on
+```
+
+Every step control takes, by hand against the services' internal APIs, and how a client reads the
+gateway's answers: [docs/guides/run-by-hand.md](../guides/run-by-hand.md). Only control is meant to
+be reached from outside; gateway, ledger, generator and reporting stay internal.
+
+Local Kubernetes, the server, invites and work on the page: [docs/guides/operations.md](../guides/operations.md).
+
+## How it is tested
+
+- **Against real infrastructure.** Integration tests run each service against PostgreSQL and Kafka in
+  Testcontainers; neither the database nor the broker is mocked.
+- **Contracts.** The Kafka messages between gateway and ledger are pinned field by field. Each service's
+  OpenAPI spec is kept in the repository, and a test fails when the running service serves anything
+  else. Control and the generator check every call and field they use against the specs of the
+  services they call ([ADR 0011](../adr/0011-contract-boundaries.md)).
+- **The page** has its own tests (Vitest).
+- **CI on every pull request:** the tests, dead-code and null checks (Error Prone, NullAway, knip), compiler warnings as
+  errors, a secret scan of the whole history, Terraform validation and shellcheck. `main` only takes
+  pull requests with green tests and a clean secret scan.
+- **The system as a whole** is checked by its own reconciliation: every run, crashes included, ends
+  with a verdict.
+
+## Deployment
+
+- **Kubernetes:** one Helm chart (`infra/helm/ledger-lab`) runs in k3d on a laptop, on one node the
+  size of the server, and on the server's single-node k3s. The ledger runs two instances and the gateway one;
+  a deploy replaces the gateway without downtime ([ADR 0020](../adr/0020-gateway-deploys-without-downtime.md)),
+  the other services stop before their new version starts. A crashed pod restarts within a second. Every pod of the
+  chart has a memory limit; the bank, the load generator, monitoring, k3s and the OS fit in the server's 12 GB together.
+- **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
+  DNS record, so no configuration can buy a server.
+- **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR, once;
+  a release, a SemVer tag, only adds its name to them, and only a release reaches the server: `deploy.sh v0.4.1`
+  deploys it by hand, names the version the page shows, and refuses while runs are in progress. The gateway
+  warms up while it already takes traffic, and no run starts until it is done.
+- **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
+  a host firewall under the provider's, SSH with a key only, services without root or capabilities.
+  Only the page is published.
+- **Load:** the server offers 100 to 2000 transactions per second in steps of 100, 100 by default, and at
+  most 2000 for all runs together.
+
+Details: [docs/guides/operations.md](../guides/operations.md#running-on-a-server).
+
+## Failure model
+
+What happens when something fails half-way through a transfer:
+
+| Failure | What happens | Why nothing is lost or doubled |
+|---|---|---|
+| The ledger crashes in the middle of a posting | The posting is one database transaction: it rolls back, and Kafka delivers the transfer again to the instance that takes over the partition | Offsets are committed only after the transaction ([ADR 0003](../adr/0003-idempotent-consumer-never-skips.md)) |
+| The commit to the database succeeded, the publish to Kafka did not | The transfer row is its own outbox, in the gateway and in the ledger: the row stays marked unpublished, and a publisher sends it after the restart | The row and the outbox are one write, so there is no state with one and not the other ([ADR 0006](../adr/0006-gateway-idempotency-outbox-and-waiting.md)) |
+| Kafka delivers the same transfer twice | The second insert of `(run_id, transfer_id)` finds the row and changes nothing | Delivery is at-least-once, the effect exactly-once: the key is the guard, not the broker |
+| The client sends the same transfer twice | The gateway answers with the current state of the transfer it already has; the same key with another payload is refused with 422 | The client's idempotency key, `ON CONFLICT DO NOTHING` |
+
+The trade-off: **accepted is not posted.** The gateway accepts a transfer without waiting for the ledger,
+so taking payments does not depend on the ledger being up; the client learns the outcome later, by
+asking for the status or retrying with the same key. A crashed ledger delays postings and never loses them.
+
+## Scope and non-goals
+
+Nothing is silently dropped: every discrepancy is either resolved or reported.
+What is deliberately left out, and what production would add:
+
+- **Not a system of record.** A run is a disposable experiment with its own accounts, to be deleted
+  after a day. Within a run durability is complete: a transfer is committed before it is
+  acknowledged.
+- **No reversals or compensating postings.** Outcomes are reported, not undone. Production would
+  add refunds and authorise-then-capture, so money is only taken once the merchant confirms.
+- **No schema registry or contract broker.** Contracts are pinned by tests. A reader that meets a
+  status or reason it does not know yet keeps what it can apply, and logs and counts the rest. Production would add a schema
+  registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
+- **One node, no failover.** The server is a single k3s node; if it goes down, so does the system.
+- **No continuous deployment.** One server with runs in progress: a deploy is chosen by hand and
+  waits for runs to end. The gateway is replaced without downtime; the other services stop for the deploy.
+  Production would deploy on merge, roll every service and run several instances.
+- **No database backups.** Runs are disposable and deleted after 24 hours; invites are re-issued.
+- **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
+  the status. Production would add signed webhooks with retried delivery.
+
+## Roadmap
+
+Each goal names how it is checked; a goal is done when the check holds.
+
+| Goal | How it is checked | Status |
+|---|---|---|
+| Every run reconciles: the books, the bank's events and the client's journal agree | verdict `BALANCED` on each run | done |
+| Survives crashes mid-run | one hour at 300 TPS on the server, the ledger crashed twice, `BALANCED` | done |
+| Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
+| Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS in October ([results](../results/2026-10-23-server-baseline.md)), about 1600 in steps of 30 s with batched writes ([optimizations](../results/2026-11-06-optimizations.md)); runs of 5 minutes by day already refuse at 1300 ([comparison](../results/2026-11-10-kotlin-vs-java.md)) | done |
+| Access on request | a visitor enters an email and receives an invite link | done |
+| A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash services; closed periods reconciled hourly, uptime and results on the page | next |
+| Dashboards | Grafana: latency by segment, node, database | planned |
+| Writes in batches, overload shed at the edge | 1000–1600 TPS on the server in steps of 30 s without a refusal in two staircases of three, every run `BALANCED` ([optimizations](../results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | done |
+| The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](../results/2026-11-06-optimizations.md)) | done |
+| Gateway deploys without downtime | replaced during a 400 TPS run: no transfer lost or duplicated, the run `BALANCED` | done |
+| No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
+| Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
+| Nothing received goes unaccounted | every message a service took is booked or reported | planned |
+| IBAN account numbers at the API (optional) | the gateway validates and maps IBANs | planned |
+
+## Design notes
+
+Decisions with their trade-offs are recorded in [docs/adr](../adr). The ones the rest stands on:
+
+- **Two idempotency guards.** The gateway takes the client's key with `ON CONFLICT DO NOTHING`; the
+  ledger does the same on `(run_id, transfer_id)`, so a redelivery or a race after a rebalance never
+  posts twice ([ADR 0003](../adr/0003-idempotent-consumer-never-skips.md), [ADR 0006](../adr/0006-gateway-idempotency-outbox-and-waiting.md)).
+- **The transfer row is the outbox.** A transfer is committed and answered before Kafka is involved;
+  publishers claim rows with `FOR UPDATE SKIP LOCKED` ([ADR 0006](../adr/0006-gateway-idempotency-outbox-and-waiting.md)).
+- **A ledger that stalls rather than skips.** Offsets are committed after processing, and errors are
+  retried without end: a crash can cause redelivery, never loss ([ADR 0003](../adr/0003-idempotent-consumer-never-skips.md)).
+- **Reconciliation from independent views.** Balances, the journal and the transfer log are checked
+  against each other per transfer, in one snapshot ([ADR 0002](../adr/0002-double-entry-journal-and-reconciliation.md)),
+  and the clients' journal against the bank's statement by transfer id ([ADR 0010](../adr/0010-client-reconciliation.md)).
+- **Batched writes.** The gateway accepts submissions, the ledger posts transfers and the gateway
+  records results a batch per transaction, each transfer with the outcome it would have had alone. A
+  batch locks only its senders; credits wait in a table until one applier adds them to the balances,
+  and reconciliation counts them meanwhile ([ADR 0018](../adr/0018-deferred-credits.md),
+  [ADR 0019](../adr/0019-batched-writes-one-result-writer-load-shedding.md)).
+- **Overload is shed at the edge.** Past a limit of open submissions the gateway answers `503 busy`
+  at once instead of filling its heap ([ADR 0019](../adr/0019-batched-writes-one-result-writer-load-shedding.md)).
+- **Hand-written SQL, no ORM**, so every lock and query of the ledger is visible ([ADR 0001](../adr/0001-jdbc-instead-of-jpa.md)).
+
+Built by Oleksii Babaikin · [LinkedIn](https://www.linkedin.com/in/oleksii-babaikin)
