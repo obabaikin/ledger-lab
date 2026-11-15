@@ -20,12 +20,10 @@ public final class BankMetrics {
     /** Of them, those not slower than a bound, given as {@code %s} by {@link #bucketBound}. */
     public static final String FAST_IN_MINUTE = "sum(increase(gateway_transfer_latency_seconds_bucket{le=\"%s\"}[1m]))";
     /**
-     * Above 0 if a process of the project's services started again under the same pod in the minute before, or up to
-     * four minutes earlier: the 5 minutes span the restart's gap without samples. A pod replaced by a new one is another
-     * series, whose start time never changes.
+     * The latest start time of each process of the project's services in the window before the instant asked about,
+     * given as {@code %s}, by pod: the value is the start itself, so a restart shows as a new value whenever it is read.
      */
-    public static final String RESTARTED_IN_MINUTE = "sum(max_over_time(process_start_time_seconds{lab_service=\"true\"}[1m])"
-        + " > bool min_over_time(process_start_time_seconds{lab_service=\"true\"}[5m]))";
+    public static final String PROCESS_STARTS = "max by (instance) (max_over_time(process_start_time_seconds{lab_service=\"true\"}[%s]))";
 
     private BankMetrics() {
     }

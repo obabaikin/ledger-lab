@@ -69,6 +69,7 @@ control:
     guaranteed-tps: 1300
     chaos-aftermath: 60s
     load-aftermath: 30s
+    restart-margin: 60s
   maintenance:
     notice: 3h
   series:

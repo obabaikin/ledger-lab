@@ -48,20 +48,30 @@ The same rules apply to both budgets.
 
   Loads up to 1300 per second are promised and judged. Above that, visitors test the bank past its limits: refusals and
   slow transfers may come, but the books must still balance.
-- **Unless the bank falls over.** If a service restarts in place during such an event, every minute of the event is
-  judged. A restart in place is a process of one of the project's services (the bank, the generator, control) starting
-  again under the same pod: killed for its memory, crashed, or failing its liveness probe. Control sees it in Prometheus
-  as a changed `process_start_time_seconds` of the same pod; it has no access to Kubernetes. A crash from the page
-  deletes pods, and their replacements are new pods, not restarts in place.
+- **Unless the bank falls over.** If a service restarts in place during such an event, beyond what the event itself
+  explains, every minute of the event is judged. A restart in place is a process of one of the project's services (the
+  bank, the generator, control) starting again under the same pod: killed for its memory, crashed, or failing its
+  liveness probe. A pod's first start is a new pod, not a restart.
+  - A crash from the page stops the JVM of each ledger pod, and Kubernetes starts it again in the same pod. Control
+    records which pods it crashed, so each of them may start once. A second start of a crashed pod, or a start of any
+    other pod, makes the crash judged.
+  - A load above the limit explains no restart: any restart makes it judged.
+  - Starts count from the event's start to 60 s after its end, as a JVM comes up some tens of seconds after it went down.
+  - Control has no access to Kubernetes. It reads each pod's `process_start_time_seconds` from Prometheus in windows of
+    2 s, shorter than a JVM takes to start, and keeps every value once: the value is the start itself, so each start is
+    counted once however the scrapes fall.
 - Only bad minutes are taken out. A good minute during an event stays good and counted.
 - A bad minute that is both in a maintenance window and outside the bounds counts as planned.
 - Deploys and the bank's own failures are judged.
 
 ## Known limits
 
-- The restart check looks back 5 minutes, to bridge the restart's gap without samples. It can mark a minute up to four
-  minutes after a restart, and so cancel the exclusion of an event that starts soon after. Such a minute is judged: the
-  error is on the strict side.
+- A process that dies before Prometheus first scrapes it leaves no start time and is not counted. The pod is then down
+  again, so its next start, or the bad minutes after the event, are still judged.
+- A crash from the page during a load above the limit makes the load judged: its pods' starts are explained for the
+  crash's window, not for the load's. Such minutes are judged: the error is on the strict side.
+- During the first deploy of the gateway that publishes the histogram, an old replica still counts transfers without
+  buckets, and its transfers read as slow. This happens once, for the minutes of that rollout.
 - A deploy of the ledger pauses its consumers for about 30 s while Kafka moves their partitions. Until the ledger's
   group membership changes, each deploy can cost the time to posting one or two bad minutes.
 - One node. In production a crashed pod would sit inside the objectives, with replicas across zones absorbing it. Here
@@ -71,6 +81,7 @@ The same rules apply to both budgets.
 ## Where it is in the code
 
 - The gateway's histogram: `gateway/src/main/java/com/ledgerlab/gateway/service/TransferLatency.java`.
-- Reading the minutes from Prometheus: `control/src/main/java/com/ledgerlab/control/availability/FreshnessCollector.java`.
+- Reading the minutes and the pods' starts from Prometheus:
+  `control/src/main/java/com/ledgerlab/control/availability/FreshnessCollector.java`.
 - Judging the minutes, both objectives in one query:
   `control/src/main/java/com/ledgerlab/control/availability/AvailabilityRepository.java`.

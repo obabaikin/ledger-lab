@@ -3,6 +3,8 @@ package com.ledgerlab.control;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import com.ledgerlab.control.availability.Availability;
+import com.ledgerlab.control.availability.FreshnessCollector;
 import com.ledgerlab.control.metrics.BankMetrics;
 import com.ledgerlab.control.metrics.PrometheusClient;
 
@@ -12,8 +14,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -30,6 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.Testcontainers;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -56,6 +61,7 @@ class RealPrometheusTest extends IntegrationTest {
     private static final Duration TARGETS_DISCOVERED = Duration.ofSeconds(30);
     /** A sample is queryable once the next scrape came. */
     private static final int SCRAPES_TO_SETTLE = 2;
+    private static final Duration STARTS_POLL = Duration.ofMillis(500);
     /** A chart has a value at the next instant of its grid after the samples. */
     private static final Duration CHART_SETTLES = Duration.ofSeconds(15);
 
@@ -83,7 +89,7 @@ class RealPrometheusTest extends IntegrationTest {
                         + "    static_configs:\n"
                         + "      - targets: ["
                         + target.ports().stream().map(it -> "\"host.testcontainers.internal:" + it + "\"").collect(Collectors.joining(", ")) + "]\n"
-                        + "        " + (target.job().equals(NODE_EXPORTER) ? "labels: {}" : "labels: {lab_service: \"true\"}"))
+                        + "        labels: {" + labels(target) + "}")
                 .collect(Collectors.joining("\n"));
             var config = "global:\n  scrape_interval: " + SCRAPE_INTERVAL.toSeconds() + "s\n  scrape_timeout: 800ms\nscrape_configs:\n" + jobs + "\n";
             var container = new GenericContainer<>("prom/prometheus:v3.5.0")
@@ -101,6 +107,18 @@ class RealPrometheusTest extends IntegrationTest {
         }
     }
 
+    /** A job of one target is named as the chart's Prometheus names a pod, by its name; the exporter lacks the project's label. */
+    private static String labels(Target target) {
+        var labels = new ArrayList<String>();
+        if (!target.job().equals(NODE_EXPORTER)) {
+            labels.add("lab_service: \"true\"");
+        }
+        if (target.ports().size() == 1) {
+            labels.add("instance: \"" + target.job() + "\"");
+        }
+        return String.join(", ", labels);
+    }
+
     @DynamicPropertySource
     static void realPrometheus(DynamicPropertyRegistry registry) {
         registry.add(
@@ -109,6 +127,9 @@ class RealPrometheusTest extends IntegrationTest {
     }
 
     @Autowired PrometheusClient prometheusClient;
+    @Autowired FreshnessCollector collector;
+    @Autowired Availability availability;
+    @Autowired DatabaseClock clock;
 
     private Map<Object, Map<?, ?>> podsByJob() {
         conductor.tick();
@@ -210,26 +231,53 @@ class RealPrometheusTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("a process of a project's service started again under the same pod counts as a restart; a new pod and an exporter do not")
-    void a_process_of_a_projects_service_started_again_under_the_same_pod_counts_as_a_restart_a_new_pod_and_an_exporter_do_not()
+    @DisplayName("a crashed pod started again leaves the crash outside, an exporter's restart too; a restart of another pod makes it judged")
+    void a_crashed_pod_started_again_leaves_the_crash_outside_an_exporters_restart_too_a_restart_of_another_pod_makes_it_judged()
         throws Exception {
-        exporter.serve(LEDGER, "process_start_time_seconds 1000");
-        exporter.serve(SECOND_LEDGER, "process_start_time_seconds 3000");
-        exporter.serve(NODE_EXPORTER, "process_start_time_seconds 5000");
-        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(restarts()).isZero();
+        ReflectionTestUtils.setField(collector, "startsReadUpTo", null);
+        var crashedAt = clock.now().minusSeconds(30);
+        exporter.serve(NODE_EXPORTER, startedAt(crashedAt.minus(Duration.ofHours(1))));
+        started(LEDGER, crashedAt.minus(Duration.ofHours(1)));
+        started(SECOND_LEDGER, crashedAt.minus(Duration.ofHours(1)));
+        jdbc.sql("INSERT INTO chaos_events (at, instances) VALUES (:at, ARRAY[:crashed])")
+            .param("at", Timestamp.from(crashedAt))
+            .param("crashed", LEDGER)
+            .update();
+        jdbc.sql("INSERT INTO availability_minutes (minute, total, errors, busy, transfers, slow) VALUES (:minute, 100, 50, 0, 100, 50)")
+            .param("minute", Timestamp.from(crashedAt.truncatedTo(ChronoUnit.MINUTES)))
+            .update();
 
-        exporter.serve(NODE_EXPORTER, "process_start_time_seconds 6000");
-        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(restarts()).isZero();
+        exporter.serve(NODE_EXPORTER, startedAt(crashedAt.plusSeconds(20)));
+        started(LEDGER, crashedAt.plusSeconds(20));
 
-        exporter.serve(LEDGER, "process_start_time_seconds 2000");
-        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(restarts()).isEqualTo(1.0);
+        assertThat(availability.slo(clock.now()).outsideMinutes()).isEqualTo(1);
+        assertThat(kept(NODE_EXPORTER, crashedAt.plusSeconds(20))).isFalse();
+        started(SECOND_LEDGER, crashedAt.plusSeconds(25));
+        assertThat(availability.slo(clock.now()).outsideMinutes()).isZero();
+        assertThat(availability.slo(clock.now()).badMinutes()).isEqualTo(1);
     }
 
-    private double restarts() throws InterruptedException {
-        return single(Objects.requireNonNull(prometheusClient.query(BankMetrics.RESTARTED_IN_MINUTE))).number();
+    private static String startedAt(Instant at) {
+        return "process_start_time_seconds " + at.toEpochMilli() / 1000.0;
+    }
+
+    /** The exporter's scrapes count every job's, so the collector reads until it has seen the start. */
+    private void started(String job, Instant at) throws InterruptedException {
+        exporter.serve(job, startedAt(at));
+        var deadline = Instant.now().plus(CHART_SETTLES);
+        while (Instant.now().isBefore(deadline) && !kept(job, at)) {
+            collector.collect(clock.now());
+            Thread.sleep(STARTS_POLL);
+        }
+        assertThat(kept(job, at)).as("the start of %s is kept", job).isTrue();
+    }
+
+    private boolean kept(String job, Instant at) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM service_starts WHERE instance = :job AND started_at = :at)")
+            .param("job", job)
+            .param("at", Timestamp.from(at.truncatedTo(ChronoUnit.MILLIS)))
+            .query(Boolean.class)
+            .single();
     }
 
     /** Serves each job's metrics as text and counts the scrapes, so a test knows Prometheus has seen what it serves. */

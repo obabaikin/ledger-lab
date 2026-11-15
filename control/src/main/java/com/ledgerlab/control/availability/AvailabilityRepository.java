@@ -4,6 +4,7 @@ import com.ledgerlab.control.generator.MinuteResponses;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -17,20 +18,29 @@ public class AvailabilityRepository {
      * was not cancelled and was declared at least :noticeSeconds before its start. It is fresh-bad if more than
      * :badSharePercent of 100 of its transfers were slow; one without transfers or not read from monitoring is not
      * measured for freshness. It is outside if it meets a crash or a pulse above :guaranteedTps, each with its aftermath,
-     * during which no service restarted in place: a minute meets an event if it starts before the event's end and ends
-     * after its start. The events' windows are joined to the minutes once: a subquery per minute, repeated in every
-     * count that reads it, cost the roll-up half a second of JIT compilation.
+     * during which no service restarted in place beyond what the event explains: a crash explains one start of each pod
+     * it crashed, a pulse none. A start counts up to :restartMarginSeconds after the event's end, and only where the pod
+     * started before: a pod's first start is a new pod, not a restart. A minute meets an event if it starts before the
+     * event's end and ends after its start. The events' windows are joined to the minutes once: a subquery per minute,
+     * repeated in every count that reads it, cost the roll-up half a second of JIT compilation.
      */
     private static final String CLASSIFIED_MINUTES = """
         WITH event_windows AS (
-            SELECT e.at AS starts, e.at + CAST(:chaosAftermathSeconds AS bigint) * interval '1 second' AS ends FROM chaos_events e
+            SELECT e.at AS starts, e.at + CAST(:chaosAftermathSeconds AS bigint) * interval '1 second' AS ends, e.instances AS crashed
+            FROM chaos_events e
             UNION ALL
-            SELECT p.at, p.until + CAST(:loadAftermathSeconds AS bigint) * interval '1 second' FROM load_pulses p WHERE p.tps > :guaranteedTps
+            SELECT p.at, p.until + CAST(:loadAftermathSeconds AS bigint) * interval '1 second', CAST('{}' AS text[])
+            FROM load_pulses p WHERE p.tps > :guaranteedTps
+        ), restarts AS (
+            SELECT s.instance, s.started_at FROM service_starts s
+            WHERE EXISTS (SELECT 1 FROM service_starts b WHERE b.instance = s.instance AND b.started_at < s.started_at)
         ), clean_windows AS (
             SELECT w.starts, w.ends FROM event_windows w
             WHERE NOT EXISTS (
-                SELECT 1 FROM availability_minutes r
-                WHERE r.restarted AND r.minute > w.starts - interval '1 minute' AND r.minute < w.ends)
+                SELECT 1 FROM restarts r
+                WHERE r.started_at > w.starts AND r.started_at <= w.ends + CAST(:restartMarginSeconds AS bigint) * interval '1 second'
+                GROUP BY r.instance
+                HAVING count(*) > CASE WHEN r.instance = ANY (w.crashed) THEN 1 ELSE 0 END)
         ), outside_minutes AS (
             SELECT DISTINCT o.minute FROM clean_windows w
             JOIN availability_minutes o ON o.minute > w.starts - interval '1 minute' AND o.minute < w.ends
@@ -52,7 +62,8 @@ public class AvailabilityRepository {
         int badSharePercent,
         int guaranteedTps,
         Duration chaosAftermath,
-        Duration loadAftermath
+        Duration loadAftermath,
+        Duration restartMargin
     ) {
     }
 
@@ -74,8 +85,10 @@ public class AvailabilityRepository {
     ) {
     }
 
-    /** One minute as monitoring tells it; {@code restarted} is null if monitoring had no process to tell about. */
-    public record FreshMinute(Instant minute, long transfers, long slow, @Nullable Boolean restarted) {
+    public record FreshMinute(Instant minute, long transfers, long slow) {
+    }
+
+    public record ServiceStart(String instance, Instant startedAt) {
     }
 
     private final JdbcClient jdbc;
@@ -183,7 +196,8 @@ public class AvailabilityRepository {
             .param("badSharePercent", rules.badSharePercent())
             .param("guaranteedTps", rules.guaranteedTps())
             .param("chaosAftermathSeconds", rules.chaosAftermath().toSeconds())
-            .param("loadAftermathSeconds", rules.loadAftermath().toSeconds());
+            .param("loadAftermathSeconds", rules.loadAftermath().toSeconds())
+            .param("restartMarginSeconds", rules.restartMargin().toSeconds());
     }
 
     /** The first minute from {@code from} to {@code to}, both included, that monitoring has not told about yet. */
@@ -202,14 +216,37 @@ public class AvailabilityRepository {
         var filled = 0;
         for (var minute : minutes) {
             filled += jdbc.sql(
-                "UPDATE availability_minutes SET transfers = :transfers, slow = :slow, restarted = :restarted WHERE minute = :minute AND transfers IS NULL")
+                "UPDATE availability_minutes SET transfers = :transfers, slow = :slow WHERE minute = :minute AND transfers IS NULL")
                 .param("minute", Timestamp.from(minute.minute()))
                 .param("transfers", minute.transfers())
                 .param("slow", minute.slow())
-                .param("restarted", minute.restarted())
                 .update();
         }
         return filled;
+    }
+
+    /** Monitoring tells a pod's start every time it is read; each is kept once. */
+    public int addStarts(Collection<ServiceStart> starts) {
+        var added = 0;
+        for (var start : starts) {
+            added += jdbc.sql("INSERT INTO service_starts (instance, started_at) VALUES (:instance, :startedAt) ON CONFLICT DO NOTHING")
+                .param("instance", start.instance())
+                .param("startedAt", Timestamp.from(start.startedAt()))
+                .update();
+        }
+        return added;
+    }
+
+    /** Each pod keeps its latest start before {@code before}, however old: a start after it is a restart only if one came before. */
+    public int deleteStartsBefore(Instant before) {
+        return jdbc.sql(
+            """
+            DELETE FROM service_starts s
+            WHERE s.started_at < :before
+              AND EXISTS (SELECT 1 FROM service_starts n WHERE n.instance = s.instance AND n.started_at > s.started_at AND n.started_at < :before)
+            """)
+            .param("before", Timestamp.from(before))
+            .update();
     }
 
     public int deleteMinutesBefore(Instant before) {

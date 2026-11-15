@@ -87,9 +87,10 @@ public record ControlProperties(
     /**
      * Bad minutes during a crash and {@link #chaosAftermath} after it, and during a pulse above {@link #guaranteedTps}
      * and {@link #loadAftermath} after it, are outside the bounds the bank promises, unless a service restarted in place
-     * then: that is the bank falling over, judged as any other minute.
+     * then, other than the crash's own pods once each: that is the bank falling over, judged as any other minute. A
+     * process starts some tens of seconds after it went down, so starts up to {@link #restartMargin} after the end count.
      */
-    public record Outside(int guaranteedTps, Duration chaosAftermath, Duration loadAftermath) {
+    public record Outside(int guaranteedTps, Duration chaosAftermath, Duration loadAftermath, Duration restartMargin) {
     }
 
     /** A window declared later than {@link #notice} before its start does not excuse its bad minutes. */

@@ -25,6 +25,9 @@ class AvailabilityTest extends IntegrationTest {
 
     private static final long TRANSFERS = 10_000;
     private static final int GUARANTEED_TPS = 1300;
+    /** As the chart names the ledger's first pod, in a crash's list and in monitoring alike. */
+    private static final String LEDGER = "ledger-0";
+    private static final String GATEWAY = "gateway-7d9f-abcde";
 
     @Autowired Availability availability;
     @Autowired AvailabilityRepository repository;
@@ -43,32 +46,36 @@ class AvailabilityTest extends IntegrationTest {
             .update();
     }
 
-    private void minute(Instant minute, long errors, @Nullable Long transfers, @Nullable Long slow, @Nullable Boolean restarted) {
+    private void freshMinute(Instant minute, long errors, @Nullable Long transfers, @Nullable Long slow) {
         jdbc.sql(
             """
-            INSERT INTO availability_minutes (minute, total, errors, busy, transfers, slow, restarted)
-            VALUES (:minute, :total, :errors, 0, :transfers, :slow, :restarted)
+            INSERT INTO availability_minutes (minute, total, errors, busy, transfers, slow)
+            VALUES (:minute, :total, :errors, 0, :transfers, :slow)
             """)
             .param("minute", Timestamp.from(minute))
             .param("total", REQUESTS)
             .param("errors", errors)
             .param("transfers", transfers)
             .param("slow", slow)
-            .param("restarted", restarted)
             .update();
     }
 
     /** Bad for both objectives: half the requests unanswered, half the transfers slow. */
     private void badForBoth(Instant minute) {
-        minute(minute, REQUESTS / 2, TRANSFERS, TRANSFERS / 2, false);
+        freshMinute(minute, REQUESTS / 2, TRANSFERS, TRANSFERS / 2);
     }
 
-    private void restartedBadForBoth(Instant minute) {
-        minute(minute, REQUESTS / 2, TRANSFERS, TRANSFERS / 2, true);
+    private void started(String instance, Instant at) {
+        repository.addStarts(List.of(new AvailabilityRepository.ServiceStart(instance, at)));
+    }
+
+    /** A pod that has run for a day, so that its next start is a restart in place. */
+    private void running(String instance) {
+        started(instance, clock.now().minus(Duration.ofDays(1)));
     }
 
     private void chaos(Instant at) {
-        jdbc.sql("INSERT INTO chaos_events (at, instances) VALUES (:at, ARRAY['ledger-0'])").param("at", Timestamp.from(at)).update();
+        jdbc.sql("INSERT INTO chaos_events (at, instances) VALUES (:at, ARRAY[:crashed])").param("at", Timestamp.from(at)).param("crashed", LEDGER).update();
     }
 
     private void pulse(Instant at, int tps, int seconds) {
@@ -87,7 +94,7 @@ class AvailabilityTest extends IntegrationTest {
     private AvailabilityRepository.Counts counts() {
         return repository.countsSince(clock.now().minus(Duration.ofDays(30)), new AvailabilityRepository.Rules(
             props.availability().goodMinuteAnsweredPercent(), NOTICE, props.freshness().badSharePercent(), GUARANTEED_TPS,
-            props.outside().chaosAftermath(), props.outside().loadAftermath()));
+            props.outside().chaosAftermath(), props.outside().loadAftermath(), props.outside().restartMargin()));
     }
 
     private void goodMinute(Instant minute) {
@@ -176,10 +183,10 @@ class AvailabilityTest extends IntegrationTest {
     @Test
     @DisplayName("a minute is fresh with exactly 1 % of its transfers slow and bad for freshness with one transfer more")
     void a_minute_is_fresh_with_exactly_1_percent_of_its_transfers_slow_and_bad_for_freshness_with_one_transfer_more() {
-        minute(minuteAgo(3), 0, TRANSFERS, TRANSFERS / 100, false);
+        freshMinute(minuteAgo(3), 0, TRANSFERS, TRANSFERS / 100);
         assertThat(objectives().freshness().badMinutes()).isZero();
 
-        minute(minuteAgo(2), 0, TRANSFERS, TRANSFERS / 100 + 1, false);
+        freshMinute(minuteAgo(2), 0, TRANSFERS, TRANSFERS / 100 + 1);
         assertThat(objectives().freshness().badMinutes()).isEqualTo(1);
         assertThat(slo().badMinutes()).isZero();
     }
@@ -187,9 +194,9 @@ class AvailabilityTest extends IntegrationTest {
     @Test
     @DisplayName("a minute without transfers, or not read from monitoring, is not measured for freshness")
     void a_minute_without_transfers_or_not_read_from_monitoring_is_not_measured_for_freshness() {
-        minute(minuteAgo(4), 0, null, null, null);
-        minute(minuteAgo(3), 0, 0L, 0L, false);
-        minute(minuteAgo(2), 0, TRANSFERS, 0L, false);
+        freshMinute(minuteAgo(4), 0, null, null);
+        freshMinute(minuteAgo(3), 0, 0L, 0L);
+        freshMinute(minuteAgo(2), 0, TRANSFERS, 0L);
 
         var counts = counts();
 
@@ -263,23 +270,96 @@ class AvailabilityTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("a service restarted in place during a crash makes every bad minute of the crash judged, those before the restart too")
-    void a_service_restarted_in_place_during_a_crash_makes_every_bad_minute_of_the_crash_judged_those_before_the_restart_too() {
-        var crashed = minuteAgo(20);
-        chaos(crashed.plusSeconds(10));
-        badForBoth(crashed);
-        restartedBadForBoth(crashed.plusSeconds(60));
-        var pulsed = minuteAgo(10);
-        pulse(pulsed.plusSeconds(10), 2000, 30);
-        badForBoth(pulsed);
-        restartedBadForBoth(pulsed.plusSeconds(60));
+    @DisplayName("a crashed pod starting again once leaves the crash outside; starting twice makes every bad minute of the crash judged")
+    void a_crashed_pod_starting_again_once_leaves_the_crash_outside_starting_twice_makes_every_bad_minute_of_the_crash_judged() {
+        running(LEDGER);
+        var once = minuteAgo(30);
+        chaos(once.plusSeconds(10));
+        started(LEDGER, once.plusSeconds(40));
+        badForBoth(once);
+        badForBoth(once.plusSeconds(60));
+        var twice = minuteAgo(15);
+        chaos(twice.plusSeconds(10));
+        started(LEDGER, twice.plusSeconds(40));
+        started(LEDGER, twice.plusSeconds(100));
+        badForBoth(twice);
+        badForBoth(twice.plusSeconds(60));
 
         var objectives = objectives();
 
-        assertThat(objectives.slo().badMinutes()).isEqualTo(4);
+        assertThat(objectives.slo().outsideMinutes()).isEqualTo(2);
+        assertThat(objectives.slo().badMinutes()).isEqualTo(2);
+        assertThat(objectives.freshness().outsideMinutes()).isEqualTo(2);
+        assertThat(objectives.freshness().badMinutes()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("a restart in place of a pod the crash did not crash makes the crash judged; so does any restart during a pulse")
+    void a_restart_in_place_of_a_pod_the_crash_did_not_crash_makes_the_crash_judged_so_does_any_restart_during_a_pulse() {
+        running(GATEWAY);
+        running(LEDGER);
+        var crashed = minuteAgo(30);
+        chaos(crashed.plusSeconds(10));
+        started(LEDGER, crashed.plusSeconds(40));
+        started(GATEWAY, crashed.plusSeconds(50));
+        badForBoth(crashed);
+        var pulsed = minuteAgo(15);
+        pulse(pulsed.plusSeconds(10), 2000, 30);
+        started(LEDGER, pulsed.plusSeconds(20));
+        badForBoth(pulsed);
+
+        var objectives = objectives();
+
+        assertThat(objectives.slo().badMinutes()).isEqualTo(2);
         assertThat(objectives.slo().outsideMinutes()).isZero();
-        assertThat(objectives.freshness().badMinutes()).isEqualTo(4);
-        assertThat(objectives.freshness().outsideMinutes()).isZero();
+        assertThat(objectives.freshness().badMinutes()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("a new pod's first start during a pulse is not a restart: the pulse stays outside")
+    void a_new_pods_first_start_during_a_pulse_is_not_a_restart_the_pulse_stays_outside() {
+        var pulsed = minuteAgo(15);
+        pulse(pulsed.plusSeconds(10), 2000, 30);
+        started(GATEWAY, pulsed.plusSeconds(20));
+        badForBoth(pulsed);
+
+        assertThat(objectives().slo().outsideMinutes()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a restart 50 s after a crash's aftermath still makes the crash judged; one 70 s after it does not")
+    void a_restart_50_s_after_a_crashs_aftermath_still_makes_the_crash_judged_one_70_s_after_it_does_not() {
+        running(GATEWAY);
+        var within = minuteAgo(30);
+        chaos(within.plusSeconds(10));
+        started(GATEWAY, within.plusSeconds(10 + 60 + 50));
+        badForBoth(within);
+        var past = minuteAgo(15);
+        chaos(past.plusSeconds(10));
+        started(GATEWAY, past.plusSeconds(10 + 60 + 70));
+        badForBoth(past);
+
+        var objectives = objectives();
+
+        assertThat(objectives.slo().badMinutes()).isEqualTo(1);
+        assertThat(objectives.slo().outsideMinutes()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("old starts are deleted, but each pod keeps its newest start before the cutoff, so a later start is still a restart")
+    void old_starts_are_deleted_but_each_pod_keeps_its_newest_start_before_the_cutoff_so_a_later_start_is_still_a_restart() {
+        var cutoff = clock.now().minus(Duration.ofDays(2));
+        started(LEDGER, cutoff.minus(Duration.ofDays(2)));
+        started(LEDGER, cutoff.minus(Duration.ofDays(1)));
+        started(LEDGER, cutoff.plus(Duration.ofHours(1)));
+        started(GATEWAY, cutoff.minus(Duration.ofDays(1)));
+
+        assertThat(repository.deleteStartsBefore(cutoff)).isEqualTo(1);
+
+        assertThat(jdbc.sql("SELECT instance, started_at FROM service_starts ORDER BY instance, started_at").query().listOfRows()).containsExactly(
+            Map.of("instance", GATEWAY, "started_at", Timestamp.from(cutoff.minus(Duration.ofDays(1)))),
+            Map.of("instance", LEDGER, "started_at", Timestamp.from(cutoff.minus(Duration.ofDays(1)))),
+            Map.of("instance", LEDGER, "started_at", Timestamp.from(cutoff.plus(Duration.ofHours(1)))));
     }
 
     @Test
@@ -425,12 +505,12 @@ class AvailabilityTest extends IntegrationTest {
     void an_hour_that_is_over_keeps_both_objectives_planned_outside_and_bad_minutes_once_its_minutes_are_deleted() throws Exception {
         var lastHour = clock.now().truncatedTo(ChronoUnit.HOURS).minus(Duration.ofHours(1));
         badForBoth(lastHour.plusSeconds(60));
-        minute(lastHour.plusSeconds(120), 0, TRANSFERS, TRANSFERS / 2, false);
+        freshMinute(lastHour.plusSeconds(120), 0, TRANSFERS, TRANSFERS / 2);
         badForBoth(lastHour.plusSeconds(600));
         window(lastHour.plusSeconds(600), lastHour.plusSeconds(660), lastHour.minus(Duration.ofDays(1)));
         badForBoth(lastHour.plusSeconds(1200));
         chaos(lastHour.plusSeconds(1200));
-        minute(lastHour.plusSeconds(1800), 0, null, null, null);
+        freshMinute(lastHour.plusSeconds(1800), 0, null, null);
         generatorHandsOver(List.of());
         prometheus.status = 503;
         var before = objectives();

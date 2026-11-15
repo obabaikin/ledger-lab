@@ -45,7 +45,7 @@ public class Availability {
         var outside = props.outside();
         this.rules = new AvailabilityRepository.Rules(
             this.props.goodMinuteAnsweredPercent(), props.maintenance().notice(), freshnessProps.badSharePercent(), outside.guaranteedTps(),
-            outside.chaosAftermath(), outside.loadAftermath());
+            outside.chaosAftermath(), outside.loadAftermath(), outside.restartMargin());
     }
 
     @Scheduled(fixedDelayString = "${control.availability.poll-interval}", initialDelayString = "${control.availability.poll-interval}")
@@ -110,6 +110,7 @@ public class Availability {
     }
 
     public int deleteOldMinutes(Instant now) {
+        minutes.deleteStartsBefore(now.minus(props.minutesRetention()));
         return minutes.deleteMinutesBefore(now.minus(props.minutesRetention()));
     }
 }
