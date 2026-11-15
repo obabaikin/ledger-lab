@@ -59,10 +59,11 @@ describe('the range of the charts', () => {
     expect(screen.getByRole('combobox', { name: en.charts.rangeLabel })).toHaveValue('5m')
   })
 
-  it('offers 5 min, 30 min and 2 h in the words of the page texts', () => {
+  it('offers 2 min, 5 min, 30 min and 2 h in the words of the page texts', () => {
     render(<Charts view={allSeries()} chaos={[]} range="2h" onRange={() => undefined} />)
 
     expect(within(screen.getByRole('combobox')).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      en.charts.ranges['2m'],
       en.charts.ranges['5m'],
       en.charts.ranges['30m'],
       en.charts.ranges['2h'],
@@ -88,6 +89,23 @@ describe('the charts', () => {
     expect(screen.getAllByTestId('chart-readout').map((r) => r.textContent)).toContain(
       `${hoursMinutes(new Date(Date.parse(view.from) + 2 * view.stepSeconds * 1000).toISOString())} · ${en.charts.series.ACCEPTED_PER_SECOND} — · ${en.charts.series.POSTED_PER_SECOND} —`,
     )
+  })
+
+  it('show the newest values before the pointer comes and after it leaves, so the readout never comes and goes', () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(DRAWN)
+    const view = allSeries()
+    render(<Charts view={view} chaos={[]} range="2h" onRange={() => undefined} />)
+    const chart = screen.getByRole('img', { name: en.charts.flow })
+    const newest = `${hoursMinutes(new Date(Date.parse(view.from) + view.stepSeconds * 1000).toISOString())} · ${en.charts.series.ACCEPTED_PER_SECOND} 410 · ${en.charts.series.POSTED_PER_SECOND} 409`
+
+    expect(screen.getAllByTestId('chart-readout').map((r) => r.textContent)).toContain(newest)
+    expect(screen.queryByTestId('chart-cursor')).not.toBeInTheDocument()
+
+    fireEvent.mouseMove(chart, { clientX: 420 })
+    fireEvent.mouseLeave(chart)
+
+    expect(screen.getAllByTestId('chart-readout').map((r) => r.textContent)).toContain(newest)
+    expect(screen.queryByTestId('chart-cursor')).not.toBeInTheDocument()
   })
 
   it('take the nearest grid point, and keep to the grid at its edges', () => {

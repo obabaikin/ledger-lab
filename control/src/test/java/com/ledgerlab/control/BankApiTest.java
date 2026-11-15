@@ -316,9 +316,10 @@ class BankApiTest extends BankIntegrationTest {
         }
 
         for (var served : List.of(
-            new Served("/api/bank/series?range=5m", 5, 61, "[15s]"),
-            new Served("/api/bank/series?range=30m", 15, 121, "[30s]"),
-            new Served("/api/bank/series", 30, 241, "[1m]"))) {
+            new Served("/api/bank/series?range=2m", 1, 121, "[3s]"),
+            new Served("/api/bank/series?range=5m", 5, 61, "[3s]"),
+            new Served("/api/bank/series?range=30m", 15, 121, "[3s]"),
+            new Served("/api/bank/series", 30, 241, "[3s]"))) {
             prometheus.calls.clear();
 
             var charts = get(served.path()).getBody();
@@ -336,9 +337,9 @@ class BankApiTest extends BankIntegrationTest {
     @DisplayName("the latency is read from the gateway's histogram, as p50 and p99 over its buckets")
     void the_latency_is_read_from_the_gateways_histogram_as_p50_and_p99_over_its_buckets() {
         assertThat(SeriesName.BANK_LATENCY_P50_MS.query(Duration.ofMinutes(1)))
-            .isEqualTo("1000 * histogram_quantile(0.5, sum by (le) (rate(gateway_transfer_latency_seconds_bucket[1m])))");
+            .isEqualTo("1000 * histogram_quantile(0.5, sum by (le) (irate(gateway_transfer_latency_seconds_bucket[1m])))");
         assertThat(SeriesName.BANK_LATENCY_P99_MS.query(Duration.ofSeconds(15)))
-            .isEqualTo("1000 * histogram_quantile(0.99, sum by (le) (rate(gateway_transfer_latency_seconds_bucket[15s])))");
+            .isEqualTo("1000 * histogram_quantile(0.99, sum by (le) (irate(gateway_transfer_latency_seconds_bucket[15s])))");
     }
 
     @Test

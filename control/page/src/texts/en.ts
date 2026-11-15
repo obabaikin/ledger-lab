@@ -136,7 +136,7 @@ export const en = {
     refused: 'Refused per second',
     latency: 'Time from acceptance to result',
     rangeLabel: 'Last',
-    ranges: { '5m': '5 min', '30m': '30 min', '2h': '2 h' },
+    ranges: { '2m': '2 min', '5m': '5 min', '30m': '30 min', '2h': '2 h' },
     milliseconds: (ms: string) => `${ms} ms`,
     seconds: (seconds: string) => `${seconds} s`,
     guides: {

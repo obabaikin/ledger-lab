@@ -56,6 +56,15 @@ export function crashBands(chaos: ChaosEvent[], view: SeriesView): [number, numb
     .map((s) => [s, Math.min(span, s + view.stepSeconds)])
 }
 
+/** Without a pointer the readout shows the newest point any line has a value at, so it never appears or vanishes and moves the charts. */
+function latestPoint(lines: Line[]): number | null {
+  const length = Math.max(0, ...lines.map((l) => l.points.length))
+  for (let i = length - 1; i >= 0; i -= 1) {
+    if (lines.some((l) => (l.points[i]?.[1] ?? null) !== null)) return i
+  }
+  return null
+}
+
 /** The grid point nearest to a place on the chart, as a share of the plotted width from its left edge. */
 export function nearestPoint(share: number, points: number): number {
   return Math.min(points - 1, Math.max(0, Math.round(share * (points - 1))))
@@ -237,8 +246,10 @@ export function Charts(props: { view: SeriesView | null; chaos: ChaosEvent[]; ra
   const point = at === null ? null : nearestPoint(at, view.points)
   const onAt = (share: number | null) => setAt(share)
   const common = { span, bands, edges, at: point, onAt }
-  const readout = (lines: Line[], as: (v: number) => string) =>
-    point !== null && <Readout lines={lines} at={point} from={from} step={view.stepSeconds} as={as} />
+  const readout = (lines: Line[], as: (v: number) => string) => {
+    const shown = point ?? latestPoint(lines)
+    return shown === null ? <p className="readout">{NO_DATA}</p> : <Readout lines={lines} at={shown} from={from} step={view.stepSeconds} as={as} />
+  }
   return (
     <section className="charts" aria-label={t.charts.flow}>
       <div className="chartsHead">{picker}</div>

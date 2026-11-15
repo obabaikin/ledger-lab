@@ -63,7 +63,7 @@ public class BankController {
     @ApiResponse(responseCode = "400", description = "A range other than those served", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @GetMapping("/series")
     public SeriesView series(
-        @Parameter(description = "The time the charts cover: 5m, 30m or 2h; omit for 2h")
+        @Parameter(description = "The time the charts cover: 2m, 5m, 30m or 2h; omit for 2h")
         @RequestParam(required = false) @Nullable String range
     ) throws InterruptedException, ExecutionException {
         return series.series(range);

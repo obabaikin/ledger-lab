@@ -73,11 +73,13 @@ control:
   maintenance:
     notice: 3h
   series:
-    # Prometheus scrapes the pods every second; each window holds at least 15 scrapes.
+    # Prometheus scrapes the pods every second; a point takes the last two scrapes in its window, so a window of 3 s
+    # bears one late scrape and still shows a service down for longer as a gap.
     ranges:
-      - {range: 5m, step: 5s, window: 15s}
-      - {range: 30m, step: 15s, window: 30s}
-      - {range: 2h, step: 30s, window: 1m}
+      - {range: 2m, step: 1s, window: 3s}
+      - {range: 5m, step: 5s, window: 3s}
+      - {range: 30m, step: 15s, window: 3s}
+      - {range: 2h, step: 30s, window: 3s}
     default-range: 2h
     # Every visitor's page asks for the same charts.
     cache: 15s

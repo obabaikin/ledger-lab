@@ -1335,7 +1335,7 @@
       "get" : {
         "operationId" : "series",
         "parameters" : [ {
-          "description" : "The time the charts cover: 5m, 30m or 2h; omit for 2h",
+          "description" : "The time the charts cover: 2m, 5m, 30m or 2h; omit for 2h",
           "in" : "query",
           "name" : "range",
           "required" : false,

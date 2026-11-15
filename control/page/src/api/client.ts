@@ -15,7 +15,7 @@ export type SiteView = Schemas['SiteView']
 const PERIODS_LISTED = 10
 
 /** The ranges control serves its charts for (`control.series.ranges`). */
-export const CHART_RANGES = ['5m', '30m', '2h'] as const
+export const CHART_RANGES = ['2m', '5m', '30m', '2h'] as const
 export type ChartRange = (typeof CHART_RANGES)[number]
 export const DEFAULT_CHART_RANGE: ChartRange = '2h'
 
