@@ -22,9 +22,10 @@ is in the [Roadmap](#roadmap).
 
 ## What it does
 
-- **One bank that never stops.** 100,000 client accounts of €10,000 each and a pool of €100 million: €1,100,000,000.00
-  in all, a sum that must never change. The last 100 accounts are blocked, so some transfers are rejected as in a real
-  bank ([ADR 0021](docs/adr/0021-one-bank-around-the-clock.md)).
+- **One bank that never stops.** 100,000 client accounts and a pool account; the total in all accounts must never
+  change. The last 100 accounts are blocked, so some transfers are rejected as in a real bank. Like merchants, 5 hot
+  accounts receive about 30 % of all transfers, so their rows are the most contended
+  ([ADR 0018](docs/adr/0018-deferred-credits.md), [ADR 0021](docs/adr/0021-one-bank-around-the-clock.md)).
 - A **gateway** accepts transfers over a client-facing API with a client-supplied idempotency key,
   stores them in a transactional outbox and publishes them to Kafka. Retries never duplicate. When too
   many are in progress, it refuses one with `503 busy` before writing anything, and the client retries later.
