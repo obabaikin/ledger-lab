@@ -76,6 +76,10 @@ postgres:
   # The services' pools take 90 (gateway 40, ledger 2 x 10, control 10, reporting 10, generator 6, the exporter and the
   # operator); while the gateway is replaced, its old and new pod hold their pools at once.
   maxConnections: 150
+  # Which statements take the time (pg_stat_statements, read by the exporter), and any statement slower than this in
+  # the log.
+  preloadLibraries: pg_stat_statements
+  logMinDuration: 1s
 
 prometheus:
   image: prom/prometheus:v3.5.0
@@ -97,6 +101,8 @@ exporters:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
     port: 9187
     memory: 64Mi
+    # The statements with the most time, each a series per metric; the text is a label, cut to its start.
+    statementsLimit: 100
 
 # Off in k3d: the server sets a host, a Let's Encrypt issuer, security headers and the rate limit (infra/server/values.yaml).
 ingress:
@@ -177,7 +183,15 @@ services:
     module: control
     port: 8083
     replicas: 1
-    memory: 448Mi
+    # The kernel killed a 448Mi pod after 9 hours with a heap of half of it, so at least 224 MiB was outside the
+    # heap then; the heap is fixed and the rest left to the JVM, its threads and malloc.
+    memory: 512Mi
+    nativeReserve: 320Mi
+    # An OutOfMemoryError leaves a heap dump and stops the JVM, the GC log keeps the hours before a kill.
+    jvmOptions: -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps -XX:+ExitOnOutOfMemoryError -Xlog:gc*:file=/dumps/gc.log:time,uptime:filecount=5,filesize=10m
+    dumps: 1Gi
+    env:
+      MALLOC_ARENA_MAX: "2"
   reporting:
     module: reporting
     port: 8084

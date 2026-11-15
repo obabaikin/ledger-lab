@@ -25,6 +25,32 @@ subjects:
     name: prometheus
     namespace: {{ .Release.Namespace }}
 ---
+# The kubelet's resource metrics, read from the node itself; nodes/proxy is not needed for them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-prometheus-kubelet
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-prometheus-kubelet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-prometheus-kubelet
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: {{ .Release.Namespace }}
+---
 # The charts of the last days outlive a restart of the pod.
 apiVersion: v1
 kind: PersistentVolumeClaim
