@@ -1,35 +1,21 @@
 {
   "components" : {
     "schemas" : {
-      "Account" : {
+      "AccountMismatch" : {
         "properties" : {
           "accountNo" : {
             "format" : "int32",
             "type" : "integer"
           },
-          "balanceCents" : {
+          "balanceChangeCents" : {
+            "description" : "Balance at the end of the period minus the balance at its start",
             "format" : "int64",
             "type" : "integer"
           },
-          "dailyLimitCents" : {
+          "journalCents" : {
+            "description" : "Sum of the account's journal entries of the period",
             "format" : "int64",
             "type" : "integer"
-          },
-          "dailySpentCents" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "openingBalanceCents" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "runId" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "status" : {
-            "enum" : [ "ACTIVE", "BLOCKED" ],
-            "type" : "string"
           }
         },
         "type" : "object"
@@ -44,70 +30,46 @@
         },
         "type" : "object"
       },
-      "CheckResult" : {
-        "properties" : {
-          "check" : {
-            "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
-            "type" : "string"
-          },
-          "description" : {
-            "type" : "string"
-          },
-          "passed" : {
-            "type" : "boolean"
-          }
-        },
-        "type" : "object"
-      },
-      "OpenAccountsRequest" : {
-        "properties" : {
-          "accountCount" : {
-            "format" : "int32",
-            "maximum" : 10000,
-            "minimum" : 2,
-            "type" : "integer"
-          },
-          "blockedAccounts" : {
-            "format" : "int32",
-            "minimum" : 0,
-            "type" : "integer"
-          },
-          "dailyLimitCents" : {
-            "format" : "int64",
-            "minimum" : 0,
-            "type" : "integer"
-          },
-          "openingBalanceCents" : {
-            "format" : "int64",
-            "minimum" : 0,
-            "type" : "integer"
-          }
-        },
-        "required" : [ "accountCount", "blockedAccounts", "dailyLimitCents", "openingBalanceCents" ],
-        "type" : "object"
-      },
-      "ReconciliationReport" : {
+      "Books" : {
         "properties" : {
           "accounts" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "accountsOutOfBalance" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "balanceTotalCents" : {
+            "description" : "All balances, the pool's included, plus the credits not yet applied",
             "format" : "int64",
             "type" : "integer"
           },
           "balanced" : {
             "type" : "boolean"
           },
-          "checks" : {
+          "openingTotalCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PeriodCheck" : {
+        "properties" : {
+          "accountExamples" : {
+            "description" : "The first of them, up to the configured number",
             "items" : {
-              "$ref" : "#/components/schemas/CheckResult"
+              "$ref" : "#/components/schemas/AccountMismatch"
             },
             "type" : "array"
+          },
+          "accountsCompared" : {
+            "description" : "False when the period before has no snapshot of the balances: the accounts were not compared",
+            "type" : "boolean"
+          },
+          "accountsOutOfBalance" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanced" : {
+            "type" : "boolean"
           },
           "creditsCents" : {
             "format" : "int64",
@@ -119,7 +81,15 @@
           },
           "failedChecks" : {
             "items" : {
-              "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
+              "enum" : [ "JOURNAL_DEBITS_EQUAL_CREDITS", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "invalidJournalExamples" : {
+            "description" : "The first of them, up to the configured number",
+            "items" : {
+              "format" : "uuid",
               "type" : "string"
             },
             "type" : "array"
@@ -128,11 +98,44 @@
             "format" : "int64",
             "type" : "integer"
           },
-          "journalSumCents" : {
+          "madeAt" : {
+            "description" : "When the ledger kept the check",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "startedAt" : {
+            "description" : "When the ledger began the check",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "transfersWithInvalidJournal" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PeriodCheckState" : {
+        "properties" : {
+          "check" : {
+            "$ref" : "#/components/schemas/PeriodCheck",
+            "description" : "Absent until the check asked for by POST has finished"
+          }
+        },
+        "type" : "object"
+      },
+      "PeriodReconciliation" : {
+        "properties" : {
+          "check" : {
+            "$ref" : "#/components/schemas/PeriodCheck",
+            "description" : "Absent until the check asked for by POST has finished"
           },
-          "openingTotalCents" : {
+          "periodStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "poolPostings" : {
+            "description" : "Postings of cash pooling; not among the transfers above",
             "format" : "int64",
             "type" : "integer"
           },
@@ -150,14 +153,6 @@
               "type" : "integer"
             },
             "type" : "object"
-          },
-          "runId" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "transfersWithInvalidJournal" : {
-            "format" : "int64",
-            "type" : "integer"
           }
         },
         "type" : "object"
@@ -165,117 +160,25 @@
     }
   },
   "info" : {
-    "description" : "A run's accounts, the ledger's reconciliation and run deletion, for control.",
+    "description" : "The ledger's view of a period and of the bank's books, for control.",
     "title" : "Ledger Lab ledger internal API",
     "version" : "1"
   },
   "openapi" : "3.1.0",
   "paths" : {
-    "/internal/runs/{runId}" : {
-      "delete" : {
-        "operationId" : "delete",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "204" : {
-            "description" : "Deleted"
-          },
-          "404" : {
-            "description" : "Unknown run"
-          }
-        },
-        "tags" : [ "run-controller" ]
-      }
-    },
-    "/internal/runs/{runId}/accounts" : {
-      "post" : {
-        "operationId" : "openAccounts",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/OpenAccountsRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "201" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "items" : {
-                    "$ref" : "#/components/schemas/Account"
-                  },
-                  "type" : "array"
-                }
-              }
-            },
-            "description" : "Accounts opened"
-          },
-          "400" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Invalid setup"
-          },
-          "409" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The run already has accounts"
-          }
-        },
-        "tags" : [ "run-controller" ]
-      }
-    },
-    "/internal/runs/{runId}/reconciliation" : {
+    "/internal/books" : {
       "get" : {
-        "operationId" : "reconciliation",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
+        "operationId" : "books",
         "responses" : {
           "200" : {
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ReconciliationReport"
+                  "$ref" : "#/components/schemas/Books"
                 }
               }
             },
-            "description" : "The ledger's checks; an unknown run has no accounts and zeros"
+            "description" : "The sums as of now"
           },
           "503" : {
             "content" : {
@@ -285,10 +188,126 @@
                 }
               }
             },
-            "description" : "The database cancelled a reconciliation query at the statement timeout."
+            "description" : "The database cancelled the query at the statement timeout"
           }
         },
-        "tags" : [ "run-controller" ]
+        "summary" : "All balances against all opening balances",
+        "tags" : [ "period-controller" ]
+      }
+    },
+    "/internal/periods/{periodStart}/check" : {
+      "get" : {
+        "operationId" : "checkState",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "periodStart",
+          "required" : true,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PeriodCheckState"
+                }
+              }
+            },
+            "description" : "The check once finished, else none"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not a period, not ended yet, or older than the ledger keeps"
+          }
+        },
+        "summary" : "Whether the period's check is made, without counting its transfers",
+        "tags" : [ "period-controller" ]
+      },
+      "post" : {
+        "operationId" : "check",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "periodStart",
+          "required" : true,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "202" : {
+            "description" : "Started, running or already made; GET shows it when finished"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not a period, not ended yet, or older than the ledger keeps"
+          }
+        },
+        "summary" : "Start the period's check in the background; call once all its transfers are booked",
+        "tags" : [ "period-controller" ]
+      }
+    },
+    "/internal/periods/{periodStart}/reconciliation" : {
+      "get" : {
+        "operationId" : "reconciliation",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "periodStart",
+          "required" : true,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PeriodReconciliation"
+                }
+              }
+            },
+            "description" : "Counted now; the check is absent until it has finished"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "Not a period, not ended yet, or older than the ledger keeps"
+          },
+          "503" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The database cancelled a query at the statement timeout"
+          }
+        },
+        "summary" : "Transfers of an ended period by outcome, and its check once made",
+        "tags" : [ "period-controller" ]
       }
     }
   }

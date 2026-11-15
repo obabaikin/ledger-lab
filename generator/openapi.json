@@ -12,24 +12,29 @@
         "type" : "object"
       },
       "ClientReconciliationReport" : {
+        "description" : "The client journal against the bank's statement of one closed period.",
         "properties" : {
+          "acceptedByJournal" : {
+            "description" : "Transfers the client knows the bank accepted in the period, those it learned by asking included.",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "balanced" : {
+            "description" : "No break of any kind.",
             "type" : "boolean"
           },
           "breaks" : {
             "$ref" : "#/components/schemas/ReconciliationBreaks"
           },
-          "journal" : {
-            "$ref" : "#/components/schemas/JournalTotals"
-          },
-          "runId" : {
-            "format" : "uuid",
+          "periodStart" : {
+            "format" : "date-time",
             "type" : "string"
           },
           "statement" : {
             "$ref" : "#/components/schemas/StatementTotals"
           },
           "statementFinal" : {
+            "description" : "Every line of the statement has a final status this client can read.",
             "type" : "boolean"
           },
           "unknownResolved" : {
@@ -38,204 +43,75 @@
         },
         "type" : "object"
       },
-      "JournalEntryView" : {
-        "properties" : {
-          "amountCents" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "first" : {
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/Send"
-            }, {
-              "type" : "null"
-            } ]
-          },
-          "fromAccount" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "gatewayStatus" : {
-            "enum" : [ "ACCEPTED", "PUBLISHED", "POSTED", "REJECTED" ],
-            "type" : [ "string", "null" ]
-          },
-          "outcome" : {
-            "enum" : [ "PENDING", "ACKNOWLEDGED", "FAILED", "UNKNOWN" ],
-            "type" : "string"
-          },
-          "rejectReason" : {
-            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
-            "type" : [ "string", "null" ]
-          },
-          "resends" : {
-            "items" : {
-              "$ref" : "#/components/schemas/Resend"
-            },
-            "type" : "array"
-          },
-          "seq" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "toAccount" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "transferId" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
-      "JournalPage" : {
-        "properties" : {
-          "items" : {
-            "items" : {
-              "$ref" : "#/components/schemas/JournalEntryView"
-            },
-            "type" : "array"
-          },
-          "next" : {
-            "format" : "int64",
-            "type" : [ "integer", "null" ]
-          }
-        },
-        "type" : "object"
-      },
-      "JournalTotals" : {
+      "ClientTotals" : {
+        "description" : "What became of the clients' transfers since the bank started, whichever generator sent them.",
         "properties" : {
           "acknowledged" : {
+            "description" : "Transfers the bank took (any 2xx).",
             "format" : "int64",
             "type" : "integer"
           },
-          "acknowledgedAmountCents" : {
+          "gaveUp" : {
+            "description" : "Transfers whose client stopped trying: refused for good, or without an answer, whatever the bank said when asked later.",
             "format" : "int64",
             "type" : "integer"
           },
-          "failed" : {
+          "sent" : {
+            "description" : "Transfers the clients sent: each intent the journal stored.",
             "format" : "int64",
             "type" : "integer"
           },
-          "refused" : {
-            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "requested" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "unknown" : {
+          "unanswered" : {
+            "description" : "Sent, without an outcome yet: in flight, or given up and not yet asked about.",
             "format" : "int64",
             "type" : "integer"
           }
         },
         "type" : "object"
       },
-      "ReconciliationBreaks" : {
-        "properties" : {
-          "acknowledgedNotInStatement" : {
-            "$ref" : "#/components/schemas/TransferIds"
-          },
-          "failedButInStatement" : {
-            "$ref" : "#/components/schemas/TransferIds"
-          },
-          "notInJournal" : {
-            "$ref" : "#/components/schemas/TransferIds"
-          },
-          "payloadMismatch" : {
-            "$ref" : "#/components/schemas/TransferIds"
-          },
-          "statusMismatch" : {
-            "$ref" : "#/components/schemas/TransferIds"
-          }
-        },
-        "type" : "object"
-      },
-      "Resend" : {
-        "properties" : {
-          "httpStatus" : {
-            "format" : "int32",
-            "type" : [ "integer", "null" ]
-          },
-          "kind" : {
-            "enum" : [ "RETRY", "DUPLICATE" ],
-            "type" : "string"
-          },
-          "latencyMs" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "number" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "offsetMs" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "result" : {
-            "enum" : [ "RESPONSE", "NOT_CONNECTED", "NO_RESPONSE", "CANCELLED" ],
-            "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
-      "Send" : {
-        "properties" : {
-          "httpStatus" : {
-            "format" : "int32",
-            "type" : [ "integer", "null" ]
-          },
-          "latencyMs" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "offsetMs" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "result" : {
-            "enum" : [ "RESPONSE", "NOT_CONNECTED", "NO_RESPONSE", "CANCELLED" ],
-            "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
-      "SimulationStatus" : {
+      "LoadStatus" : {
+        "description" : "The clients' load now, what became of their transfers since this generator started, and in total since the bank started.",
         "properties" : {
           "acknowledged" : {
+            "description" : "Transfers the bank took (any 2xx).",
             "format" : "int64",
             "type" : "integer"
           },
-          "actualTps" : {
-            "format" : "double",
-            "type" : "number"
+          "baseTps" : {
+            "description" : "New transfers a second without a pulse.",
+            "format" : "int32",
+            "type" : "integer"
           },
           "duplicatesSent" : {
+            "description" : "Second sends of the same transfer, as a user pressing twice; not new transfers.",
             "format" : "int64",
-            "type" : "integer"
-          },
-          "durationSeconds" : {
-            "format" : "int32",
             "type" : "integer"
           },
           "failed" : {
+            "description" : "The client gave up and the bank does not have the transfer: refused on every attempt, or never reached.",
             "format" : "int64",
             "type" : "integer"
-          },
-          "finishedAt" : {
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
           },
           "inFlight" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "posted" : {
+          "notJournaled" : {
+            "description" : "Transfers not sent because the client journal could not store them first.",
             "format" : "int64",
             "type" : "integer"
+          },
+          "posted" : {
+            "description" : "Of the clients that waited for the final status: posted.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "pulse" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Pulse"
+            }, {
+              "type" : "null"
+            } ]
           },
           "refused" : {
             "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
@@ -243,6 +119,7 @@
             "type" : "integer"
           },
           "rejected" : {
+            "description" : "Of the clients that waited for the final status: rejected by the bank's rules.",
             "format" : "int64",
             "type" : "integer"
           },
@@ -254,101 +131,180 @@
             "type" : "object"
           },
           "requested" : {
+            "description" : "Transfers the clients set out to send.",
             "format" : "int64",
             "type" : "integer"
           },
-          "requestedPerSecond" : {
-            "description" : "New transfers per second of the run, from its start; index 0 is the first second.",
-            "items" : {
-              "format" : "int64",
-              "type" : "integer"
-            },
-            "type" : "array"
+          "restarted" : {
+            "description" : "Whether clients sent before this generator started, so its own counts are less than the total.",
+            "type" : "boolean"
           },
           "retries" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "runId" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "startedAt" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "state" : {
-            "enum" : [ "RUNNING", "STOPPING", "FINISHED", "STOPPED" ],
-            "type" : "string"
-          },
-          "targetTps" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "unknown" : {
+          "skipped" : {
+            "description" : "Transfers that were due while as many requests as allowed were open; never sent.",
             "format" : "int64",
             "type" : "integer"
           },
-          "waitedLatencyP50Ms" : {
-            "description" : "p50 of the time a waiting client's first press took to a final status, ms; presses whose wait ran out are left out; null before one.",
-            "format" : "double",
-            "type" : [ "number", "null" ]
+          "startedAt" : {
+            "description" : "When this generator began to send; null while the load is off. The counts start from zero with it.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
           },
-          "waitedLatencyP99Ms" : {
-            "description" : "p99, as waitedLatencyP50Ms.",
-            "format" : "double",
-            "type" : [ "number", "null" ]
+          "targetTps" : {
+            "description" : "New transfers a second now, the highest pulse included.",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "total" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ClientTotals"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "unknown" : {
+            "description" : "The client gave up without knowing whether the bank has the transfer.",
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
       },
-      "StartSimulationRequest" : {
+      "MinuteResponses" : {
+        "description" : "How the bank answered the clients' requests that ended in one minute.",
         "properties" : {
-          "accountCount" : {
-            "format" : "int32",
-            "minimum" : 2,
+          "busy" : {
+            "description" : "Of them refused as busy (503): an answer, the transfer was not taken.",
+            "format" : "int64",
             "type" : "integer"
           },
-          "blockedAccounts" : {
-            "format" : "int32",
-            "minimum" : 0,
+          "errors" : {
+            "description" : "Of them without a usable answer: a 5xx other than busy, no connection, or no answer in time.",
+            "format" : "int64",
             "type" : "integer"
           },
-          "durationSeconds" : {
-            "description" : "At most the generator's configured maximum duration.",
-            "format" : "int32",
-            "minimum" : 1,
-            "type" : "integer"
+          "minute" : {
+            "description" : "Start of the minute.",
+            "format" : "date-time",
+            "type" : "string"
           },
-          "hotAccounts" : {
-            "format" : "int32",
-            "minimum" : 0,
-            "type" : "integer"
-          },
-          "runId" : {
-            "format" : "uuid",
-            "type" : [ "string", "null" ]
-          },
-          "tps" : {
-            "format" : "int32",
-            "maximum" : 2000,
-            "minimum" : 1,
-            "type" : "integer"
-          },
-          "waitShare" : {
-            "format" : "double",
-            "maximum" : 1.0,
-            "minimum" : 0.0,
-            "type" : "number"
-          },
-          "waitTimeoutSeconds" : {
-            "format" : "int32",
-            "maximum" : 30,
-            "minimum" : 1,
+          "total" : {
+            "description" : "Requests that ended in the minute, retries and duplicates included.",
+            "format" : "int64",
             "type" : "integer"
           }
         },
-        "required" : [ "accountCount", "durationSeconds", "runId", "tps" ],
+        "type" : "object"
+      },
+      "MinutesPage" : {
+        "description" : "Minutes without a request are left out.",
+        "properties" : {
+          "minutes" : {
+            "items" : {
+              "$ref" : "#/components/schemas/MinuteResponses"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "MismatchedTransfer" : {
+        "properties" : {
+          "bank" : {
+            "$ref" : "#/components/schemas/TransferSide"
+          },
+          "client" : {
+            "$ref" : "#/components/schemas/TransferSide"
+          },
+          "transferId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "PeriodReconciliation" : {
+        "description" : "Where the client reconciliation of a period stands. It is kept in memory: after a restart of the generator it is NOT_STARTED again.",
+        "properties" : {
+          "failure" : {
+            "description" : "Set when FAILED.",
+            "enum" : [ "PERIOD_NOT_CLOSED", "GATEWAY_UNAVAILABLE", "BAD_GATEWAY_ANSWER", "JOURNAL_UNAVAILABLE", "INTERNAL_ERROR" ],
+            "type" : [ "string", "null" ]
+          },
+          "periodStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "report" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ClientReconciliationReport"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "state" : {
+            "enum" : [ "NOT_STARTED", "RUNNING", "DONE", "FAILED" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Pulse" : {
+        "description" : "A rise of the load above its base for a while.",
+        "properties" : {
+          "tps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "until" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "PulseRequest" : {
+        "properties" : {
+          "seconds" : {
+            "description" : "How long the pulse lasts, from now.",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "tps" : {
+            "description" : "New transfers a second while the pulse lasts; at most the generator's ceiling.",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "seconds", "tps" ],
+        "type" : "object"
+      },
+      "ReconciliationBreaks" : {
+        "properties" : {
+          "acknowledgedNotInStatement" : {
+            "$ref" : "#/components/schemas/TransferIds",
+            "description" : "The bank told the client it accepted the transfer in this period; its statement does not list it."
+          },
+          "failedButInStatement" : {
+            "$ref" : "#/components/schemas/TransferIds",
+            "description" : "The client was told the bank did not take it; the statement lists it."
+          },
+          "notInJournal" : {
+            "$ref" : "#/components/schemas/TransferIds",
+            "description" : "In the bank's statement, not in the client journal."
+          },
+          "payloadMismatch" : {
+            "$ref" : "#/components/schemas/TransferSides",
+            "description" : "Accounts or amount differ."
+          },
+          "statusMismatch" : {
+            "$ref" : "#/components/schemas/TransferSides",
+            "description" : "The final status or the reject reason the client was told differs from the statement's."
+          }
+        },
         "type" : "object"
       },
       "StatementTotals" : {
@@ -367,6 +323,11 @@
           "rows" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "unknownToClient" : {
+            "description" : "Lines whose transfer the client sent without learning the outcome, the generator's stop included.",
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -378,6 +339,7 @@
             "type" : "integer"
           },
           "transferIds" : {
+            "description" : "The first of them, by id; at most the generator's example limit.",
             "items" : {
               "format" : "uuid",
               "type" : "string"
@@ -387,13 +349,59 @@
         },
         "type" : "object"
       },
+      "TransferSide" : {
+        "description" : "One transfer as one side holds it.",
+        "properties" : {
+          "amountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "fromAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "rejectReason" : {
+            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS" ],
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "enum" : [ "ACCEPTED", "PUBLISHED", "POSTED", "REJECTED" ],
+            "type" : [ "string", "null" ]
+          },
+          "toAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "TransferSides" : {
+        "description" : "Transfers the client and the bank hold differently.",
+        "properties" : {
+          "count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "examples" : {
+            "description" : "The first of them, by id; at most the generator's example limit.",
+            "items" : {
+              "$ref" : "#/components/schemas/MismatchedTransfer"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
       "UnknownResolved" : {
+        "description" : "Transfers sent in the period before whose outcome the client did not learn, by what the bank said when asked.",
         "properties" : {
           "accepted" : {
-            "$ref" : "#/components/schemas/TransferIds"
+            "format" : "int64",
+            "type" : "integer"
           },
           "notAccepted" : {
-            "$ref" : "#/components/schemas/TransferIds"
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -401,35 +409,83 @@
     }
   },
   "info" : {
-    "description" : "Load runs, the client journal and client reconciliation, for control.",
+    "description" : "The clients' load, their answers by minute and the client reconciliation of a period, for control.",
     "title" : "Ledger Lab generator internal API",
-    "version" : "1"
+    "version" : "2"
   },
   "openapi" : "3.1.0",
   "paths" : {
-    "/internal/simulations" : {
+    "/internal/load" : {
+      "get" : {
+        "operationId" : "status",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoadStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The load now, the clients' counts since this generator started and their totals since the bank started",
+        "tags" : [ "load-controller" ]
+      }
+    },
+    "/internal/load/minutes" : {
+      "get" : {
+        "operationId" : "minutes",
+        "parameters" : [ {
+          "description" : "Only minutes after this instant; omit for all the generator keeps",
+          "in" : "query",
+          "name" : "after",
+          "required" : false,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MinutesPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The bank's answers to the clients by minute, for the minutes that are over",
+        "tags" : [ "load-controller" ]
+      }
+    },
+    "/internal/load/pulse" : {
       "post" : {
-        "operationId" : "start",
+        "operationId" : "pulse",
         "requestBody" : {
           "content" : {
             "application/json" : {
               "schema" : {
-                "$ref" : "#/components/schemas/StartSimulationRequest"
+                "$ref" : "#/components/schemas/PulseRequest"
               }
             }
           },
           "required" : true
         },
         "responses" : {
-          "201" : {
+          "200" : {
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/SimulationStatus"
+                  "$ref" : "#/components/schemas/LoadStatus"
                 }
               }
             },
-            "description" : "Started"
+            "description" : "The pulse is in effect"
           },
           "400" : {
             "content" : {
@@ -439,31 +495,22 @@
                 }
               }
             },
-            "description" : "Invalid request, longer than the maximum duration, or the run alone exceeds the journal cap"
-          },
-          "409" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Already running, or journals in memory leave no room"
+            "description" : "tps or seconds missing, below 1 or above the generator's ceiling"
           }
         },
-        "tags" : [ "simulation-controller" ]
+        "summary" : "Raise the load for a while; of several pulses the highest sets the pace",
+        "tags" : [ "load-controller" ]
       }
     },
-    "/internal/simulations/{runId}" : {
+    "/internal/periods/{periodStart}/reconciliation" : {
       "get" : {
-        "operationId" : "status",
+        "operationId" : "get",
         "parameters" : [ {
           "in" : "path",
-          "name" : "runId",
+          "name" : "periodStart",
           "required" : true,
           "schema" : {
-            "format" : "uuid",
+            "format" : "date-time",
             "type" : "string"
           }
         } ],
@@ -472,11 +519,11 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/SimulationStatus"
+                  "$ref" : "#/components/schemas/PeriodReconciliation"
                 }
               }
             },
-            "description" : "The simulation's state and counts"
+            "description" : "The state now"
           },
           "404" : {
             "content" : {
@@ -486,151 +533,33 @@
                 }
               }
             },
-            "description" : "Unknown run, or evicted after the retention"
+            "description" : "Not a period, not ended yet, or older than the journal holds"
           }
         },
-        "tags" : [ "simulation-controller" ]
-      }
-    },
-    "/internal/simulations/{runId}/journal" : {
-      "delete" : {
-        "operationId" : "releaseJournal",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "204" : {
-            "description" : "Released; the status stays"
-          },
-          "404" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Unknown run, or its journal already released"
-          },
-          "409" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The run is still active"
-          }
-        },
-        "tags" : [ "simulation-controller" ]
-      }
-    },
-    "/internal/simulations/{runId}/reconciliation" : {
-      "get" : {
-        "operationId" : "reconciliation",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ClientReconciliationReport"
-                }
-              }
-            },
-            "description" : "The report"
-          },
-          "404" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Unknown run, or its journal released"
-          },
-          "409" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "With error \"run still active\": the run's clients are still sending or stopping; else the period is not closed"
-          },
-          "502" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The gateway's statement is inconsistent or unreadable"
-          },
-          "503" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The gateway did not answer"
-          }
-        },
-        "tags" : [ "simulation-controller" ]
-      }
-    },
-    "/internal/simulations/{runId}/stop" : {
+        "summary" : "Where the client reconciliation of a period stands, with its report once done",
+        "tags" : [ "reconciliation-controller" ]
+      },
       "post" : {
-        "operationId" : "stop",
+        "operationId" : "start",
         "parameters" : [ {
           "in" : "path",
-          "name" : "runId",
+          "name" : "periodStart",
           "required" : true,
           "schema" : {
-            "format" : "uuid",
+            "format" : "date-time",
             "type" : "string"
           }
         } ],
         "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/SimulationStatus"
-                }
-              }
-            },
-            "description" : "Already ended"
-          },
           "202" : {
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/SimulationStatus"
+                  "$ref" : "#/components/schemas/PeriodReconciliation"
                 }
               }
             },
-            "description" : "Stopping; poll the status"
+            "description" : "Running: started now, or already running. Poll with GET"
           },
           "404" : {
             "content" : {
@@ -640,112 +569,11 @@
                 }
               }
             },
-            "description" : "Unknown run"
+            "description" : "Not a period, not ended yet, or older than the journal holds"
           }
         },
-        "tags" : [ "simulation-controller" ]
-      }
-    },
-    "/internal/simulations/{runId}/transfers" : {
-      "get" : {
-        "operationId" : "transfers",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "outcome",
-          "required" : false,
-          "schema" : {
-            "enum" : [ "PENDING", "ACKNOWLEDGED", "FAILED", "UNKNOWN" ],
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "resent",
-          "required" : false,
-          "schema" : {
-            "type" : "boolean"
-          }
-        }, {
-          "in" : "query",
-          "name" : "rejectReason",
-          "required" : false,
-          "schema" : {
-            "enum" : [ "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED" ],
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "after",
-          "required" : false,
-          "schema" : {
-            "default" : 0,
-            "format" : "int64",
-            "type" : "integer"
-          }
-        }, {
-          "in" : "query",
-          "name" : "limit",
-          "required" : false,
-          "schema" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/JournalPage"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [ "simulation-controller" ]
-      }
-    },
-    "/internal/simulations/{runId}/transfers/{transferId}" : {
-      "get" : {
-        "operationId" : "transfer",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
-          "in" : "path",
-          "name" : "transferId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/JournalEntryView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [ "simulation-controller" ]
+        "summary" : "Start the client reconciliation of a period the bank has closed",
+        "tags" : [ "reconciliation-controller" ]
       }
     }
   }

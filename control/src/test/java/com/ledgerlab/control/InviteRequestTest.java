@@ -17,7 +17,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -179,31 +178,14 @@ class InviteRequestTest extends IntegrationTest {
     }
 
     @Test
-    void a_mailed_invite_has_the_configured_lifetime_and_run_quota() {
+    void a_mailed_invite_has_the_configured_lifetime() {
         var email = address();
         requestLink(email);
 
-        var invite = jdbc.sql("SELECT quota, extract(epoch FROM expires_at - created_at) AS seconds FROM invite_tokens")
-            .query((rs, row) -> Map.entry(rs.getInt("quota"), rs.getLong("seconds"))).single();
-        int quota = invite.getKey();
-        long lifetime = invite.getValue();
+        long lifetime = jdbc.sql("SELECT extract(epoch FROM expires_at - created_at) FROM invite_tokens").query(Long.class).single();
 
-        assertThat(quota).isEqualTo(props.invites().email().runsPerHour());
         assertThat(lifetime).isEqualTo(props.invites().email().lifetime().toSeconds());
         assertThat(single(tokens(email))).startsWith("mail-");
-    }
-
-    @Test
-    void asking_again_does_not_reset_the_run_quota() {
-        var email = address();
-        requestLink(email);
-        start(sessionOf(single(tokens(email))));
-
-        requestLink(email);
-        var sessionId = sessionOf(tokens(email).getLast());
-
-        var view = get("/api/sessions/" + sessionId).getBody();
-        assertThat(view.get("runsLastHour")).isEqualTo(1);
     }
 
     @Test
@@ -407,13 +389,13 @@ class InviteRequestTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("an address unused for the retention is deleted, its invite, sessions and runs stay")
-    void an_address_unused_for_the_retention_is_deleted_its_invite_sessions_and_runs_stay() {
+    @DisplayName("an address unused for the retention is deleted, its invite and sessions stay")
+    void an_address_unused_for_the_retention_is_deleted_its_invite_and_sessions_stay() {
         var email = address();
         requestLink(email);
         sender.sendDue();
         var token = single(tokens(email));
-        start(sessionOf(token));
+        sessionOf(token);
         ageEverything(Duration.ofDays(30).plusHours(1));
 
         assertThat(cleanup.deleteUnused()).isEqualTo(1);
@@ -423,7 +405,6 @@ class InviteRequestTest extends IntegrationTest {
         assertThat(count("SELECT count(*) FROM invite_mails WHERE email IS NULL")).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM invite_tokens")).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM sessions")).isEqualTo(1);
-        assertThat(count("SELECT count(*) FROM runs")).isEqualTo(1);
     }
 
     @Test

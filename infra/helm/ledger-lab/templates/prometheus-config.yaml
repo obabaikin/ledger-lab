@@ -52,6 +52,22 @@ data:
             target_label: job
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: instance
+      # The memory the kernel compares with a container's limit, which the JVM's own metrics do not show.
+      - job_name: kubelet
+        scrape_interval: {{ .Values.exporters.scrapeInterval }}
+        scrape_timeout: {{ .Values.exporters.scrapeTimeout }}
+        scheme: https
+        metrics_path: /metrics/resource
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        kubernetes_sd_configs:
+          - role: node
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: container_memory_working_set_bytes
+            action: keep
       {{- if .Values.certManager.enabled }}
       - job_name: cert-manager
         scrape_interval: 1m

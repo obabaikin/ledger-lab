@@ -55,7 +55,7 @@ class MailTextsTest extends IntegrationTest {
     void numbers_in_a_mail_are_not_grouped() {
         var email = props.invites().email();
         var limits = new ControlProperties.InviteEmail(
-            1000, email.dailyMails(), email.window(), email.lifetime(), email.runsPerHour(), email.retention(), email.deletionCheck());
+            1000, email.dailyMails(), email.window(), email.lifetime(), email.retention(), email.deletionCheck());
 
         var body = texts(limits).limit(UUID.randomUUID().toString(), Instant.parse("2026-10-28T10:15:00Z")).body();
 

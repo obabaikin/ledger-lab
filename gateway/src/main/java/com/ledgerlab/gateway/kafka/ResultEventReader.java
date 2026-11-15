@@ -59,6 +59,6 @@ public class ResultEventReader {
             registry.counter(UNKNOWN_REASON_METRIC, LISTENER_TAG, listener.tag()).increment();
             log.warn("Result of transfer {} has a reject reason this gateway does not know: {}", event.transferId(), reason);
         }
-        return new LedgerResult(event.runId(), event.transferId(), event.outcome(), reason);
+        return new LedgerResult(event.transferId(), event.outcome(), reason, event.acceptedAt());
     }
 }

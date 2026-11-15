@@ -1,6 +1,6 @@
 package com.ledgerlab.control;
 
-import static com.ledgerlab.control.RunFixtures.mapOf;
+import static com.ledgerlab.control.Fixtures.mapOf;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
@@ -188,14 +188,14 @@ class AddressDeletionTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("an address past its deletion time is deleted by the tick, its invite, sessions and runs stay")
-    void an_address_past_its_deletion_time_is_deleted_by_the_tick_its_invite_sessions_and_runs_stay() {
+    @DisplayName("an address past its deletion time is deleted by the tick, its invite and sessions stay")
+    void an_address_past_its_deletion_time_is_deleted_by_the_tick_its_invite_and_sessions_stay() {
         var email = address();
         var kept = address();
         requestLink(email);
         requestLink(kept);
         sender.sendDue();
-        start(sessionOf(tokenOf(email)));
+        sessionOf(tokenOf(email));
         askDeletion(tokenOf(email));
         makeDeletionDue(email);
 
@@ -205,7 +205,6 @@ class AddressDeletionTest extends IntegrationTest {
         assertThat(stored(kept)).isTrue();
         assertThat(count("SELECT count(*) FROM invite_tokens")).isEqualTo(2);
         assertThat(count("SELECT count(*) FROM sessions")).isEqualTo(1);
-        assertThat(count("SELECT count(*) FROM runs")).isEqualTo(1);
     }
 
     @Test

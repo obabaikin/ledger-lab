@@ -1,6 +1,6 @@
 # ADR 0007: Stopping a run stops the clients, not the bank
 
-Status: accepted · Date: 2026-10-09 · Updated: 2026-10-09
+Status: superseded by [ADR 0021](0021-one-bank-around-the-clock.md) · Date: 2026-10-09 · Updated: 2026-10-09 · Superseded: 2026-11-15
 
 ## Context
 

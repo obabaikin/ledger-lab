@@ -4,17 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.common.TransferCommand;
-import com.ledgerlab.ledger.domain.AccountKey;
 import com.ledgerlab.ledger.domain.TransferResult;
 import com.ledgerlab.ledger.persistence.AccountRepository;
 import com.ledgerlab.ledger.service.LedgerService;
-import com.ledgerlab.ledger.service.RunService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Random;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -33,58 +30,55 @@ class LedgerConcurrencyTest extends IntegrationTest {
     private static final int ROUNDS = 10;
 
     @Autowired LedgerService ledger;
-    @Autowired RunService runs;
     @Autowired AccountRepository accounts;
     @Autowired TransactionTemplate tx;
 
     @Test
     void concurrent_transfers_between_a_few_hot_accounts_never_deadlock_and_always_reconcile() throws Exception {
-        var runId = UUID.randomUUID();
         var accountCount = 5;
-        runs.openAccounts(runId, setup(accountCount, 10_000));
+        openBank(accountCount, 10_000);
         var random = new Random(42);
         var commands = new ArrayList<TransferCommand>();
         for (var i = 0; i < 1_000; i++) {
             var from = random.nextInt(1, accountCount + 1);
             var to = random.ints(1, accountCount + 1).filter(candidate -> candidate != from).findFirst().orElseThrow();
-            commands.add(transfer(runId, from, to, random.nextLong(1, 500)));
+            commands.add(transfer(from, to, random.nextLong(1, 500)));
         }
 
         var results = inParallel(16, commands.stream().<Callable<TransferResult>>map(command -> () -> applyOne(ledger, command)).toList());
 
         assertThat(results).allMatch(it -> it instanceof TransferResult.Posted || it instanceof TransferResult.Rejected);
-        var report = runs.reconcile(runId);
-        assertThat(report.failedChecks()).isEmpty();
+        awaitCreditsApplied();
+        assertTheBooksAgree();
+        var report = reconciliation();
         assertThat(report.postedTransfers() + report.rejectedTransfers()).isEqualTo(commands.size());
-        assertThat(report.balanceTotalCents()).isEqualTo(accountCount * 10_000L);
+        assertThat(balances().values().stream().mapToLong(Long::longValue).sum()).isEqualTo(accountCount * 10_000L);
     }
 
     @Test
     void concurrent_deliveries_of_the_same_transfer_post_it_exactly_once() throws Exception {
-        var runId = UUID.randomUUID();
-        runs.openAccounts(runId, setup(2, 1_000));
-        var command = transfer(runId, 1, 2, 100);
+        openBank(2, 1_000);
+        var command = transfer(1, 2, 100);
 
         var results = inParallel(16, Collections.nCopies(16, () -> applyOne(ledger, command)));
 
         assertThat(results).filteredOn(POSTED::equals).hasSize(1);
         assertThat(results).filteredOn(ALREADY_PROCESSED::equals).hasSize(15);
-        assertThat(balances(runs, runId).get(1)).isEqualTo(900);
-        assertThat(runs.reconcile(runId).failedChecks()).isEmpty();
+        assertThat(balances().get(1)).isEqualTo(900);
+        assertTheBooksAgree();
     }
 
     @Test
     void transactions_locking_overlapping_accounts_given_in_different_orders_all_commit_without_a_deadlock() throws Exception {
-        var runId = UUID.randomUUID();
-        runs.openAccounts(runId, setup(LOCKED_ACCOUNTS));
+        openBank(LOCKED_ACCOUNTS);
         var pool = Executors.newFixedThreadPool(3);
         try {
             for (var round = 0; round < LOCK_ROUNDS; round++) {
-                var shuffled = new ArrayList<>(keys(runId, LOCKED_ACCOUNTS / 3));
+                var shuffled = new ArrayList<>(keys(LOCKED_ACCOUNTS / 3));
                 Collections.shuffle(shuffled);
                 var start = new CountDownLatch(1);
                 var locking = new ArrayList<Future<Integer>>();
-                for (var order : List.of(keys(runId, LOCKED_ACCOUNTS), keys(runId, LOCKED_ACCOUNTS / 7).reversed(), shuffled)) {
+                for (var order : List.of(keys(LOCKED_ACCOUNTS), keys(LOCKED_ACCOUNTS / 7).reversed(), shuffled)) {
                     locking.add(pool.submit(() -> {
                         start.await();
                         return tx.execute(status -> lockAndRewrite(order));
@@ -103,12 +97,12 @@ class LedgerConcurrencyTest extends IntegrationTest {
         }
     }
 
-    private static List<AccountKey> keys(UUID runId, int count) {
-        return IntStream.rangeClosed(1, count).mapToObj(accountNo -> new AccountKey(runId, accountNo)).toList();
+    private static List<Integer> keys(int count) {
+        return IntStream.rangeClosed(1, count).boxed().toList();
     }
 
     /** Rewriting the rows moves them in the table, as the balance updates of real batches do between two locks. */
-    private int lockAndRewrite(List<AccountKey> order) {
+    private int lockAndRewrite(List<Integer> order) {
         var locked = accounts.lockAll(new LinkedHashSet<>(order));
         accounts.updateBalances(locked);
         return locked.size();
@@ -116,12 +110,11 @@ class LedgerConcurrencyTest extends IntegrationTest {
 
     @Test
     void concurrent_deliveries_of_a_transfer_that_locks_no_account_report_its_rejection_once() throws Exception {
-        var runId = UUID.randomUUID();
-        runs.openAccounts(runId, setup(2));
+        openBank(2);
         var pool = Executors.newFixedThreadPool(16);
         try {
             for (var round = 0; round < ROUNDS; round++) {
-                var command = transfer(runId, 1, 2, 0);
+                var command = transfer(1, 2, 0);
 
                 var results = inParallel(pool, Collections.nCopies(16, () -> applyOne(ledger, command)));
 

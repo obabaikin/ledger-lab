@@ -28,64 +28,94 @@ server:
   port: 8083
 
 control:
-  runs:
-    max-active: 3
-    max-queued: 10
-    # Batched writes sustained 1200 TPS on the server with room above it (ADR 0019).
-    max-total-tps: 2000
-    # A start holds a connection of the pool of 10 while it waits for the queue's lock; the rest stay for reads and the tick.
-    max-concurrent-starts: 4
-    start-wait: 200ms
-    queue-timeout: 5m
-    tps-options: 100, 500, 1000, 2000
-    default-tps: 1000
-    duration-options: 10s, 20s, 30s
-    setup-timeout: 30s
-    running-grace: 60s
-    drain-stall-timeout: 60s
-    drain-timeout: 3m
-    accounts:
-      count: 100
-      # 10 000 EUR ran out after about 17 minutes at 300 TPS (measured): most payments go to five merchants.
-      # 1 000 000 EUR lasts many such runs; an account sends about 110 000 EUR an hour, the daily limit is twice that.
-      opening-balance-cents: 100000000
-      blocked: 2
-      daily-limit-cents: 20000000
-  queue:
-    poll-interval: 1s
+  periods:
+    # The bank's period: the same value as in the gateway, ledger, reporting and generator.
+    length: 60m
+    # The gateway closes a period only once no transfer accepted in it is still being written.
+    close-delay: 60s
+    tick-interval: 1s
+    # From the period's end: the bank's counts of a period are read once, when its transfers are long written.
+    settle-delay: 10m
+    # From the request: the ledger's check and the clients' reconciliation take minutes on a full period.
+    check-wait: 5m
+    # Counts that do not agree yet and a check or reconciliation not there yet are asked about again after this.
+    retry-wait: 5m
+    # From the period's end: without a verdict by then the period fails with the reason.
+    verdict-deadline: 40m
+    # The bank's retention of transfers: the same value as in its services.
+    details-retention: 4h
+    # The counts read the whole period: the gateway's took up to 5.6 s on the server (Prometheus, 2026-11-14), over
+    # services.request-timeout, and a count not answered in time is made again only after retry-wait.
+    count-timeout: 30s
+  bank:
+    books-interval: 1m
+    recent-chaos: 2h
+  availability:
+    poll-interval: 15s
+    good-minute-answered-percent: 99
+    minutes-retention: 48h
+    slo-target: 0.999
+    slo-window: 30d
+  freshness:
+    # The same value as the gateway's gateway.latency.slo-threshold: its histogram has a bucket at it.
+    threshold: 2s
+    bad-share-percent: 1
+    # Prometheus has a minute's last samples a scrape after its end; the margin covers a late scrape.
+    lag: 30s
+    catch-up: 1h
+    slo-target: 0.999
+  outside:
+    # Pulses up to this speed are promised and judged; above it the clients test the bank past its limits (docs/guides/slo.md).
+    guaranteed-tps: 1300
+    chaos-aftermath: 60s
+    load-aftermath: 30s
+    restart-margin: 60s
+  maintenance:
+    notice: 3h
+  series:
+    # Prometheus scrapes the pods every second; a point takes the last two scrapes in its window, so a window of 3 s
+    # bears one late scrape and still shows a service down for longer as a gap.
+    ranges:
+      - {range: 2m, step: 1s, window: 3s}
+      - {range: 5m, step: 5s, window: 3s}
+      - {range: 30m, step: 15s, window: 3s}
+      - {range: 2h, step: 30s, window: 3s}
+    default-range: 2h
+    # Every visitor's page asks for the same charts.
+    cache: 15s
   ledger:
     base-url: http://localhost:8080
-    # The transfers topic's partition count (infra/kafka/create-topics.sh); runs start once the ledger holds them all.
-    transfer-partitions: 6
-    # It reads the whole run: longer than a plain request, and grows with the run's size.
-    reconciliation-timeout: 30s
   gateway:
     base-url: http://localhost:8081
-    # Like the ledger's reconciliation: it reads the whole run.
-    summary-timeout: 30s
   generator:
     base-url: http://localhost:8082
-    reconciliation-timeout: 30s
   services:
     request-timeout: 5s
   cleanup:
     interval: 1h
-    retention: 24h
+    retention: 48h
   reporting:
     base-url: http://localhost:8084
     # Past Kafka's session timeout (45 s): a killed reporting instance's partitions move to another by then (ADR 0015).
     catch-up-wait: 60s
-    # The live chart reads the stats every tick within the services' timeout; the report's read covers the whole run.
-    final-stats-timeout: 30s
   prometheus:
     base-url: http://localhost:9090
-    # Shorter than the services': it is read every tick for every live run.
+    # Shorter than the services': it is read every tick.
     request-timeout: 1s
   chaos:
     # On in the chart, which also lists the ledger instances by their management URLs.
     enabled: false
-    min-interval: 60s
+    min-interval: 90s
     request-timeout: 2s
+  load:
+    # The bank's speed while a visitor's pulse lasts; its base (400) is the lowest option.
+    min-tps: 400
+    max-tps: 2000
+    tps-step: 100
+    default-tps: 1000
+    duration-options: 10s, 20s, 30s
+    default-duration: 10s
+    min-interval: 60s
   invites:
     email:
       links-per-address: 3
@@ -93,7 +123,6 @@ control:
       daily-mails: 50
       window: 24h
       lifetime: 7d
-      runs-per-hour: 10
       retention: 30d
       deletion-check: 1m
   turnstile:

@@ -6,7 +6,7 @@ data:
   init.sh: |
     #!/bin/sh
     set -eu
-    for role in ledger gateway control reporting; do
+    for role in ledger gateway control reporting generator; do
       password=$(cat "/run/db-passwords/$role")
       psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
         -v role="$role" -v password="$password" <<'SQL'
@@ -43,7 +43,9 @@ spec:
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
-          args: ["-c", "shared_buffers={{ .Values.postgres.sharedBuffers }}", "-c", "max_connections={{ .Values.postgres.maxConnections }}"]
+          args: ["-c", "shared_buffers={{ .Values.postgres.sharedBuffers }}", "-c", "max_connections={{ .Values.postgres.maxConnections }}",
+                 "-c", "shared_preload_libraries={{ .Values.postgres.preloadLibraries }}", "-c", "log_min_duration_statement={{ .Values.postgres.logMinDuration }}",
+                 "-c", "log_parameter_max_length=0"]
           env:
             - name: POSTGRES_DB
               value: ledgerlab
@@ -81,7 +83,8 @@ spec:
           requests: {storage: {{ .Values.postgres.storage }}}
 ---
 # A new name per release revision, as create-topics: the init script above runs only on an empty volume, so a role
-# added later is created here, on the database that already exists.
+# added later is created here, on the database that already exists. The extension lands in public, closed to the
+# services' roles; the exporter's role may only see into it.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -110,6 +113,8 @@ spec:
               SELECT 'CREATE ROLE monitor' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'monitor') \gexec
               ALTER ROLE monitor WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'password';
               GRANT pg_monitor TO monitor;
+              CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+              GRANT USAGE ON SCHEMA public TO monitor;
               SQL
           env:
             - name: PGPASSWORD

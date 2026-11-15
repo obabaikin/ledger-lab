@@ -1,6 +1,25 @@
 {
   "components" : {
     "schemas" : {
+      "AccountMismatch" : {
+        "description" : "An account whose balance moved by another sum than its journal entries of the period.",
+        "properties" : {
+          "accountNo" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "balanceChangeCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "journalCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "accountNo", "balanceChangeCents", "journalCents" ],
+        "type" : "object"
+      },
       "AddressDeletionAccepted" : {
         "description" : "Deletion is set.",
         "properties" : {
@@ -39,50 +58,153 @@
         "required" : [ "error" ],
         "type" : "object"
       },
-      "BankLatency" : {
-        "description" : "processedAt − acceptedAt (ledger clock minus gateway clock); null without both.",
+      "BankView" : {
+        "description" : "The bank as control sees it now.",
         "properties" : {
-          "p50Ms" : {
-            "format" : "double",
-            "type" : [ "number", "null" ]
+          "books" : {
+            "description" : "null until the ledger answered once.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/BooksNow"
+            }, {
+              "type" : "null"
+            } ]
           },
-          "p99Ms" : {
-            "format" : "double",
-            "type" : [ "number", "null" ]
+          "chaos" : {
+            "$ref" : "#/components/schemas/Chaos"
+          },
+          "clients" : {
+            "description" : "null until the generator answered once.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Clients"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "currentPeriod" : {
+            "$ref" : "#/components/schemas/CurrentPeriod"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/Freshness"
+          },
+          "maintenance" : {
+            "description" : "The maintenance window that is on, else the next one; null if none is declared.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/MaintenanceWindow"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "periodMinutes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "pods" : {
+            "description" : "null until Prometheus answered once.",
+            "items" : {
+              "$ref" : "#/components/schemas/PodView"
+            },
+            "type" : [ "array", "null" ]
+          },
+          "readAt" : {
+            "description" : "When control last read the live parts; null before the first read.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "slo" : {
+            "$ref" : "#/components/schemas/Slo"
+          },
+          "startedAt" : {
+            "description" : "When the bank started: control's first tick; null before it.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/PeriodNumbers",
+            "description" : "Transfers since the bank started: the reconciled periods and the live numbers of those still open."
           }
         },
-        "required" : [ "p50Ms", "p99Ms" ],
+        "required" : [ "books", "chaos", "clients", "currentPeriod", "freshness", "maintenance", "periodMinutes", "pods", "readAt", "slo", "startedAt", "totals" ],
         "type" : "object"
       },
-      "ChaosInRun" : {
-        "description" : "A crash of the ledger while the run was active.",
+      "Books" : {
+        "description" : "All balances of the bank against the sum its accounts were opened with.",
         "properties" : {
-          "instances" : {
-            "description" : "Instances that took the crash.",
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
+          "accounts" : {
+            "format" : "int64",
+            "type" : "integer"
           },
-          "offsetMs" : {
-            "description" : "Milliseconds from the clients' start; 0 if the crash came before it.",
+          "balanceTotalCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanced" : {
+            "type" : "boolean"
+          },
+          "openingTotalCents" : {
             "format" : "int64",
             "type" : "integer"
           }
         },
-        "required" : [ "instances", "offsetMs" ],
+        "required" : [ "accounts", "balanceTotalCents", "balanced", "openingTotalCents" ],
         "type" : "object"
       },
-      "ChaosView" : {
-        "description" : "The ledger instances that were crashed.",
+      "BooksNow" : {
+        "description" : "All balances of the bank against the sum its accounts were opened with, read now and then.",
+        "properties" : {
+          "accounts" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanceTotalCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanced" : {
+            "type" : "boolean"
+          },
+          "openingTotalCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "readAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "accounts", "balanceTotalCents", "balanced", "openingTotalCents", "readAt" ],
+        "type" : "object"
+      },
+      "Chaos" : {
+        "properties" : {
+          "available" : {
+            "description" : "Whether the chaos button works in this deployment.",
+            "type" : "boolean"
+          },
+          "readyInSeconds" : {
+            "description" : "Seconds until chaos may be used again; 0 when it may be used now.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "recent" : {
+            "description" : "The last crashes, in order.",
+            "items" : {
+              "$ref" : "#/components/schemas/ChaosEvent"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "available", "readyInSeconds", "recent" ],
+        "type" : "object"
+      },
+      "ChaosEvent" : {
+        "description" : "A crash of the ledger's instances, set off from the page.",
         "properties" : {
           "at" : {
-            "description" : "When the instances were crashed, by control's clock.",
             "format" : "date-time",
             "type" : "string"
           },
           "instances" : {
-            "description" : "Instances that took the crash; those that did not answer are left out.",
+            "description" : "Instances that took the crash.",
             "items" : {
               "type" : "string"
             },
@@ -92,24 +214,94 @@
         "required" : [ "at", "instances" ],
         "type" : "object"
       },
-      "ClientCounts" : {
-        "description" : "What the clients counted, from the generator's status.",
+      "ClientReconciliationReport" : {
+        "description" : "The clients' journal against the period's statement, as the generator reported it.",
+        "properties" : {
+          "acceptedByJournal" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanced" : {
+            "type" : "boolean"
+          },
+          "breaks" : {
+            "$ref" : "#/components/schemas/ReconciliationBreaks"
+          },
+          "periodStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "statement" : {
+            "$ref" : "#/components/schemas/StatementTotals"
+          },
+          "statementFinal" : {
+            "description" : "No statement line was still in flight.",
+            "type" : "boolean"
+          },
+          "unknownResolved" : {
+            "$ref" : "#/components/schemas/UnknownResolved"
+          }
+        },
+        "required" : [ "acceptedByJournal", "balanced", "breaks", "periodStart", "statement", "statementFinal", "unknownResolved" ],
+        "type" : "object"
+      },
+      "ClientTotals" : {
+        "description" : "What became of the clients' transfers since the bank started, whichever generator sent them.",
+        "properties" : {
+          "acknowledged" : {
+            "description" : "Transfers the bank took (any 2xx).",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gaveUp" : {
+            "description" : "Transfers whose client stopped trying: refused for good, or without an answer it could use.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sent" : {
+            "description" : "Transfers the clients sent.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unanswered" : {
+            "description" : "Sent, without an outcome yet: in flight, or given up and not yet asked about.",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "acknowledged", "gaveUp", "sent", "unanswered" ],
+        "type" : "object"
+      },
+      "Clients" : {
+        "description" : "What the clients count: since the generator started, and in total since the bank started.",
         "properties" : {
           "acknowledged" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "duplicatesSent" : {
-            "description" : "Second presses of the same transfer; the gateway answers them without a new transfer.",
+          "baseTps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "gaveUp" : {
+            "description" : "Transfers whose client stopped trying: refused for good, or without an answer it could use.",
             "format" : "int64",
             "type" : "integer"
           },
-          "failed" : {
+          "inFlight" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "pulse" : {
+            "description" : "null without a pulse.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Pulse"
+            }, {
+              "type" : "null"
+            } ]
           },
           "refused" : {
-            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
+            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not.",
             "format" : "int64",
             "type" : "integer"
           },
@@ -117,24 +309,33 @@
             "format" : "int64",
             "type" : "integer"
           },
-          "requestedPerSecond" : {
-            "description" : "New transfers per second from the clients' start; index 0 is the first second.",
-            "items" : {
-              "format" : "int64",
-              "type" : "integer"
-            },
-            "type" : "array"
+          "restarted" : {
+            "description" : "Whether clients sent before this generator started: the counts other than total then cover only its part.",
+            "type" : "boolean"
           },
           "retries" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "unknown" : {
-            "format" : "int64",
+          "since" : {
+            "description" : "When the generator started sending; null before. The counts other than total run from it.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "targetTps" : {
+            "format" : "int32",
             "type" : "integer"
+          },
+          "total" : {
+            "description" : "Since the bank started; null while the generator cannot read its journal.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ClientTotals"
+            }, {
+              "type" : "null"
+            } ]
           }
         },
-        "required" : [ "acknowledged", "duplicatesSent", "failed", "refused", "requested", "requestedPerSecond", "retries", "unknown" ],
+        "required" : [ "acknowledged", "baseTps", "gaveUp", "inFlight", "pulse", "refused", "requested", "restarted", "retries", "since", "targetTps", "total" ],
         "type" : "object"
       },
       "CreateSessionRequest" : {
@@ -148,10 +349,70 @@
         "required" : [ "token" ],
         "type" : "object"
       },
+      "CurrentPeriod" : {
+        "properties" : {
+          "closesAt" : {
+            "description" : "When control asks the gateway to close it.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "end" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "start" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "closesAt", "end", "start" ],
+        "type" : "object"
+      },
+      "Freshness" : {
+        "description" : "How soon the bank posts transfers, by minute: a minute is bad if more than a small share of its transfers took longer than the threshold from acceptance to result.",
+        "properties" : {
+          "badMinutes" : {
+            "description" : "Bad minutes that use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "budgetMinutes" : {
+            "description" : "Bad minutes the target allows in a full window.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "outsideMinutes" : {
+            "description" : "Bad minutes during a crash or a load above the promised one, with their aftermath; they do not use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "plannedMinutes" : {
+            "description" : "Bad minutes within a maintenance window declared in time; they do not use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "target" : {
+            "description" : "Share of good minutes the bank aims for.",
+            "type" : "number"
+          },
+          "thresholdMs" : {
+            "description" : "Longest time from acceptance to result a transfer may take to count as fast.",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "badMinutes", "budgetMinutes", "outsideMinutes", "plannedMinutes", "target", "thresholdMs" ],
+        "type" : "object"
+      },
       "GatewayCounts" : {
-        "description" : "What the gateway counted for the run.",
+        "description" : "The period's transfers as the gateway counts them.",
         "properties" : {
           "accepted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "entryCount" : {
+            "description" : "Transfers in the period when the gateway closed it.",
             "format" : "int64",
             "type" : "integer"
           },
@@ -168,7 +429,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "accepted", "posted", "published", "rejected" ],
+        "required" : [ "accepted", "entryCount", "posted", "published", "rejected" ],
         "type" : "object"
       },
       "InviteRequest" : {
@@ -189,117 +450,72 @@
       "InviteRequestAccepted" : {
         "description" : "Taken; the same for any address, whether a mail goes out or not."
       },
-      "JournalTotals" : {
-        "properties" : {
-          "acknowledged" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "acknowledgedAmountCents" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "failed" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "refused" : {
-            "description" : "Transfers the gateway refused as busy (503) at least once, retried or not; each counts once.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "requested" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "unknown" : {
-            "format" : "int64",
-            "type" : "integer"
-          }
-        },
-        "required" : [ "acknowledged", "acknowledgedAmountCents", "failed", "refused", "requested", "unknown" ],
-        "type" : "object"
-      },
       "LedgerCounts" : {
-        "description" : "What the ledger applied for the run, and the sums of its books.",
+        "description" : "The period's transfers as the ledger counts them.",
         "properties" : {
-          "balanceTotalCents" : {
-            "description" : "Sum of the accounts' balances after the run.",
+          "poolPostings" : {
+            "description" : "Postings between the pool and the accounts; no client sees them.",
             "format" : "int64",
             "type" : "integer"
           },
-          "creditsCents" : {
-            "description" : "Sum of the journal's credits.",
+          "postedTransfers" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "debitsCents" : {
-            "description" : "Sum of the journal's debits, as a positive amount.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "openingTotalCents" : {
-            "description" : "Sum of the accounts' opening balances.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "posted" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "rejected" : {
+          "rejectedTransfers" : {
             "format" : "int64",
             "type" : "integer"
           }
         },
-        "required" : [ "balanceTotalCents", "creditsCents", "debitsCents", "openingTotalCents", "posted", "rejected" ],
+        "required" : [ "poolPostings", "postedTransfers", "rejectedTransfers" ],
         "type" : "object"
       },
-      "LiveView" : {
-        "description" : "Live numbers of a running or draining run; each part is the last one read and keeps it while its source cannot be read.",
+      "LoadRequest" : {
+        "description" : "A load pulse: one of the session's speed and length options.",
         "properties" : {
-          "chaos" : {
-            "description" : "Ledger crashes since the run was admitted, in order; empty if none.",
-            "items" : {
-              "$ref" : "#/components/schemas/ChaosInRun"
-            },
-            "type" : "array"
+          "seconds" : {
+            "description" : "How long the pulse lasts, in seconds.",
+            "format" : "int32",
+            "type" : "integer"
           },
-          "clients" : {
-            "description" : "null until the generator answered once.",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/ClientCounts"
-            }, {
-              "type" : "null"
-            } ]
-          },
-          "ledgerDuplicatesAtLeast" : {
-            "description" : "Redeliveries the ledger skipped, at least this many: from monitoring, and a killed instance takes its count along. Not part of the verdict.",
-            "format" : "int64",
-            "type" : [ "integer", "null" ]
-          },
-          "pods" : {
-            "description" : "null until Prometheus answered once.",
-            "items" : {
-              "$ref" : "#/components/schemas/PodView"
-            },
-            "type" : [ "array", "null" ]
-          },
-          "readAt" : {
-            "description" : "When control last read any part, by its own clock.",
+          "tps" : {
+            "description" : "The bank's speed while the pulse lasts, in transfers a second.",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "seconds", "tps" ],
+        "type" : "object"
+      },
+      "MaintenanceWindow" : {
+        "description" : "A declared maintenance window.",
+        "properties" : {
+          "from" : {
             "format" : "date-time",
             "type" : "string"
           },
-          "stats" : {
-            "description" : "The bank's numbers from its events; null until the reporting service answered once.",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/RunStats"
-            }, {
-              "type" : "null"
-            } ]
+          "to" : {
+            "format" : "date-time",
+            "type" : "string"
           }
         },
-        "required" : [ "chaos", "clients", "ledgerDuplicatesAtLeast", "pods", "readAt", "stats" ],
+        "required" : [ "from", "to" ],
+        "type" : "object"
+      },
+      "MismatchedTransfer" : {
+        "properties" : {
+          "bank" : {
+            "$ref" : "#/components/schemas/TransferSide"
+          },
+          "client" : {
+            "$ref" : "#/components/schemas/TransferSide"
+          },
+          "transferId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "bank", "client", "transferId" ],
         "type" : "object"
       },
       "Operator" : {
@@ -316,6 +532,292 @@
           }
         },
         "required" : [ "address", "email", "name" ],
+        "type" : "object"
+      },
+      "PeriodCheck" : {
+        "description" : "The ledger's check of a period's books, as the ledger reported it.",
+        "properties" : {
+          "accountExamples" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AccountMismatch"
+            },
+            "type" : "array"
+          },
+          "accountsCompared" : {
+            "description" : "False where the ledger holds no balances of the period before to compare with: the bank's first period, and one after a period that failed.",
+            "type" : "boolean"
+          },
+          "accountsOutOfBalance" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "balanced" : {
+            "type" : "boolean"
+          },
+          "creditsCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "debitsCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "failedChecks" : {
+            "items" : {
+              "enum" : [ "JOURNAL_DEBITS_EQUAL_CREDITS", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "invalidJournalExamples" : {
+            "description" : "Ids of the first such transfers.",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "journalEntries" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "madeAt" : {
+            "description" : "When the ledger kept the check; null in reports kept before the ledger told it.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "startedAt" : {
+            "description" : "When the ledger began the check; null in reports kept before the ledger told it.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "transfersWithInvalidJournal" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "accountExamples", "accountsCompared", "accountsOutOfBalance", "balanced", "creditsCents", "debitsCents", "failedChecks", "invalidJournalExamples", "journalEntries", "madeAt", "startedAt", "transfersWithInvalidJournal" ],
+        "type" : "object"
+      },
+      "PeriodDetails" : {
+        "properties" : {
+          "period" : {
+            "$ref" : "#/components/schemas/PeriodView"
+          },
+          "report" : {
+            "description" : "Only once reconciled.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/PeriodReport"
+            }, {
+              "type" : "null"
+            } ]
+          }
+        },
+        "required" : [ "period", "report" ],
+        "type" : "object"
+      },
+      "PeriodList" : {
+        "properties" : {
+          "periods" : {
+            "description" : "The periods that are over, newest first.",
+            "items" : {
+              "$ref" : "#/components/schemas/PeriodView"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "periods" ],
+        "type" : "object"
+      },
+      "PeriodNumbers" : {
+        "description" : "A period's transfers by outcome.",
+        "properties" : {
+          "accepted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "postedAmountCents" : {
+            "description" : "Sum of the posted transfers; 0 if the reporting service could not be read.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectionsByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          }
+        },
+        "required" : [ "accepted", "posted", "postedAmountCents", "rejected", "rejectionsByReason" ],
+        "type" : "object"
+      },
+      "PeriodReport" : {
+        "description" : "The verdict of a period and what it rests on; the bank deletes the transfers themselves after its retention.",
+        "properties" : {
+          "books" : {
+            "$ref" : "#/components/schemas/Books",
+            "description" : "All balances of the bank when the period was reconciled."
+          },
+          "chaos" : {
+            "description" : "Ledger crashes within the period, in order; empty if none.",
+            "items" : {
+              "$ref" : "#/components/schemas/ChaosEvent"
+            },
+            "type" : "array"
+          },
+          "client" : {
+            "$ref" : "#/components/schemas/ClientReconciliationReport"
+          },
+          "gateway" : {
+            "$ref" : "#/components/schemas/GatewayCounts"
+          },
+          "ledger" : {
+            "$ref" : "#/components/schemas/LedgerCounts"
+          },
+          "ledgerCheck" : {
+            "$ref" : "#/components/schemas/PeriodCheck"
+          },
+          "mismatches" : {
+            "description" : "What disagreed; empty for BALANCED.",
+            "items" : {
+              "enum" : [ "ENTRIES_CHANGED_AFTER_CLOSE", "BANK_VIEWS_DISAGREE", "LEDGER_CHECK_FAILED", "BOOKS_OUT_OF_BALANCE", "CLIENT_JOURNAL_DISAGREES", "STATEMENT_NOT_FINAL" ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "notes" : {
+            "description" : "What the report could not show; does not decide the verdict.",
+            "items" : {
+              "enum" : [ "REPORTING_UNAVAILABLE", "PROJECTION_BEHIND_BOOKS", "ACCOUNTS_NOT_COMPARED" ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "rejectionsByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "description" : "Rejections by reason, as the ledger decided them.",
+            "type" : "object"
+          },
+          "stats" : {
+            "description" : "null if the reporting service could not be read.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/PeriodStats"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "verdict" : {
+            "enum" : [ "BALANCED", "MISMATCH" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "books", "chaos", "client", "gateway", "ledger", "ledgerCheck", "mismatches", "notes", "rejectionsByReason", "stats", "verdict" ],
+        "type" : "object"
+      },
+      "PeriodStats" : {
+        "description" : "A period's numbers from the bank's events, as the reporting service counted them.",
+        "properties" : {
+          "accepted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "at" : {
+            "description" : "When the reporting service read them.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "commandsSeen" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "periodStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "posted" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "postedAmountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejected" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rejectionsByReason" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          }
+        },
+        "required" : [ "accepted", "at", "commandsSeen", "periodStart", "posted", "postedAmountCents", "rejected", "rejectionsByReason" ],
+        "type" : "object"
+      },
+      "PeriodView" : {
+        "description" : "A period of the bank as control sees it now.",
+        "properties" : {
+          "booksFinalAt" : {
+            "description" : "When control first saw every accepted transfer applied; null before.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "closedAt" : {
+            "description" : "When the gateway closed the period, by the bank's clock; null before.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "end" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "failure" : {
+            "description" : "Why the period ended without a verdict; only when failed.",
+            "enum" : [ "PERIOD_NOT_CLOSED", "PERIOD_UNKNOWN_TO_BANK", "BANK_UNAVAILABLE", "DRAIN_STALLED", "DRAIN_TIMED_OUT", "MORE_RESULTS_THAN_ACCEPTED", "LEDGER_CHECK_UNAVAILABLE", "BOOKS_UNAVAILABLE", "CLIENT_RECONCILIATION_UNAVAILABLE", "DETAILS_EXPIRED" ],
+            "type" : [ "string", "null" ]
+          },
+          "finishedAt" : {
+            "description" : "When the period reached a final state; null before.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "numbers" : {
+            "description" : "null before the period is final, and for a failed one whose numbers could not be read.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/PeriodNumbers"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "start" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "state" : {
+            "enum" : [ "OPEN", "CLOSING", "DRAINING", "RECONCILED", "FAILED" ],
+            "type" : "string"
+          },
+          "verdict" : {
+            "description" : "Only once reconciled. Only BALANCED is green.",
+            "enum" : [ "BALANCED", "MISMATCH" ],
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "booksFinalAt", "closedAt", "end", "failure", "finishedAt", "numbers", "start", "state", "verdict" ],
         "type" : "object"
       },
       "PodView" : {
@@ -340,7 +842,23 @@
         "required" : [ "instance", "job", "partitions", "up" ],
         "type" : "object"
       },
+      "Pulse" : {
+        "description" : "A rise of the load above its base for a while.",
+        "properties" : {
+          "tps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "until" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "tps", "until" ],
+        "type" : "object"
+      },
       "ReconciliationBreaks" : {
+        "description" : "Discrepancies between the clients' journal and the statement, by kind, each with its first examples.",
         "properties" : {
           "acknowledgedNotInStatement" : {
             "$ref" : "#/components/schemas/TransferIds"
@@ -352,305 +870,59 @@
             "$ref" : "#/components/schemas/TransferIds"
           },
           "payloadMismatch" : {
-            "$ref" : "#/components/schemas/TransferIds"
+            "$ref" : "#/components/schemas/TransferSides"
           },
           "statusMismatch" : {
-            "$ref" : "#/components/schemas/TransferIds"
+            "$ref" : "#/components/schemas/TransferSides"
           }
         },
         "required" : [ "acknowledgedNotInStatement", "failedButInStatement", "notInJournal", "payloadMismatch", "statusMismatch" ],
         "type" : "object"
       },
-      "RunList" : {
-        "description" : "A session's runs, newest first.",
+      "Series" : {
         "properties" : {
-          "items" : {
-            "items" : {
-              "$ref" : "#/components/schemas/RunView"
-            },
-            "type" : "array"
-          }
-        },
-        "required" : [ "items" ],
-        "type" : "object"
-      },
-      "RunReport" : {
-        "description" : "The verdict of a run and what it rests on.",
-        "properties" : {
-          "bankLatencyP50Ms" : {
-            "description" : "Bank latency p50, ms: accepted to result known, by the gateway's clock; null without results.",
-            "format" : "double",
-            "type" : [ "number", "null" ]
-          },
-          "bankLatencyP99Ms" : {
-            "description" : "Bank latency p99, ms, as bankLatencyP50Ms.",
-            "format" : "double",
-            "type" : [ "number", "null" ]
-          },
-          "bankViewsAgree" : {
-            "description" : "Gateway and ledger count the same posted and rejected transfers and reasons; null if the drain did not finish.",
-            "type" : [ "boolean", "null" ]
-          },
-          "breaks" : {
-            "description" : "Discrepancies between journal and statement, by kind, with up to 1000 ids each.",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/ReconciliationBreaks"
-            }, {
-              "type" : "null"
-            } ]
-          },
-          "chaos" : {
-            "description" : "Ledger crashes while the run was active, in order; empty if none.",
-            "items" : {
-              "$ref" : "#/components/schemas/ChaosInRun"
-            },
-            "type" : "array"
-          },
-          "client" : {
-            "description" : "What the clients were told; null without a client reconciliation.",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/JournalTotals"
-            }, {
-              "type" : "null"
-            } ]
-          },
-          "clientBalanced" : {
-            "description" : "The clients' journal matches the statement; null without a client reconciliation.",
-            "type" : [ "boolean", "null" ]
-          },
-          "clientLatencyP50Ms" : {
-            "description" : "Client latency p50, ms: a waiting client's first press to a final status, exact over the run; presses whose wait ran out are left out; null without one.",
-            "format" : "double",
-            "type" : [ "number", "null" ]
-          },
-          "clientLatencyP99Ms" : {
-            "description" : "Client latency p99, ms, as clientLatencyP50Ms.",
-            "format" : "double",
-            "type" : [ "number", "null" ]
-          },
-          "gateway" : {
-            "$ref" : "#/components/schemas/GatewayCounts"
-          },
-          "ledger" : {
-            "$ref" : "#/components/schemas/LedgerCounts"
-          },
-          "ledgerBalanced" : {
-            "description" : "The ledger's books: balances, journal and transfer log agree.",
-            "type" : "boolean"
-          },
-          "ledgerDuplicatesAtLeast" : {
-            "description" : "Redeliveries the ledger skipped, at least this many, from monitoring; null if never read.",
-            "format" : "int64",
-            "type" : [ "integer", "null" ]
-          },
-          "ledgerFailedChecks" : {
-            "items" : {
-              "enum" : [ "TOTAL_BALANCE_CONSERVED", "JOURNAL_SUMS_TO_ZERO", "JOURNAL_MATCHES_TRANSFER_LOG", "EVERY_ACCOUNT_MATCHES_JOURNAL" ],
-              "type" : "string"
-            },
-            "type" : "array"
-          },
-          "notes" : {
-            "description" : "What the report could not show; does not decide the verdict.",
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          },
-          "projectionMatchesBooks" : {
-            "description" : "The projection counts what the books count: commands seen as accepted, posted, rejected; null without stats.",
-            "type" : [ "boolean", "null" ]
-          },
-          "reasons" : {
-            "description" : "What the verdict could not check, with or without breaks; empty if nothing was missing.",
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          },
-          "rejectionsByReason" : {
-            "additionalProperties" : {
-              "format" : "int64",
-              "type" : "integer"
-            },
-            "description" : "Rejections by reason, as the ledger decided them.",
-            "type" : "object"
-          },
-          "result" : {
-            "enum" : [ "BALANCED", "BREAKS", "INCOMPLETE" ],
+          "name" : {
+            "enum" : [ "ACCEPTED_PER_SECOND", "POSTED_PER_SECOND", "REJECTED_PER_SECOND", "BUSY_PER_SECOND", "BANK_LATENCY_P50_MS", "BANK_LATENCY_P99_MS" ],
             "type" : "string"
           },
-          "statementFinal" : {
-            "description" : "No statement line was still in flight; null without a client reconciliation.",
-            "type" : [ "boolean", "null" ]
-          },
-          "stats" : {
-            "description" : "The run's numbers from the bank's events, for the page; null if the reporting service could not be read.",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/RunStats"
-            }, {
-              "type" : "null"
-            } ]
-          },
-          "unknownResolved" : {
-            "description" : "Transfers the clients did not know the outcome of, settled by the statement.",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/UnknownResolved"
-            }, {
-              "type" : "null"
-            } ]
+          "values" : {
+            "description" : "One value per instant of the grid; null where monitoring has none.",
+            "items" : {
+              "format" : "double",
+              "type" : [ "number", "null" ]
+            },
+            "type" : "array"
           }
         },
-        "required" : [ "bankLatencyP50Ms", "bankLatencyP99Ms", "bankViewsAgree", "breaks", "chaos", "client", "clientBalanced", "clientLatencyP50Ms", "clientLatencyP99Ms", "gateway", "ledger", "ledgerBalanced", "ledgerDuplicatesAtLeast", "ledgerFailedChecks", "notes", "projectionMatchesBooks", "reasons", "rejectionsByReason", "result", "statementFinal", "stats", "unknownResolved" ],
+        "required" : [ "name", "values" ],
         "type" : "object"
       },
-      "RunStats" : {
-        "description" : "A run's numbers from the bank's events, as the reporting service had them at `at`; they trail the books while events are on the way.",
+      "SeriesView" : {
+        "description" : "The bank's charts from monitoring, on one grid of instants.",
         "properties" : {
-          "at" : {
-            "description" : "Time of the snapshot, by the reporting database's clock.",
+          "from" : {
+            "description" : "The first instant of the grid.",
             "format" : "date-time",
             "type" : "string"
           },
-          "bankLatency" : {
-            "$ref" : "#/components/schemas/BankLatency"
-          },
-          "runId" : {
-            "format" : "uuid",
-            "type" : "string"
+          "points" : {
+            "description" : "Instants on the grid.",
+            "format" : "int32",
+            "type" : "integer"
           },
           "series" : {
-            "description" : "Increments per second, oldest first.",
+            "description" : "Empty if monitoring could not be read.",
             "items" : {
-              "$ref" : "#/components/schemas/SecondStats"
+              "$ref" : "#/components/schemas/Series"
             },
             "type" : "array"
           },
-          "totals" : {
-            "$ref" : "#/components/schemas/StatsTotals"
+          "stepSeconds" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
-        "required" : [ "at", "bankLatency", "runId", "series", "totals" ],
-        "type" : "object"
-      },
-      "RunView" : {
-        "description" : "A run as control sees it now.",
-        "properties" : {
-          "admittedAt" : {
-            "description" : "When the run left the queue; null while queued or if it expired.",
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "booksFinalAt" : {
-            "description" : "When control first saw the books final: every accepted transfer applied; reconciling from then on. null before.",
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "closedAt" : {
-            "description" : "When the bank closed the run's period, by the bank's clock; null before.",
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "createdAt" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "durationSeconds" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "failure" : {
-            "description" : "Why the run failed without a verdict; only when failed.",
-            "type" : [ "string", "null" ]
-          },
-          "finishedAt" : {
-            "description" : "When the run reached a final state; null before.",
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "live" : {
-            "description" : "Live numbers; only in a run's own GET while running or draining, else null. The report keeps the final ones.",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/LiveView"
-            }, {
-              "type" : "null"
-            } ]
-          },
-          "position" : {
-            "description" : "Place in the queue, from 1; only while queued.",
-            "format" : "int64",
-            "type" : [ "integer", "null" ]
-          },
-          "result" : {
-            "description" : "The verdict; only once reconciled. Only BALANCED is green.",
-            "enum" : [ "BALANCED", "BREAKS", "INCOMPLETE" ],
-            "type" : [ "string", "null" ]
-          },
-          "runId" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "startedAt" : {
-            "description" : "When the clients started sending; null before.",
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "state" : {
-            "enum" : [ "QUEUED", "CREATED", "RUNNING", "DRAINING", "RECONCILED", "FAILED", "EXPIRED" ],
-            "type" : "string"
-          },
-          "stopRequested" : {
-            "description" : "A stop was asked for while the run was running.",
-            "type" : "boolean"
-          },
-          "tps" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "waitingFor" : {
-            "description" : "WARM_UP while queued because the bank is not ready: the ledger takes its partitions (after a start or a crash), the gateway warms up, or Prometheus cannot tell; null otherwise.",
-            "enum" : [ "WARM_UP" ],
-            "type" : [ "string", "null" ]
-          }
-        },
-        "required" : [ "admittedAt", "booksFinalAt", "closedAt", "createdAt", "durationSeconds", "failure", "finishedAt", "live", "position", "result", "runId", "startedAt", "state", "stopRequested", "tps", "waitingFor" ],
-        "type" : "object"
-      },
-      "SecondStats" : {
-        "properties" : {
-          "accepted" : {
-            "description" : "By acceptedAt, or by processedAt while the command is not seen yet.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "bankP50Ms" : {
-            "format" : "double",
-            "type" : [ "number", "null" ]
-          },
-          "bankP99Ms" : {
-            "format" : "double",
-            "type" : [ "number", "null" ]
-          },
-          "posted" : {
-            "description" : "By processedAt, as the rest.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "postedAmountCents" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "rejected" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "second" : {
-            "description" : "Start of the second.",
-            "format" : "date-time",
-            "type" : "string"
-          }
-        },
-        "required" : [ "accepted", "bankP50Ms", "bankP99Ms", "posted", "postedAmountCents", "rejected", "second" ],
+        "required" : [ "from", "points", "series", "stepSeconds" ],
         "type" : "object"
       },
       "SessionCreated" : {
@@ -676,47 +948,47 @@
             "format" : "int64",
             "type" : "integer"
           },
-          "defaultTps" : {
-            "description" : "Transfers per second chosen when the page opens; one of tpsOptions.",
+          "defaultLoadSeconds" : {
+            "description" : "The length offered first, in seconds.",
             "format" : "int32",
             "type" : "integer"
           },
-          "durationOptions" : {
-            "description" : "Allowed run durations, seconds.",
+          "defaultLoadTps" : {
+            "description" : "The speed offered first.",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "inviteValid" : {
+            "description" : "False once the invite expired or was switched off; the session can then only look.",
+            "type" : "boolean"
+          },
+          "loadDurationOptions" : {
+            "description" : "Lengths a load pulse may last, in seconds, shortest first.",
             "items" : {
               "format" : "int32",
               "type" : "integer"
             },
             "type" : "array"
           },
-          "inviteValid" : {
-            "description" : "False once the invite expired or was switched off; runs can then only be read.",
-            "type" : "boolean"
-          },
-          "runsLastHour" : {
-            "description" : "Runs started with the invite in the last hour, from any session.",
+          "loadReadyInSeconds" : {
+            "description" : "Seconds until a load pulse may be started again, on the whole bank; 0 when it may be started now.",
             "format" : "int64",
             "type" : "integer"
           },
-          "runsPerHour" : {
-            "description" : "Runs the invite may start in any hour.",
-            "format" : "int32",
-            "type" : "integer"
+          "loadTpsOptions" : {
+            "description" : "Speeds a load pulse may set, in transfers a second, lowest first.",
+            "items" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : "array"
           },
           "sessionId" : {
             "format" : "uuid",
             "type" : "string"
-          },
-          "tpsOptions" : {
-            "description" : "Allowed transfers per second.",
-            "items" : {
-              "format" : "int32",
-              "type" : "integer"
-            },
-            "type" : "array"
           }
         },
-        "required" : [ "chaosAvailable", "chaosReadyInSeconds", "defaultTps", "durationOptions", "inviteValid", "runsLastHour", "runsPerHour", "sessionId", "tpsOptions" ],
+        "required" : [ "chaosAvailable", "chaosReadyInSeconds", "defaultLoadSeconds", "defaultLoadTps", "inviteValid", "loadDurationOptions", "loadReadyInSeconds", "loadTpsOptions", "sessionId" ],
         "type" : "object"
       },
       "SiteView" : {
@@ -757,67 +1029,79 @@
         "required" : [ "linkDays", "linksPerDay", "operator", "retentionDays", "turnstileSiteKey", "version" ],
         "type" : "object"
       },
-      "StartRunRequest" : {
-        "description" : "A run to start.",
+      "Slo" : {
+        "description" : "The bank's availability to its clients over the last days, by minute: a minute is good if nearly every request got an answer; busy (503) is an answer.",
         "properties" : {
-          "durationSeconds" : {
-            "description" : "Seconds, one of the session's durationOptions.",
-            "format" : "int32",
-            "type" : [ "integer", "null" ]
+          "availability" : {
+            "description" : "Share of good minutes among the measured ones, the planned and outside left out; null before the first measured minute.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
           },
-          "requestId" : {
-            "description" : "Idempotency key within the session: a repeat with the same body gets the same run.",
-            "format" : "uuid",
-            "type" : [ "string", "null" ]
+          "badMinutes" : {
+            "description" : "Bad minutes that use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
           },
-          "tps" : {
-            "description" : "Transfers per second, one of the session's tpsOptions.",
+          "budgetMinutes" : {
+            "description" : "Bad minutes the target allows in a full window.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "busyShare" : {
+            "description" : "Share of requests refused as busy; null before the first request.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "measuredMinutes" : {
+            "description" : "Minutes with requests in the window; a minute without any is not measured.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "outsideMinutes" : {
+            "description" : "Bad minutes during a crash or a load above the promised one, with their aftermath; they do not use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "plannedMinutes" : {
+            "description" : "Bad minutes within a maintenance window declared in time; they do not use up the budget.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "target" : {
+            "description" : "Share of good minutes the bank aims for.",
+            "type" : "number"
+          },
+          "windowDays" : {
             "format" : "int32",
-            "type" : [ "integer", "null" ]
+            "type" : "integer"
           }
         },
-        "required" : [ "durationSeconds", "requestId", "tps" ],
+        "required" : [ "availability", "badMinutes", "budgetMinutes", "busyShare", "measuredMinutes", "outsideMinutes", "plannedMinutes", "target", "windowDays" ],
         "type" : "object"
       },
-      "StatsTotals" : {
+      "StatementTotals" : {
         "properties" : {
-          "accepted" : {
-            "description" : "Transfers the gateway accepted, including those known only by their result so far.",
+          "amountCents" : {
             "format" : "int64",
             "type" : "integer"
           },
-          "commandsSeen" : {
-            "description" : "Transfers whose command is seen: their amount and acceptedAt are known.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "inFlight" : {
-            "description" : "accepted − posted − rejected.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "posted" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "postedAmountCents" : {
-            "description" : "Sum of posted transfers whose amount is known.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "rejected" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "rejectedByReason" : {
+          "byStatus" : {
             "additionalProperties" : {
               "format" : "int64",
               "type" : "integer"
             },
             "type" : "object"
+          },
+          "rows" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unknownToClient" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
-        "required" : [ "accepted", "commandsSeen", "inFlight", "posted", "postedAmountCents", "rejected", "rejectedByReason" ],
+        "required" : [ "amountCents", "byStatus", "rows", "unknownToClient" ],
         "type" : "object"
       },
       "TransferIds" : {
@@ -837,13 +1121,57 @@
         "required" : [ "count", "transferIds" ],
         "type" : "object"
       },
+      "TransferSide" : {
+        "description" : "A transfer as one side holds it.",
+        "properties" : {
+          "amountCents" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "fromAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "rejectReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "type" : [ "string", "null" ]
+          },
+          "toAccount" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "amountCents", "fromAccount", "rejectReason", "status", "toAccount" ],
+        "type" : "object"
+      },
+      "TransferSides" : {
+        "properties" : {
+          "count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "examples" : {
+            "items" : {
+              "$ref" : "#/components/schemas/MismatchedTransfer"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "count", "examples" ],
+        "type" : "object"
+      },
       "UnknownResolved" : {
+        "description" : "Transfers the clients did not know the outcome of, settled by asking the bank.",
         "properties" : {
           "accepted" : {
-            "$ref" : "#/components/schemas/TransferIds"
+            "format" : "int64",
+            "type" : "integer"
           },
           "notAccepted" : {
-            "$ref" : "#/components/schemas/TransferIds"
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "required" : [ "accepted", "notAccepted" ],
@@ -852,9 +1180,9 @@
     }
   },
   "info" : {
-    "description" : "Invite sessions and the run queue, for the control page.",
+    "description" : "The bank's state, periods and charts, and invite sessions, for the control page.",
     "title" : "Ledger Lab control API",
-    "version" : "1"
+    "version" : "2"
   },
   "openapi" : "3.1.0",
   "paths" : {
@@ -905,6 +1233,140 @@
         },
         "summary" : "Delete the address a link was mailed to",
         "tags" : [ "address-deletion-controller" ]
+      }
+    },
+    "/api/bank" : {
+      "get" : {
+        "operationId" : "bank",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BankView"
+                }
+              }
+            },
+            "description" : "The bank"
+          }
+        },
+        "summary" : "The bank now: totals, clients, instances, objectives",
+        "tags" : [ "bank-controller" ]
+      }
+    },
+    "/api/bank/periods" : {
+      "get" : {
+        "operationId" : "periods",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 10,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PeriodList"
+                }
+              }
+            },
+            "description" : "The periods, newest first"
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "limit is not between 1 and 100"
+          }
+        },
+        "summary" : "The last periods that are over",
+        "tags" : [ "bank-controller" ]
+      }
+    },
+    "/api/bank/periods/{periodStart}" : {
+      "get" : {
+        "operationId" : "period",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "periodStart",
+          "required" : true,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PeriodDetails"
+                }
+              }
+            },
+            "description" : "The period"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "No such period, or it is not over"
+          }
+        },
+        "summary" : "A period that is over, with its report once reconciled",
+        "tags" : [ "bank-controller" ]
+      }
+    },
+    "/api/bank/series" : {
+      "get" : {
+        "operationId" : "series",
+        "parameters" : [ {
+          "description" : "The time the charts cover: 2m, 5m, 30m or 2h; omit for 2h",
+          "in" : "query",
+          "name" : "range",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SeriesView"
+                }
+              }
+            },
+            "description" : "The charts; without series if monitoring could not be read"
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "A range other than those served"
+          }
+        },
+        "summary" : "The bank's charts from monitoring",
+        "tags" : [ "bank-controller" ]
       }
     },
     "/api/invite-requests" : {
@@ -1077,7 +1539,7 @@
             "description" : "Unknown session"
           }
         },
-        "summary" : "A session's quota and run options",
+        "summary" : "What a session may do",
         "tags" : [ "session-controller" ]
       }
     },
@@ -1098,11 +1560,21 @@
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ChaosView"
+                  "$ref" : "#/components/schemas/ChaosEvent"
                 }
               }
             },
-            "description" : "Crashed; the instances restart and the run goes on"
+            "description" : "Crashed; the instances restart and the bank goes on"
+          },
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description" : "The session's invite expired or was switched off"
           },
           "404" : {
             "content" : {
@@ -1114,16 +1586,6 @@
             },
             "description" : "Unknown session"
           },
-          "409" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The session has no running run"
-          },
           "429" : {
             "content" : {
               "application/json" : {
@@ -1132,7 +1594,7 @@
                 }
               }
             },
-            "description" : "Chaos was used on the cluster recently (Retry-After says when)",
+            "description" : "Chaos is being used or was used on the cluster recently (Retry-After says when to ask again)",
             "headers" : {
               "Retry-After" : {
                 "description" : "Seconds until chaos is available again",
@@ -1164,49 +1626,13 @@
             "description" : "No ledger instance answered"
           }
         },
-        "summary" : "Crash every ledger instance during a run",
+        "summary" : "Crash every ledger instance",
         "tags" : [ "chaos-controller" ]
       }
     },
-    "/api/sessions/{sessionId}/runs" : {
-      "get" : {
-        "operationId" : "list",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "sessionId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/RunList"
-                }
-              }
-            },
-            "description" : "The runs, newest first"
-          },
-          "404" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Unknown session"
-          }
-        },
-        "summary" : "A session's runs",
-        "tags" : [ "run-controller" ]
-      },
+    "/api/sessions/{sessionId}/load" : {
       "post" : {
-        "operationId" : "start",
+        "operationId" : "load",
         "parameters" : [ {
           "in" : "path",
           "name" : "sessionId",
@@ -1220,50 +1646,22 @@
           "content" : {
             "application/json" : {
               "schema" : {
-                "$ref" : "#/components/schemas/StartRunRequest"
+                "$ref" : "#/components/schemas/LoadRequest"
               }
             }
           },
           "required" : true
         },
         "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/RunView"
-                }
-              }
-            },
-            "description" : "A repeat of a run that is final",
-            "headers" : {
-              "Location" : {
-                "description" : "The run's address",
-                "schema" : {
-                  "type" : "string"
-                },
-                "style" : "simple"
-              }
-            }
-          },
           "202" : {
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/RunView"
+                  "$ref" : "#/components/schemas/Pulse"
                 }
               }
             },
-            "description" : "Queued, or a repeat of a run that is not final",
-            "headers" : {
-              "Location" : {
-                "description" : "The run's address",
-                "schema" : {
-                  "type" : "string"
-                },
-                "style" : "simple"
-              }
-            }
+            "description" : "The pulse runs until the time given; then the load goes back to its base"
           },
           "400" : {
             "content" : {
@@ -1273,7 +1671,7 @@
                 }
               }
             },
-            "description" : "Unreadable body, no requestId, or tps or duration not allowed"
+            "description" : "Unreadable body, or a speed or length not among the options"
           },
           "403" : {
             "content" : {
@@ -1283,7 +1681,7 @@
                 }
               }
             },
-            "description" : "The invite expired or was switched off"
+            "description" : "The session's invite expired or was switched off"
           },
           "404" : {
             "content" : {
@@ -1295,26 +1693,6 @@
             },
             "description" : "Unknown session"
           },
-          "409" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Another run of the session is not final"
-          },
-          "422" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The requestId was used with a different body"
-          },
           "429" : {
             "content" : {
               "application/json" : {
@@ -1323,10 +1701,10 @@
                 }
               }
             },
-            "description" : "Quota used up (Retry-After says when) or queue full",
+            "description" : "A pulse is being started, runs or ended recently (Retry-After says when to ask again)",
             "headers" : {
               "Retry-After" : {
-                "description" : "Seconds until the quota allows a run; absent when the queue is full",
+                "description" : "Seconds until a pulse may be started again",
                 "schema" : {
                   "type" : "integer"
                 },
@@ -1342,188 +1720,11 @@
                 }
               }
             },
-            "description" : "Too many starts at once; nothing was started, start again after Retry-After",
-            "headers" : {
-              "Retry-After" : {
-                "description" : "Seconds to wait",
-                "schema" : {
-                  "type" : "integer"
-                },
-                "style" : "simple"
-              }
-            }
+            "description" : "The generator did not confirm the pulse; without an answer it is taken as running"
           }
         },
-        "summary" : "Start a run: it joins the queue",
-        "tags" : [ "run-controller" ]
-      }
-    },
-    "/api/sessions/{sessionId}/runs/{runId}" : {
-      "get" : {
-        "operationId" : "get_1",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "sessionId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/RunView"
-                }
-              }
-            },
-            "description" : "The run"
-          },
-          "404" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Unknown session, or no such run in it"
-          }
-        },
-        "summary" : "A run of the session",
-        "tags" : [ "run-controller" ]
-      }
-    },
-    "/api/sessions/{sessionId}/runs/{runId}/report" : {
-      "get" : {
-        "operationId" : "report",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "sessionId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/RunReport"
-                }
-              }
-            },
-            "description" : "The report"
-          },
-          "404" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Unknown session, or no such run in it"
-          },
-          "409" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The run is not reconciled"
-          }
-        },
-        "summary" : "The verdict of a reconciled run",
-        "tags" : [ "run-controller" ]
-      }
-    },
-    "/api/sessions/{sessionId}/runs/{runId}/stop" : {
-      "post" : {
-        "operationId" : "stop",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "sessionId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
-          "in" : "path",
-          "name" : "runId",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/RunView"
-                }
-              }
-            },
-            "description" : "The run is past running; nothing to stop"
-          },
-          "202" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/RunView"
-                }
-              }
-            },
-            "description" : "Stopping"
-          },
-          "404" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "Unknown session, or no such run in it"
-          },
-          "409" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description" : "The run has not started yet"
-          }
-        },
-        "summary" : "Stop a running run early; the bank still finishes and reconciles it",
-        "tags" : [ "run-controller" ]
+        "summary" : "Raise the bank's load for a while",
+        "tags" : [ "load-controller" ]
       }
     },
     "/api/site" : {

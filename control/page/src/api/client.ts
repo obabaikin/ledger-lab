@@ -2,16 +2,22 @@ import type { components } from './schema'
 
 type Schemas = components['schemas']
 export type SessionView = Schemas['SessionView']
-export type RunView = Schemas['RunView']
-export type RunReport = Schemas['RunReport']
-type RunState = RunView['state']
-export type LiveView = Schemas['LiveView']
+export type BankView = Schemas['BankView']
+export type PeriodView = Schemas['PeriodView']
+export type PeriodDetails = Schemas['PeriodDetails']
+export type PeriodReport = Schemas['PeriodReport']
+export type SeriesView = Schemas['SeriesView']
+export type SeriesName = Schemas['Series']['name']
 export type PodView = Schemas['PodView']
-export type ChaosInRun = Schemas['ChaosInRun']
-export type SecondStats = Schemas['SecondStats']
+export type ChaosEvent = Schemas['ChaosEvent']
 export type SiteView = Schemas['SiteView']
 
-export const FINAL_STATES: ReadonlySet<RunState> = new Set(['RECONCILED', 'FAILED', 'EXPIRED'])
+const PERIODS_LISTED = 10
+
+/** The ranges control serves its charts for (`control.series.ranges`). */
+export const CHART_RANGES = ['2m', '5m', '30m', '2h'] as const
+export type ChartRange = (typeof CHART_RANGES)[number]
+export const DEFAULT_CHART_RANGE: ChartRange = '2h'
 
 export class ApiFailure extends Error {
   constructor(
@@ -42,13 +48,12 @@ const post = (body?: unknown): RequestInit => ({ method: 'POST', body: body === 
 export const api = {
   openSession: (token: string) => call<Schemas['SessionCreated']>('/api/sessions', post({ token })),
   session: (sessionId: string) => call<SessionView>(`/api/sessions/${sessionId}`),
-  runs: (sessionId: string) => call<Schemas['RunList']>(`/api/sessions/${sessionId}/runs`),
-  startRun: (sessionId: string, request: Schemas['StartRunRequest']) =>
-    call<RunView>(`/api/sessions/${sessionId}/runs`, post(request)),
-  stopRun: (sessionId: string, runId: string) => call<RunView>(`/api/sessions/${sessionId}/runs/${runId}/stop`, post()),
-  run: (sessionId: string, runId: string) => call<RunView>(`/api/sessions/${sessionId}/runs/${runId}`),
-  chaos: (sessionId: string) => call<Schemas['ChaosView']>(`/api/sessions/${sessionId}/chaos`, post()),
-  report: (sessionId: string, runId: string) => call<RunReport>(`/api/sessions/${sessionId}/runs/${runId}/report`),
+  load: (sessionId: string, request: Schemas['LoadRequest']) => call<Schemas['Pulse']>(`/api/sessions/${sessionId}/load`, post(request)),
+  chaos: (sessionId: string) => call<ChaosEvent>(`/api/sessions/${sessionId}/chaos`, post()),
+  bank: () => call<BankView>('/api/bank'),
+  periods: () => call<Schemas['PeriodList']>(`/api/bank/periods?limit=${PERIODS_LISTED}`),
+  period: (start: string) => call<PeriodDetails>(`/api/bank/periods/${encodeURIComponent(start)}`),
+  series: (range: ChartRange) => call<SeriesView>(`/api/bank/series?range=${range}`),
   site: () => call<SiteView>('/api/site'),
   requestInvite: (request: Schemas['InviteRequest']) => call<unknown>('/api/invite-requests', post(request)),
   deleteAddress: (token: string) => call<Schemas['AddressDeletionAccepted']>('/api/address-deletions', post({ token })),

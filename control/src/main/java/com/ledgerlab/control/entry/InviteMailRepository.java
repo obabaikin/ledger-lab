@@ -60,21 +60,20 @@ public class InviteMailRepository {
     public @Nullable Invite inviteOf(String email) {
         return jdbc.sql(
             """
-            SELECT t.token, t.quota, t.active AND t.expires_at > clock_timestamp() AS valid
+            SELECT t.token, t.active AND t.expires_at > clock_timestamp() AS valid
             FROM invite_emails e JOIN invite_tokens t ON t.token = e.token WHERE e.email = :email
             """)
             .param("email", email)
-            .query((rs, rowNum) -> new Invite(rs.getString("token"), rs.getInt("quota"), rs.getBoolean("valid")))
+            .query((rs, rowNum) -> new Invite(rs.getString("token"), rs.getBoolean("valid")))
             .optional()
             .orElse(null);
     }
 
-    public void createInvite(String token, Instant at, Duration lifetime, int quota) {
-        jdbc.sql("INSERT INTO invite_tokens (token, created_at, expires_at, quota) VALUES (:token, :at, :expiresAt, :quota)")
+    public void createInvite(String token, Instant at, Duration lifetime) {
+        jdbc.sql("INSERT INTO invite_tokens (token, created_at, expires_at) VALUES (:token, :at, :expiresAt)")
             .param("token", token)
             .param("at", Timestamp.from(at))
             .param("expiresAt", Timestamp.from(at.plus(lifetime)))
-            .param("quota", quota)
             .update();
     }
 

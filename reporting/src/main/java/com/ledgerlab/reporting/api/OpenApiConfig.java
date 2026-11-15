@@ -13,7 +13,7 @@ public class OpenApiConfig {
     public OpenAPI reportingApi() {
         return new OpenAPI().info(new Info()
             .title("Ledger Lab reporting internal API")
-            .version("1")
-            .description("A run's numbers from the bank's events, for control."));
+            .version("2")
+            .description("A period's numbers from the bank's events, for control."));
     }
 }

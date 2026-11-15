@@ -40,16 +40,44 @@ ledger:
     retry-backoff: 500ms
     # Set per instance in Kubernetes (the StatefulSet pod name); unset, the consumer joins the group dynamically.
     instance-id: ${LEDGER_INSTANCE_ID:}
-  run-duplicates:
-    # Past the last scrape after the run, before a long-lived pod publishes every past run.
-    idle-retention: 10m
-    sweep-interval: 1m
+  accounts:
+    # The generator is told the same count; the last ones are blocked.
+    count: 100000
+    opening-balance-cents: 1000000
+    blocked: 100
+  periods:
+    # The same in every service: they cut time at the same instants.
+    length: 60m
+    # How long a period's transfers and journal are held after it ended; the partition is dropped then.
+    retention: 4h
+    # Every connection that reads a table keeps a cache entry per partition: 313 partitions took 21 MB a connection and
+    # Postgres out of its memory (k3d, 10-minute periods). Maintenance creates them every minute.
+    partitions-ahead: 6h
+    maintenance-interval: 1m
+    # Creating or dropping a partition holds up every booking while it waits for the table.
+    lock-timeout: 2s
+    snapshot-retention: 48h
+    # Rows left outside the partitions are deleted this many a statement: one long delete would hold up another instance's
+    # partition change, and every insert queued behind it.
+    unpartitioned-delete-batch: 10000
+  pool:
+    opening-balance-cents: 10000000000
+    # Accounts 1..n receive a third of all payments; their surplus goes to the pool once per interval.
+    hot-accounts: 5
+    hot-sweep-interval: 60m
+    # Every account is brought back to its opening balance once per round.
+    round: 24h
+    tick-interval: 1s
+    max-batch: 100
   deferred-credits:
     apply-interval: 250ms
     batch-size: 1000
   reconciliation:
     # Per query, below control's 5 s call timeout: the database stops a query control has already given up on.
     statement-timeout: 4s
+    # The background check reads a whole period; nobody waits on a call for it.
+    check-timeout: 5m
+    example-limit: 20
   chaos:
     # On in the chart only: POST /actuator/crash halts the instance (control's chaos button).
     enabled: false
@@ -58,10 +86,6 @@ ledger:
 springdoc:
   # Otherwise every controller-local error handler is added to every operation as a possible answer.
   override-with-generic-response: false
-
-logging:
-  pattern:
-    correlation: "[run=%X{runId:-}] "
 
 management:
   endpoints:

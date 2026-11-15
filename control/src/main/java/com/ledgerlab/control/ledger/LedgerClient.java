@@ -1,12 +1,12 @@
 package com.ledgerlab.control.ledger;
 
-import static com.ledgerlab.control.http.ServiceHttp.forRun;
+import static com.ledgerlab.control.http.ServiceHttp.forPeriod;
 
 import com.ledgerlab.control.ControlProperties;
 import com.ledgerlab.control.http.Reply;
 import com.ledgerlab.control.http.ServiceHttp;
 import java.time.Duration;
-import java.util.UUID;
+import java.time.Instant;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -14,22 +14,26 @@ import tools.jackson.databind.ObjectMapper;
 public class LedgerClient {
 
     private final ServiceHttp http;
-    private final Duration reconciliationTimeout;
+    private final Duration countTimeout;
 
     public LedgerClient(ControlProperties props, ObjectMapper objectMapper) {
         this.http = new ServiceHttp(props.ledger().baseUrl(), props.services().requestTimeout(), objectMapper);
-        this.reconciliationTimeout = props.ledger().reconciliationTimeout();
+        this.countTimeout = props.periods().countTimeout();
     }
 
-    public Reply<Object> openAccounts(UUID runId, OpenAccountsRequest request) throws InterruptedException {
-        return http.send("POST", forRun(LedgerApi.ACCOUNTS_PATH, runId), request);
+    public Reply<LedgerReconciliation> reconciliation(Instant periodStart) throws InterruptedException {
+        return http.call("GET", forPeriod(LedgerApi.RECONCILIATION_PATH, periodStart), LedgerReconciliation.class, countTimeout);
     }
 
-    public Reply<ReconciliationReport> reconciliation(UUID runId) throws InterruptedException {
-        return http.call("GET", forRun(LedgerApi.RECONCILIATION_PATH, runId), ReconciliationReport.class, reconciliationTimeout);
+    public Reply<LedgerCheckState> check(Instant periodStart) throws InterruptedException {
+        return http.call("GET", forPeriod(LedgerApi.CHECK_PATH, periodStart), LedgerCheckState.class);
     }
 
-    public Reply<Object> delete(UUID runId) throws InterruptedException {
-        return http.send("DELETE", forRun(LedgerApi.RUN_PATH, runId));
+    public Reply<Object> requestCheck(Instant periodStart) throws InterruptedException {
+        return http.send("POST", forPeriod(LedgerApi.CHECK_PATH, periodStart));
+    }
+
+    public Reply<Books> books() throws InterruptedException {
+        return http.call("GET", LedgerApi.BOOKS_PATH, Books.class);
     }
 }

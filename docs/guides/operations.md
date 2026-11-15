@@ -20,13 +20,14 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 - **The gateway is replaced without downtime**: the new pod becomes ready before the old one stops; the old one
   answers what it holds within 40 s. Postgres takes 150 connections so both pools fit during the swap
   ([ADR 0020](../adr/0020-gateway-deploys-without-downtime.md)).
-- **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service; whether a run may
-  start is control's question, answered by the partitions the live instances hold.
-- **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap; the gateway's and the generator's heap is their
-  memory less a fixed reserve (550 and 450 MiB), set from the start, and malloc keeps two arenas, as outside the heap
-  a JVM took about 290 MiB and malloc up to 135 MiB more under load: the gateway's heap holds
-  the open submissions, the generator's the journals. An OutOfMemoryError of the
-  gateway leaves a heap dump in its pod's `/dumps`.
+- **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service.
+- **Periods** are an hour; to see closings sooner, `up.sh --set periodMinutes=10` with control's closing times
+  shortened to fit (`closing.*` in the chart's values; the verdict deadline must stay under the period plus a minute).
+- **Every pod has a memory limit**, set from measurements under load; a JVM takes half of it as heap; the gateway's,
+  the generator's and control's heap is their memory less a fixed reserve (550, 450 and 320 MiB), set from the start,
+  and malloc keeps two arenas, as outside the heap a JVM took about 290 MiB and malloc up to 135 MiB more under load:
+  the gateway's heap holds the open submissions, the generator's the requests in flight. An OutOfMemoryError of the
+  gateway or control leaves a heap dump in its pod's `/dumps`; control then exits, and keeps its GC log there.
 - **A crashed pod restarts within a second**: the cluster caps the kubelet's crash-loop backoff at 1 s
   (`infra/k3d/kubelet-crash-loop-backoff.yaml`), otherwise a second crash in a row waits 10 s, then twice as long.
   A cluster created before needs `down.sh` and `up.sh`.
@@ -54,9 +55,10 @@ infra/server/deploy.sh <release tag>        # cert-manager and the chart, with t
   `git push origin vX.Y.Z`; the tag adds its name to the images `main` built from that commit, nothing is
   rebuilt, so the server runs the images CI tested. The images carry no version: `deploy.sh` passes the tag to
   the chart, and the page shows it. A commit that is not on `main` has no images and cannot be released.
-- **Deploying** is by hand, `deploy.sh <release tag>`. It refuses a tag that is not on GitHub, and before Helm
-  when a tag's image is missing, which is so until the tag's CI run is green. It refuses while runs are in
-  progress (`--force` overrides). The first deploy generates the database
+- **Deploying** is by hand, `deploy.sh <release tag>`, while the clients go on sending. It refuses a tag that is
+  not on GitHub, and before Helm when a tag's image is missing, which is so until the tag's CI run is green. It
+  refuses a server still on the chart of version 1 (below). A release that changes a contract between the services
+  is deployed with `deploy.sh <tag> --contract`, which refuses outside a declared maintenance window. The first deploy generates the database
   passwords into a local file outside the repository; a role added to the chart later gets one on the
   next deploy, and a deploy that would still carry a `change-me` placeholder is refused.
 - **Load:** the server's rates are in `infra/server/values.yaml`.
@@ -68,7 +70,9 @@ infra/server/deploy.sh <release tag>        # cert-manager and the chart, with t
   oldest entries are overwritten.
 - **Node and database metrics:** node-exporter (CPU with steal and iowait, pressure, disks; not the
   node's network, as it runs in its own pod's network) and
-  postgres-exporter (commits, checkpoints, locks, connections) are scraped every 5 s. The exporter logs
+  postgres-exporter (commits, checkpoints, locks, connections, and the 100 statements with the most time from
+  `pg_stat_statements`) are scraped every 5 s, and so is each container's working-set memory from the kubelet, the
+  number the kernel compares with the limit. Postgres logs every statement slower than a second. The exporter logs
   in as `monitor`, a member of `pg_monitor`: it sees the statistics, not the data. The role is created or
   updated on every deploy, as the init script runs only on an empty volume. No port of either is
   published; read them through `kubectl port-forward svc/prometheus 9090`.
@@ -76,22 +80,41 @@ infra/server/deploy.sh <release tag>        # cert-manager and the chart, with t
   ([results](../results/2026-10-23-server-baseline.md)). Traefik gets 256 MiB in
   `infra/server/traefik-config.yaml`; k3s's other pods (CoreDNS, the metrics server, the local-path
   provisioner) are left as k3s ships them, the one exception: together they peaked under 200 MiB.
-- **Right after a deploy** runs wait in the queue until the gateway has warmed up, up to 90 s; the page
-  says the bank is getting ready on the queued run.
+- **Right after a deploy** the gateway warms up while it already takes transfers.
+- **Maintenance windows:** `infra/server/maintenance.sh add 2026-11-12T02:00Z 2026-11-12T03:00Z` declares one
+  (UTC, whole minutes), `list` shows them and `cancel <id>` withdraws one before it starts. The page shows a window to
+  every visitor; its bad minutes stay out of the error budget only if it was declared at least 3 hours before its
+  start ([SLO](slo.md)).
 - **Operator access** is SSH with a key only: `kubectl` and `psql` (via `kubectl exec`) through the
   tunnel. Nothing but the page is published.
 - **Hardening:** a host firewall (nftables) under the provider's lets only SSH reach the host itself;
   `bootstrap.sh` puts it on with a timer that removes it again unless a new SSH login gets through.
-  Security updates install on their own, and a reboot for a new kernel is done by hand between runs:
+  Security updates install on their own, and a reboot for a new kernel is done by hand in a maintenance window:
   `deploy.sh` says when one is due. The services run as a non-root user without capabilities or a
   Kubernetes API token; responses carry HSTS, `nosniff`, frame-deny and no-referrer headers.
   cert-manager's chart and images are pinned by digest.
 
+### Moving from runs to one bank
+
+Version 1 (runs, up to `v0.9.0`) and the bank around the clock ([ADR 0021](../adr/0021-one-bank-around-the-clock.md))
+share no data: the database's schemas and the volumes differ, and `helm upgrade` does not change a volume. The move
+is a fresh install, and `deploy.sh` refuses to upgrade a server whose database lacks the generator's role:
+
+1. Optionally, keep a dump: `kubectl -n ledger-lab exec postgres-0 -- pg_dump -U admin -Fc ledgerlab > <file>`,
+   outside the repository.
+2. `helm uninstall ledger-lab -n ledger-lab`, then delete the volumes of Postgres, Kafka and Prometheus
+   (`kubectl -n ledger-lab get pvc`, `kubectl -n ledger-lab delete pvc <name>`). The namespace and the TLS
+   certificate's secret stay.
+3. `deploy.sh <release tag>`. The ledger opens the accounts on its first start; the clients start sending once
+   the bank is ready.
+
+A maintenance window declared in the old database is gone with it; declare it again after the install, with its
+original time of declaration, or its minutes count against the budget.
+
 ## Invites
 
 The page is opened with an invite link, `/?ref=<token>`. A visitor gets one by entering an email on the
-start page ([ADR 0017](../adr/0017-invites-by-email.md)); the address is kept with the invite, its visits and
-runs, in `control.invite_emails`, for 30 days after its last use, or until 24 hours after its owner asked to
+start page ([ADR 0017](../adr/0017-invites-by-email.md)); the address is kept with the invite and its visits, in `control.invite_emails`, for 30 days after its last use, or until 24 hours after its owner asked to
 delete it by the link in any mail (`/delete?ref=<token>`).
 
 ### Mailed invites
@@ -123,8 +146,8 @@ OPERATOR_EMAIL=<contact address>
 Invites for a person are still created by hand in the database; there is no endpoint for them:
 
 ```sql
-INSERT INTO control.invite_tokens (token, expires_at, quota)
-VALUES ('<random token>', now() + interval '30 days', 5);  -- runs per hour
+INSERT INTO control.invite_tokens (token, expires_at)
+VALUES ('<random token>', now() + interval '30 days');
 ```
 
 ## Working on the page

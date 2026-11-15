@@ -1,5 +1,6 @@
 package com.ledgerlab.gateway.api;
 
+import com.ledgerlab.gateway.GatewayProperties;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import org.springdoc.core.models.GroupedOpenApi;
@@ -8,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Two specs, each kept in the repository and checked against the running app: the bank's published API
- * (gateway/openapi.json, ADR 0011) and the run endpoints control calls (gateway/openapi-internal.json).
+ * (gateway/openapi.json, ADR 0011) and the period endpoints control calls (gateway/openapi-internal.json).
  */
 @Configuration
 public class OpenApiConfig {
@@ -18,11 +19,13 @@ public class OpenApiConfig {
     private static final String INTERNAL_PATHS = "/internal/**";
 
     @Bean
-    public OpenAPI bankApi() {
+    public OpenAPI bankApi(GatewayProperties props) {
         return new OpenAPI().info(new Info()
             .title("Ledger Lab bank API")
             .version(ApiVersioning.VERSION)
-            .description("Transfers and the statement of a closed period."));
+            .description(
+                "Transfers and the statement of a closed period. Periods are %s long, on a grid from the epoch. A transfer and its key are kept for %s (the idempotency window): after that the transfer is no longer found, and the same key is taken as a new transfer."
+                    .formatted(props.periods().length(), props.periods().retention())));
     }
 
     @Bean
@@ -38,7 +41,7 @@ public class OpenApiConfig {
             .addOpenApiCustomizer(api -> api.info(new Info()
                 .title("Ledger Lab gateway internal API")
                 .version(ApiVersioning.VERSION)
-                .description("Run summary, period close and run deletion, for control.")))
+                .description("Period summary and period close, for control.")))
             .build();
     }
 }

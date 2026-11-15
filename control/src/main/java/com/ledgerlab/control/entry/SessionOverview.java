@@ -6,12 +6,16 @@ import java.util.UUID;
 public record SessionOverview(
     UUID sessionId,
     boolean inviteValid,
-    int runsPerHour,
-    long runsLastHour,
-    List<Integer> tpsOptions,
-    int defaultTps,
-    List<Integer> durationOptions,
     boolean chaosAvailable,
-    long chaosReadyInSeconds
+    long chaosReadyInSeconds,
+    List<Integer> loadTpsOptions,
+    int defaultLoadTps,
+    List<Integer> loadDurationOptions,
+    int defaultLoadSeconds,
+    long loadReadyInSeconds
 ) {
+    public SessionOverview {
+        loadTpsOptions = List.copyOf(loadTpsOptions);
+        loadDurationOptions = List.copyOf(loadDurationOptions);
+    }
 }

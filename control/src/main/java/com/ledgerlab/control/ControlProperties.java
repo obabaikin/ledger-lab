@@ -1,15 +1,22 @@
 package com.ledgerlab.control;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.ZoneId;
-import java.util.Collections;
 import java.util.List;
+import java.util.stream.IntStream;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 @ConfigurationProperties("control")
 public record ControlProperties(
-    Runs runs,
+    Periods periods,
+    Bank bank,
+    Availability availability,
+    Freshness freshness,
+    Outside outside,
+    Maintenance maintenance,
+    Series series,
     Ledger ledger,
     Gateway gateway,
     Generator generator,
@@ -18,52 +25,99 @@ public record ControlProperties(
     Reporting reporting,
     Prometheus prometheus,
     Chaos chaos,
+    Load load,
     Invites invites,
     Turnstile turnstile,
     Mail mail,
     Site site
 ) {
-    public record Runs(
-        int maxActive,
-        int maxQueued,
-        Duration queueTimeout,
-        List<Integer> tpsOptions,
-        int defaultTps,
-        List<Duration> durationOptions,
-        Duration setupTimeout,
-        Duration runningGrace,
-        Duration drainStallTimeout,
-        Duration drainTimeout,
-        Accounts accounts,
-        int maxTotalTps,
-        // At most this many starts wait for the queue's lock at once; one more waits up to startWait, then is refused.
-        int maxConcurrentStarts,
-        Duration startWait
+    /**
+     * {@link #length} is the bank's: every service cuts its periods by the same setting. {@link #detailsRetention} is the
+     * bank's too: a period older than it cannot be reconciled any more. The other times count from a period's end: the
+     * next period closes at {@code length + closeDelay}, and control settles the oldest period first, so a period's verdict
+     * is due before that.
+     */
+    public record Periods(
+        Duration length,
+        Duration closeDelay,
+        Duration settleDelay,
+        Duration checkWait,
+        Duration retryWait,
+        Duration verdictDeadline,
+        Duration detailsRetention,
+        Duration countTimeout
     ) {
-        public Runs {
-            if (!tpsOptions.stream().allMatch(it -> it <= maxTotalTps)) {
-                throw new IllegalArgumentException("a run of " + Collections.max(tpsOptions) + " TPS would never fit max-total-tps " + maxTotalTps);
+        public Periods {
+            if (length.isZero() || length.isNegative() || !length.equals(Duration.ofMinutes(length.toMinutes()))) {
+                throw new IllegalArgumentException("periods.length must be whole minutes, got " + length);
             }
-            if (!tpsOptions.contains(defaultTps)) {
-                throw new IllegalArgumentException("default-tps " + defaultTps + " is not one of tps-options " + tpsOptions);
+            if (!closeDelay.isPositive() || !checkWait.isPositive() || !retryWait.isPositive() || !countTimeout.isPositive()) {
+                throw new IllegalArgumentException(
+                    "periods.close-delay, check-wait, retry-wait and count-timeout must be positive, got " + closeDelay + ", " + checkWait + ", "
+                        + retryWait + ", " + countTimeout);
+            }
+            if (closeDelay.compareTo(settleDelay) >= 0 || settleDelay.compareTo(verdictDeadline) >= 0
+                || verdictDeadline.compareTo(length.plus(closeDelay)) >= 0) {
+                throw new IllegalArgumentException(
+                    "periods need close-delay < settle-delay < verdict-deadline < length + close-delay, got " + closeDelay + " < " + settleDelay
+                        + " < " + verdictDeadline + " < " + length.plus(closeDelay));
             }
         }
+    }
 
-        public List<Integer> durationSecondsOptions() {
-            return durationOptions.stream().map(it -> (int) it.toSeconds()).toList();
+    public record Bank(Duration booksInterval, Duration recentChaos) {
+    }
+
+    public record Availability(
+        int goodMinuteAnsweredPercent,
+        Duration minutesRetention,
+        BigDecimal sloTarget,
+        Duration sloWindow
+    ) {
+    }
+
+    /**
+     * A minute is bad if more than {@link #badSharePercent} of its transfers took longer than {@link #threshold} from
+     * acceptance to result. A minute is read from monitoring once it ended {@link #lag} ago, and no later than
+     * {@link #catchUp} after; one not read by then stays without data.
+     */
+    public record Freshness(Duration threshold, int badSharePercent, Duration lag, Duration catchUp, BigDecimal sloTarget) {
+    }
+
+    /**
+     * Bad minutes during a crash and {@link #chaosAftermath} after it, and during a pulse above {@link #guaranteedTps}
+     * and {@link #loadAftermath} after it, are outside the bounds the bank promises, unless a service restarted in place
+     * then, other than the crash's own pods once each: that is the bank falling over, judged as any other minute. A
+     * process starts some tens of seconds after it went down, so starts up to {@link #restartMargin} after the end count.
+     */
+    public record Outside(int guaranteedTps, Duration chaosAftermath, Duration loadAftermath, Duration restartMargin) {
+    }
+
+    /** A window declared later than {@link #notice} before its start does not excuse its bad minutes. */
+    public record Maintenance(Duration notice) {
+    }
+
+    /** Each answer is kept for {@link #cache}, one per range. */
+    public record Series(List<Range> ranges, Duration defaultRange, Duration cache) {
+        public Series {
+            ranges = List.copyOf(ranges);
+            if (ranges.stream().noneMatch(it -> it.range().equals(defaultRange))) {
+                throw new IllegalArgumentException("series.default-range " + defaultRange + " is not one of the ranges");
+            }
         }
     }
 
-    public record Accounts(int count, long openingBalanceCents, int blocked, long dailyLimitCents) {
+    /** A chart of {@link #range} has a point every {@link #step}; each rate is taken over {@link #window}. */
+    public record Range(Duration range, Duration step, Duration window) {
     }
 
-    public record Ledger(String baseUrl, int transferPartitions, Duration reconciliationTimeout) {
+    public record Ledger(String baseUrl) {
     }
 
-    public record Gateway(String baseUrl, Duration summaryTimeout) {
+    public record Gateway(String baseUrl) {
     }
 
-    public record Generator(String baseUrl, Duration reconciliationTimeout) {
+    public record Generator(String baseUrl) {
     }
 
     public record Services(Duration requestTimeout) {
@@ -72,7 +126,7 @@ public record ControlProperties(
     public record Cleanup(Duration interval, Duration retention) {
     }
 
-    public record Reporting(String baseUrl, Duration catchUpWait, Duration finalStatsTimeout) {
+    public record Reporting(String baseUrl, Duration catchUpWait) {
     }
 
     public record Prometheus(String baseUrl, Duration requestTimeout) {
@@ -89,6 +143,53 @@ public record ControlProperties(
     public record LedgerInstance(String name, String url) {
     }
 
+    /** {@link #minInterval} runs from a pulse's end, not its start. */
+    public record Load(
+        int minTps,
+        int maxTps,
+        int tpsStep,
+        int defaultTps,
+        List<Duration> durationOptions,
+        Duration defaultDuration,
+        Duration minInterval
+    ) {
+        public Load {
+            if (minTps < 1 || tpsStep < 1 || maxTps < minTps || (maxTps - minTps) % tpsStep != 0) {
+                throw new IllegalArgumentException(
+                    "load: min-tps " + minTps + " to max-tps " + maxTps + " must be whole steps of tps-step " + tpsStep);
+            }
+            durationOptions = List.copyOf(durationOptions);
+            if (durationOptions.isEmpty() || durationOptions.stream().anyMatch(it -> !isWholeSeconds(it))) {
+                throw new IllegalArgumentException("load.duration-options must be whole seconds, got " + durationOptions);
+            }
+            if (!tpsOptionsOf(minTps, maxTps, tpsStep).contains(defaultTps)) {
+                throw new IllegalArgumentException("load.default-tps " + defaultTps + " is not one of the options");
+            }
+            if (!durationOptions.contains(defaultDuration)) {
+                throw new IllegalArgumentException("load.default-duration " + defaultDuration + " is not one of " + durationOptions);
+            }
+            if (minInterval == null || !minInterval.isPositive()) {
+                throw new IllegalArgumentException("load.min-interval must be set and positive, got " + minInterval);
+            }
+        }
+
+        public List<Integer> tpsOptions() {
+            return tpsOptionsOf(minTps, maxTps, tpsStep);
+        }
+
+        public List<Integer> secondsOptions() {
+            return durationOptions.stream().map(it -> (int) it.toSeconds()).toList();
+        }
+
+        private static List<Integer> tpsOptionsOf(int minTps, int maxTps, int tpsStep) {
+            return IntStream.rangeClosed(0, (maxTps - minTps) / tpsStep).map(it -> minTps + it * tpsStep).boxed().toList();
+        }
+
+        private static boolean isWholeSeconds(Duration duration) {
+            return duration.isPositive() && duration.equals(Duration.ofSeconds(duration.toSeconds()));
+        }
+    }
+
     public record Invites(InviteEmail email) {
     }
 
@@ -97,7 +198,6 @@ public record ControlProperties(
         int dailyMails,
         Duration window,
         Duration lifetime,
-        int runsPerHour,
         Duration retention,
         Duration deletionCheck
     ) {

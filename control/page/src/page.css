@@ -34,10 +34,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .error { color: var(--bad); font-size: 14px; }
 .banner { border-left: 4px solid var(--warn); padding: 8px 12px; background: color-mix(in srgb, var(--warn) 10%, var(--card)); border-radius: 6px; margin-bottom: 12px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .banner label { white-space: nowrap; }
-.phases { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; align-items: center; }
-.phase { font-size: 13px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-.phase.now { border-color: var(--flow); color: var(--flow); font-weight: 600; }
-.phase.done { color: var(--ok); border-color: var(--ok); }
 svg { width: 100%; height: auto; display: block; }
 #diagram.across { max-height: 80vh; }
 .node rect.box { fill: var(--node); stroke: var(--line); stroke-width: 1.5; transition: fill .3s, stroke .3s; }
@@ -47,7 +43,6 @@ a.node:hover rect.box { stroke: var(--flow); }
 .node .title { font-weight: 700; font-size: 15px; fill: var(--ink); }
 .node .sub { font-size: 11px; fill: var(--muted); }
 .node .num { font-size: 14px; fill: var(--ink); font-variant-numeric: tabular-nums; }
-.node .repeats { font-size: 11px; fill: var(--warn); }
 .node .sub.busy { fill: var(--warn); }
 .wire { stroke: var(--line); stroke-width: 2; fill: none; }
 .wire.back { stroke-dasharray: 4 4; }
@@ -59,6 +54,10 @@ a.node:hover rect.box { stroke: var(--flow); }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
 .chart h3 { margin: 0 0 4px; font-size: 14px; }
+.chartsHead { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+.chart svg { touch-action: pan-y; }
+.readout { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
+.card h4 { margin: 12px 0 4px; font-size: 14px; }
 .legend { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
 .verdict { text-align: center; padding: 28px 16px; }
@@ -83,8 +82,6 @@ th:first-child, td:first-child { text-align: left; }
 .bin { fill: none; stroke: var(--bad); stroke-dasharray: 4 3; }
 .binLabel { font-size: 11px; fill: var(--bad); }
 .binNum { fill: var(--bad) !important; font-size: 13px; }
-.quota { margin: 12px 0 0; }
-.pill { font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
 .bad { color: var(--bad); }
 .warn { color: var(--warn); }
 .verdict .mark.bad { color: var(--bad); }
@@ -95,11 +92,9 @@ tr[role='button'] { cursor: pointer; }
 h3 { margin: 0 0 8px; font-size: 15px; }
 .chaosWait { font-variant-numeric: tabular-nums; }
 .build { margin-top: 24px; text-align: center; font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
-.goto { display: block; width: 100%; margin: 0 0 12px; text-align: left; border-color: var(--flow); color: var(--flow); background: color-mix(in srgb, var(--flow) 8%, var(--card)); font-weight: 600; }
 button .why { display: block; font-size: 12px; font-weight: 400; }
 .legend .dot { width: 9px; height: 9px; border-radius: 50%; }
 .podLegend { justify-content: center; margin-top: 4px; }
-.runList button.link { border: none; background: none; color: var(--flow); padding: 6px 0; }
 .invite h2 { font-size: 18px; margin: 0 0 12px; }
 .invite input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); min-width: 0; width: min(320px, 100%); }
 .invite label { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; min-width: 0; }
@@ -109,9 +104,24 @@ button .why { display: block; font-size: 12px; font-weight: 400; }
 .invite .form-status { min-height: 21px; margin-top: 8px; }
 .invite .form-status p { margin: 0; }
 .invite-sent { margin: 0; }
+.intro { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
+.teaser { flex: 1 1 320px; min-width: 0; }
+.teaser h2 { font-size: 20px; margin: 0 0 12px; max-width: 560px; }
+.teaser .invite { margin-top: 4px; }
+.teaser [tabindex="-1"]:focus { outline: none; }
+.speed { margin: 0; font-variant-numeric: tabular-nums; }
+.speed b { display: block; font-size: 32px; line-height: 1.1; }
 .legal h3 { font-size: 15px; margin: 16px 0 4px; }
 .legal address { font-style: normal; margin: 8px 0; }
 .build a { color: inherit; }
 .node.recovering rect.box { fill: color-mix(in srgb, var(--ok) 14%, var(--node)); stroke: var(--ok); }
 .illustration { margin: 4px 0 0; text-align: center; }
 .crash-scene { margin: 0; }
+.status { margin: 0 0 8px; font-weight: 600; }
+.center { text-align: center; margin: 6px 0 0; }
+.periods tr[role="button"] { cursor: pointer; }
+.budgetBar { height: 8px; border-radius: 999px; background: var(--node); border: 1px solid var(--line); overflow: hidden; max-width: 420px; }
+.budgetBar i { display: block; height: 100%; background: var(--warn); }
+.budgetBar i.spent { background: var(--bad); }
+.examples { text-align: left; font-size: 14px; padding-left: 18px; }
+.examples code { word-break: break-all; }

@@ -9,9 +9,14 @@ gateway:
     retry-backoff: 200ms
   max-wait: 5s
   retry-after: 1s
-  close-lock-timeout: 1s
+  # Above the waits of the tests that hold a close behind a lock, so a slow machine does not turn them into the timeout.
+  close-lock-timeout: 3s
   warm-up:
     rounds: 20
+  periods:
+    key-cleanup-batch: 3
+    # Below the rows a test leaves outside the partitions, so they go in more than one batch.
+    unpartitioned-delete-batch: 2
 logging:
   level:
     org.apache.kafka: WARN

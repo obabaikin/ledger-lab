@@ -43,7 +43,7 @@ public class SessionController {
         return ResponseEntity.created(URI.create(SESSIONS_PATH + "/" + sessionId)).body(new SessionCreated(sessionId));
     }
 
-    @Operation(summary = "A session's quota and run options")
+    @Operation(summary = "What a session may do")
     @ApiResponse(responseCode = "200", description = "The session")
     @ApiResponse(responseCode = "404", description = "Unknown session", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @GetMapping("/{sessionId}")

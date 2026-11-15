@@ -1,126 +1,137 @@
-import type { RunReport } from './api/client'
+import type { PeriodReport } from './api/client'
 import { REPOSITORY_URL } from './Diagram'
-import { count, euros, MS_PER_SECOND, NO_DATA, shown } from './format'
+import { clock, count, euros } from './format'
+import { t } from './texts'
 
 const TESTS_URL = `${REPOSITORY_URL}/tree/main/control/src/test`
 
-const HEADLINE: Record<RunReport['result'], { mark: string; title: string; tone: string }> = {
-  BALANCED: { mark: '✓', title: 'Every cent accounted for', tone: 'ok' },
-  BREAKS: { mark: '✗', title: 'The records do not agree', tone: 'bad' },
-  INCOMPLETE: { mark: '?', title: 'Not everything could be checked', tone: 'warn' },
+const HEADLINE: Record<PeriodReport['verdict'], { mark: string; tone: string }> = {
+  BALANCED: { mark: '✓', tone: 'ok' },
+  MISMATCH: { mark: '✗', tone: 'bad' },
 }
 
 type Check = { rule: string; value: string; passed: boolean | null }
 
-function checks(r: RunReport): Check[] {
-  const failed = new Set(r.ledgerFailedChecks)
-  const { ledger, gateway, client } = r
+function checks(r: PeriodReport): Check[] {
+  const failed = new Set(r.ledgerCheck.failedChecks)
+  const { ledgerCheck: check, gateway, ledger, books, client } = r
+  const notes = new Set(r.notes)
   return [
     {
-      rule: 'Σ debits = Σ credits',
-      value: `${euros(ledger.debitsCents)} = ${euros(ledger.creditsCents)}`,
-      passed: !failed.has('JOURNAL_SUMS_TO_ZERO'),
+      rule: t.report.debitsEqualCredits,
+      value: `${euros(check.debitsCents)} = ${euros(check.creditsCents)}`,
+      passed: !failed.has('JOURNAL_DEBITS_EQUAL_CREDITS'),
     },
     {
-      rule: 'Σ balances before = after',
-      value: `${euros(ledger.openingTotalCents)} = ${euros(ledger.balanceTotalCents)}`,
-      passed: !failed.has('TOTAL_BALANCE_CONSERVED'),
-    },
-    { rule: 'every transfer has its debit and credit', value: `${count(ledger.posted)} booked`, passed: !failed.has('JOURNAL_MATCHES_TRANSFER_LOG') },
-    { rule: 'every balance = opening + its journal', value: '', passed: !failed.has('EVERY_ACCOUNT_MATCHES_JOURNAL') },
-    {
-      rule: 'accepted = booked + rejected',
-      value: `${count(gateway.accepted)} = ${count(ledger.posted)} + ${count(ledger.rejected)}`,
-      passed: r.bankViewsAgree,
+      rule: t.report.everyTransferBooked,
+      value: t.report.withoutJournal(count(check.transfersWithInvalidJournal)),
+      passed: !failed.has('JOURNAL_MATCHES_TRANSFER_LOG'),
     },
     {
-      rule: "clients' journal = bank's statement",
-      value: client ? `${count(client.acknowledged)} acknowledged · ${count(client.unknown)} unknown, settled` : 'not checked',
-      passed: r.clientBalanced,
+      rule: t.report.everyAccount,
+      value: check.accountsCompared ? t.report.accountsOutOfBalance(count(check.accountsOutOfBalance)) : t.report.notCompared,
+      passed: check.accountsCompared ? !failed.has('EVERY_ACCOUNT_MATCHES_JOURNAL') : null,
     },
     {
-      rule: "bank's events = books",
-      value: projectionValue(r),
-      // The projection may trail the books without a break, so it never shows ✗; the note under the table says why.
-      passed: r.projectionMatchesBooks === true ? true : null,
+      rule: t.report.totalUnchanged,
+      value: `${euros(books.openingTotalCents)} = ${euros(books.balanceTotalCents)}`,
+      passed: books.balanced,
+    },
+    {
+      rule: t.report.acceptedIsBookedPlusRejected,
+      value: `${count(gateway.accepted)} = ${count(ledger.postedTransfers)} + ${count(ledger.rejectedTransfers)}`,
+      passed: !r.mismatches.includes('BANK_VIEWS_DISAGREE'),
+    },
+    {
+      rule: t.report.clientsAgree,
+      value: t.report.unknownSettled(count(client.unknownResolved.accepted), count(client.unknownResolved.notAccepted)),
+      passed: client.balanced,
+    },
+    {
+      rule: t.report.projection,
+      value: r.stats === null || notes.has('REPORTING_UNAVAILABLE') ? t.report.notChecked : notes.has('PROJECTION_BEHIND_BOOKS') ? t.report.behind : count(r.stats.posted),
+      // The projection may trail the books without a break, so it never shows ✗; the note says why.
+      passed: r.stats !== null && !notes.has('PROJECTION_BEHIND_BOOKS') && !notes.has('REPORTING_UNAVAILABLE') ? true : null,
     },
   ]
 }
 
-function projectionValue(r: RunReport): string {
-  if (r.projectionMatchesBooks === null || !r.stats) return 'not checked'
-  if (!r.projectionMatchesBooks) return 'behind the books'
-  return `${count(r.stats.totals.posted)} booked · ${count(r.stats.totals.rejected)} rejected`
+function transferExamples(r: PeriodReport): [string, string[]][] {
+  const b = r.client.breaks
+  const kinds: [string, string[]][] = [
+    [t.report.breaks.notInJournal, b.notInJournal.transferIds],
+    [t.report.breaks.acknowledgedNotInStatement, b.acknowledgedNotInStatement.transferIds],
+    [t.report.breaks.failedButInStatement, b.failedButInStatement.transferIds],
+    [t.report.breaks.payloadMismatch, b.payloadMismatch.examples.map((e) => e.transferId)],
+    [t.report.breaks.statusMismatch, b.statusMismatch.examples.map((e) => e.transferId)],
+    [t.report.breaks.invalidJournal, r.ledgerCheck.invalidJournalExamples],
+  ]
+  return kinds.filter(([, ids]) => ids.length > 0)
 }
 
-const PERCENT = 100
-
-const seconds = (ms: number | null) => shown(ms, (v) => `${(v / MS_PER_SECOND).toFixed(2)} s`)
-
-/** What the bank took and how fast it answered, from the report alone; a side without data is a dash. */
-export function verdictLine(r: RunReport): string {
-  const sent = r.client?.requested ?? null
-  const accepted = r.gateway.accepted
-  const share = sent === null || sent === 0 ? NO_DATA : `${((accepted / sent) * PERCENT).toFixed(1)} %`
-  const sentText = shown(sent)
-  return `Accepted ${count(accepted)} of ${sentText} sent (${share}) · gateway - ledger p50 ${seconds(r.bankLatencyP50Ms)} / p99 ${seconds(r.bankLatencyP99Ms)}`
+function lostOrDoubled(r: PeriodReport): number {
+  const b = r.client.breaks
+  return b.notInJournal.count + b.acknowledgedNotInStatement.count + b.failedButInStatement.count + b.payloadMismatch.count + b.statusMismatch.count
 }
 
 const MARK = (passed: boolean | null) => (passed === null ? '–' : passed ? '✓' : '✗')
 
-export function Verdict({ report, tps, durationSeconds }: { report: RunReport; tps: number; durationSeconds: number }) {
-  const head = HEADLINE[report.result]
-  const agree = [report.ledgerBalanced, report.bankViewsAgree, report.clientBalanced].filter((v) => v === true).length
-  const breaks = report.breaks ? Object.values(report.breaks).reduce((n, ids) => n + ids.count, 0) : null
-  const rejected = Object.entries(report.rejectionsByReason)
-  const facts: [string, string][] = [
-    ['€', `${euros(report.ledger.debitsCents)} moved · every debit has its credit`],
-    ['✕', `${count(report.ledger.rejected)} bad transfers caught by the rules`],
-  ]
-  if (report.ledgerDuplicatesAtLeast) facts.push(['↺', `≥ ${count(report.ledgerDuplicatesAtLeast)} redeliveries skipped by the ledger`])
-  for (const c of report.chaos) {
-    facts.push(['⚡', `ledger crashed at ${(c.offsetMs / MS_PER_SECOND).toFixed(1)} s (${c.instances.length} instances)`])
-  }
+export function Verdict({ report }: { report: PeriodReport }) {
+  const head = HEADLINE[report.verdict]
+  const breaks = lostOrDoubled(report)
+  const rejected = Object.entries(report.rejectionsByReason).filter(([, n]) => n > 0)
+  const examples = transferExamples(report)
+  const facts: [string, string][] = []
+  if (report.stats) facts.push(['€', `${t.bank.moved} ${euros(report.stats.postedAmountCents)}`])
+  if (report.ledger.poolPostings > 0) facts.push(['↔', t.report.poolPostings(count(report.ledger.poolPostings))])
+  for (const c of report.chaos) facts.push(['⚡', t.report.crashedAt(clock(c.at), c.instances.length)])
   return (
     <section className="card verdict" data-testid="verdict">
       <div className={`mark ${head.tone}`}>{head.mark}</div>
-      <h2>{head.title}</h2>
-      <div data-testid="verdict-line">{verdictLine(report)}</div>
-      <div className="hint">
-        {count(tps)} transfers/s for {durationSeconds} s
-      </div>
-      {report.reasons.length > 0 && (
-        <ul className="reasons" aria-label="Reasons">
-          {report.reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
+      <h2>{t.report.headline[report.verdict]}</h2>
+      {report.mismatches.length > 0 && (
+        <ul className="reasons" aria-label={t.report.mismatchesLabel}>
+          {report.mismatches.map((m) => (
+            <li key={m}>{t.report.mismatch[m]}</li>
           ))}
         </ul>
       )}
       <div className="bigs">
         <div className="big">
           <b>{count(report.gateway.accepted)}</b>
-          <span>transfers</span>
+          <span>{t.report.transfers}</span>
         </div>
         <div className="big">
-          <b className={breaks ? 'bad' : 'ok'}>{breaks === null ? '–' : count(breaks)}</b>
-          <span>lost or doubled</span>
+          <b className={breaks > 0 ? 'bad' : 'ok'} data-testid="lost-or-doubled">
+            {count(breaks)}
+          </b>
+          <span>{t.report.lostOrDoubled}</span>
         </div>
         <div className="big">
-          <b>{agree} of 3</b>
-          <span>independent records agree</span>
+          <b className={report.ledgerCheck.accountsOutOfBalance > 0 ? 'bad' : 'ok'}>
+            {report.ledgerCheck.accountsCompared ? count(report.ledgerCheck.accountsOutOfBalance) : '–'}
+          </b>
+          <span>{t.report.accountsOff}</span>
         </div>
       </div>
-      <ul className="facts">
-        {facts.map(([icon, text]) => (
-          <li key={text}>
-            <span className="icon">{icon}</span>
-            <span>{text}</span>
-          </li>
-        ))}
-      </ul>
+      {facts.length > 0 && (
+        <ul className="facts">
+          {facts.map(([icon, text]) => (
+            <li key={text}>
+              <span className="icon">{icon}</span>
+              <span>{text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {report.notes.map((note) => (
+        <p key={note} className="hint">
+          {t.report.note[note]}
+        </p>
+      ))}
       <details>
-        <summary>Details</summary>
-        <h4>Accounting invariants, checked after the run</h4>
+        <summary>{t.report.details}</summary>
+        <h4>{t.report.checksHeading}</h4>
         <div className="table-wrap">
           <table className="inv">
             <tbody>
@@ -137,58 +148,31 @@ export function Verdict({ report, tps, durationSeconds }: { report: RunReport; t
           </table>
         </div>
         {rejected.length > 0 && (
-          <p className="hint">Rejected by reason: {rejected.map(([reason, n]) => `${reason.toLowerCase().replaceAll('_', ' ')} ${count(n)}`).join(', ')}</p>
-        )}
-        {report.notes.map((note) => (
-          <p key={note} className="hint">
-            {note}
+          <p className="hint">
+            {t.report.rejectedByReason}: {rejected.map(([reason, n]) => `${t.bank.rejectReason[reason] ?? reason} ${count(n)}`).join(', ')}
           </p>
-        ))}
-        <h4>Guarantees</h4>
-        <div className="table-wrap">
-          <table className="guar">
-            <tbody>
-              <tr><td>Client → Gateway</td><td>idempotent requests: a repeat gets the same transfer</td></tr>
-              <tr><td>Gateway → Kafka</td><td>durable handoff: stored first, published from the outbox</td></tr>
-              <tr><td>Kafka → Ledger</td><td>at-least-once delivery: a message may come twice</td></tr>
-              <tr><td>Ledger booking</td><td>exactly-once effect: a repeat is skipped, a booking is one transaction</td></tr>
-              <tr><td>Reconciliation</td><td>detects divergence between clients, gateway and ledger</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <h4>Three sides of the run</h4>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr><th /><th>Sent</th><th>Accepted</th><th>Booked</th><th>Rejected</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Clients' journal</td>
-                <td>{report.client ? count(report.client.requested) : '–'}</td>
-                <td>{report.client ? count(report.client.acknowledged) : '–'}</td>
-                <td /><td />
-              </tr>
-              <tr>
-                <td>Gateway</td><td />
-                <td>{count(report.gateway.accepted)}</td>
-                <td>{count(report.gateway.posted)}</td>
-                <td>{count(report.gateway.rejected)}</td>
-              </tr>
-              <tr>
-                <td>Ledger</td><td /><td />
-                <td>{count(report.ledger.posted)}</td>
-                <td>{count(report.ledger.rejected)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        )}
+        {(examples.length > 0 || report.ledgerCheck.accountExamples.length > 0) && (
+          <>
+            <h4>{t.report.examplesHeading}</h4>
+            <ul className="examples" data-testid="examples">
+              {report.ledgerCheck.accountExamples.map((a) => (
+                <li key={`account-${a.accountNo}`}>{t.report.accountExample(a.accountNo, euros(a.balanceChangeCents), euros(a.journalCents))}</li>
+              ))}
+              {examples.map(([kind, ids]) => (
+                <li key={kind}>
+                  {kind}: <code>{ids.join(', ')}</code>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         <p className="hint">
-          These checks can say no:{' '}
+          {t.report.testsBefore}
           <a href={TESTS_URL} target="_blank" rel="noopener">
-            see the tests
-          </a>{' '}
-          where a lost, doubled or half-booked transfer makes them fail.
+            {t.report.testsLink}
+          </a>
+          {t.report.testsAfter}
         </p>
       </details>
     </section>

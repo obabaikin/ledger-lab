@@ -1,10 +1,7 @@
 package com.ledgerlab.ledger.kafka;
 
-import static com.ledgerlab.common.Observability.MDC_RUN_ID;
-
 import com.ledgerlab.common.TransferCommand;
 import com.ledgerlab.ledger.domain.TransferResult;
-import com.ledgerlab.ledger.metrics.RunDuplicates;
 import com.ledgerlab.ledger.service.LedgerService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -13,7 +10,6 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
@@ -24,21 +20,29 @@ import tools.jackson.databind.ObjectReader;
 public class TransferConsumer {
 
     public static final String LISTENER_ID = "transfers";
+    public static final String DUPLICATES_METRIC = "ledger.duplicates";
+    public static final String EXPIRED_METRIC = "ledger.transfers.expired";
 
     private static final Logger log = LoggerFactory.getLogger(TransferConsumer.class);
 
     private final LedgerService ledger;
-    private final RunDuplicates duplicates;
     private final ObjectReader reader;
     private final Counter posted;
     private final Counter rejected;
+    private final Counter duplicates;
+    private final Counter expired;
 
-    public TransferConsumer(LedgerService ledger, ObjectMapper objectMapper, RunDuplicates duplicates, MeterRegistry registry) {
+    public TransferConsumer(LedgerService ledger, ObjectMapper objectMapper, MeterRegistry registry) {
         this.ledger = ledger;
-        this.duplicates = duplicates;
         this.reader = objectMapper.readerFor(TransferCommand.class);
         this.posted = outcomeCounter(registry, "posted");
         this.rejected = outcomeCounter(registry, "rejected");
+        this.duplicates = Counter.builder(DUPLICATES_METRIC)
+            .description("Redeliveries the ledger skipped; a lower bound, what a killed instance counted is gone with it (ADR 0015)")
+            .register(registry);
+        this.expired = Counter.builder(EXPIRED_METRIC)
+            .description("Transfers delivered after the ledger dropped their period: not booked, their periods do not reconcile")
+            .register(registry);
     }
 
     // The id lets the readiness check find this container; without idIsGroup = false it would also replace the group id.
@@ -51,17 +55,9 @@ public class TransferConsumer {
                 commands.add(command);
             }
         }
-        var runIds = commands.stream().map(TransferCommand::runId).distinct().toList();
-        if (runIds.size() == 1) {
-            MDC.put(MDC_RUN_ID, runIds.getFirst().toString());
-        }
-        try {
-            var results = ledger.applyBatch(commands);
-            for (var i = 0; i < commands.size(); i++) {
-                count(commands.get(i), results.get(i));
-            }
-        } finally {
-            MDC.remove(MDC_RUN_ID);
+        var results = ledger.applyBatch(commands);
+        for (var i = 0; i < commands.size(); i++) {
+            count(commands.get(i), results.get(i));
         }
     }
 
@@ -79,9 +75,13 @@ public class TransferConsumer {
         switch (result) {
             case TransferResult.Posted() -> posted.increment();
             case TransferResult.Rejected(var reason) -> rejected.increment();
+            case TransferResult.Expired() -> {
+                expired.increment();
+                log.warn("Transfer {} accepted at {} is older than the ledger holds and was not booked", command.transferId(), command.acceptedAt());
+            }
             case TransferResult.AlreadyProcessed() -> {
-                duplicates.record(command.runId());
-                log.debug("Duplicate delivery ignored: run={} transfer={}", command.runId(), command.transferId());
+                duplicates.increment();
+                log.debug("Duplicate delivery ignored: transfer={}", command.transferId());
             }
         }
     }

@@ -6,24 +6,20 @@ import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
 public record TransferResultEvent(
-    UUID runId,
     UUID transferId,
     TransferOutcome outcome,
     @Nullable RejectReason rejectReason,
-    Instant processedAt
+    Instant processedAt,
+    Instant acceptedAt
 ) {
     public TransferResultEvent {
-        Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(transferId, "transferId");
         Objects.requireNonNull(outcome, "outcome");
         Objects.requireNonNull(processedAt, "processedAt");
+        Objects.requireNonNull(acceptedAt, "acceptedAt");
     }
 
     public String partitionKey() {
-        return partitionKey(runId, transferId);
-    }
-
-    public static String partitionKey(UUID runId, UUID transferId) {
-        return runId + ":" + transferId;
+        return transferId.toString();
     }
 }

@@ -1,29 +1,29 @@
 package com.ledgerlab.control;
 
-import static com.ledgerlab.control.RunFixtures.simulation;
-import static com.ledgerlab.control.http.ServiceHttp.forRun;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
-import com.ledgerlab.control.gateway.GatewayWarmUp;
-import com.ledgerlab.control.generator.GeneratorApi;
-import com.ledgerlab.control.ledger.LedgerReadiness;
-import com.ledgerlab.control.runs.Conductor;
-import com.ledgerlab.control.runs.RunQueue;
+import com.ledgerlab.control.availability.Availability;
+import com.ledgerlab.control.availability.FreshnessCollector;
+import com.ledgerlab.control.metrics.BankMetrics;
+import com.ledgerlab.control.metrics.PrometheusClient;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,12 +33,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.Testcontainers;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
 
 /** Control's queries against a real Prometheus scraping fake services: a canned answer cannot show what PromQL does (E97). */
+@TestPropertySource(properties = {
+    "control.series.ranges[0].range=1m", "control.series.ranges[0].step=1s", "control.series.ranges[0].window=5s", "control.series.default-range=1m"})
 class RealPrometheusTest extends IntegrationTest {
 
     private static final String LEDGER = "ledger";
@@ -57,20 +61,14 @@ class RealPrometheusTest extends IntegrationTest {
     private static final Duration TARGETS_DISCOVERED = Duration.ofSeconds(30);
     /** A sample is queryable once the next scrape came. */
     private static final int SCRAPES_TO_SETTLE = 2;
+    private static final Duration STARTS_POLL = Duration.ofMillis(500);
+    /** A chart has a value at the next instant of its grid after the samples. */
+    private static final Duration CHART_SETTLES = Duration.ofSeconds(15);
 
     static final FakeExporter exporter = new FakeExporter(JOBS);
     static final FakeExporter killedExporter = new FakeExporter(List.of(KILLED_LEDGER));
     static final FakeExporter gatewayExporter = new FakeExporter(List.of(GATEWAY));
-    /** A gateway instance the test makes unreachable by closing its exporter. */
-    static final FakeExporter unscrapedGateway = new FakeExporter(List.of(GATEWAY));
-
-    @Autowired Conductor conductor;
-    @Autowired RunQueue queue;
-    @Autowired LedgerReadiness readiness;
-    @Autowired GatewayWarmUp warmUp;
-
-    private record Running(UUID sessionId, UUID runId) {
-    }
+    static final FakeExporter secondGateway = new FakeExporter(List.of(GATEWAY));
 
     private record Target(String job, List<Integer> ports) {
     }
@@ -79,11 +77,11 @@ class RealPrometheusTest extends IntegrationTest {
         static final GenericContainer<?> CONTAINER = started();
 
         private static GenericContainer<?> started() {
-            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port, gatewayExporter.port, unscrapedGateway.port);
+            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port, gatewayExporter.port, secondGateway.port);
             var targets = new ArrayList<Target>();
             JOBS.forEach(it -> targets.add(new Target(it, List.of(exporter.port))));
             targets.add(new Target(KILLED_LEDGER, List.of(killedExporter.port)));
-            targets.add(new Target(GATEWAY, List.of(gatewayExporter.port, unscrapedGateway.port)));
+            targets.add(new Target(GATEWAY, List.of(gatewayExporter.port, secondGateway.port)));
             var jobs = targets.stream()
                 .map(target ->
                     "  - job_name: " + target.job() + "\n"
@@ -91,7 +89,7 @@ class RealPrometheusTest extends IntegrationTest {
                         + "    static_configs:\n"
                         + "      - targets: ["
                         + target.ports().stream().map(it -> "\"host.testcontainers.internal:" + it + "\"").collect(Collectors.joining(", ")) + "]\n"
-                        + "        " + (target.job().equals(NODE_EXPORTER) ? "labels: {}" : "labels: {lab_service: \"true\"}"))
+                        + "        labels: {" + labels(target) + "}")
                 .collect(Collectors.joining("\n"));
             var config = "global:\n  scrape_interval: " + SCRAPE_INTERVAL.toSeconds() + "s\n  scrape_timeout: 800ms\nscrape_configs:\n" + jobs + "\n";
             var container = new GenericContainer<>("prom/prometheus:v3.5.0")
@@ -109,6 +107,18 @@ class RealPrometheusTest extends IntegrationTest {
         }
     }
 
+    /** A job of one target is named as the chart's Prometheus names a pod, by its name; the exporter lacks the project's label. */
+    private static String labels(Target target) {
+        var labels = new ArrayList<String>();
+        if (!target.job().equals(NODE_EXPORTER)) {
+            labels.add("lab_service: \"true\"");
+        }
+        if (target.ports().size() == 1) {
+            labels.add("instance: \"" + target.job() + "\"");
+        }
+        return String.join(", ", labels);
+    }
+
     @DynamicPropertySource
     static void realPrometheus(DynamicPropertyRegistry registry) {
         registry.add(
@@ -116,37 +126,42 @@ class RealPrometheusTest extends IntegrationTest {
             () -> "http://" + RealPrometheus.CONTAINER.getHost() + ":" + RealPrometheus.CONTAINER.getMappedPort(PROMETHEUS_PORT));
     }
 
-    private Running running() {
-        var sessionId = sessionOf(invite());
-        var runId = UUID.fromString((String) start(sessionId).getBody().get("runId"));
-        queue.advance(true);
-        jdbc.sql("UPDATE runs SET state = 'RUNNING', started_at = clock_timestamp() WHERE run_id = :id").param("id", runId).update();
-        generator.answer("GET", forRun(GeneratorApi.SIMULATION_PATH, runId), 200, simulation(runId, "RUNNING"));
-        return new Running(sessionId, runId);
-    }
+    @Autowired PrometheusClient prometheusClient;
+    @Autowired FreshnessCollector collector;
+    @Autowired Availability availability;
+    @Autowired DatabaseClock clock;
 
-    private Map<?, ?> live(UUID sessionId, UUID runId) {
-        return Objects.requireNonNull((Map<?, ?>) getRun(sessionId, runId).getBody().get("live"));
+    private Map<Object, Map<?, ?>> podsByJob() {
+        conductor.tick();
+        var pods = new HashMap<Object, Map<?, ?>>();
+        ((List<?>) Objects.requireNonNull(get("/api/bank").getBody().get("pods"))).forEach(it -> pods.put(((Map<?, ?>) it).get("job"), (Map<?, ?>) it));
+        return pods;
     }
 
     private List<Object> upAndPartitions(Map<?, ?> pod) {
         return Arrays.asList(pod.get("up"), pod.get("partitions"));
     }
 
+    private List<Double> valuesOf(String name) {
+        var series = (List<?>) get("/api/bank/series").getBody().get("series");
+        return series.stream()
+            .map(it -> (Map<?, ?>) it)
+            .filter(it -> name.equals(it.get("name")))
+            .flatMap(it -> ((List<?>) it.get("values")).stream())
+            .filter(Objects::nonNull)
+            .map(it -> ((Number) it).doubleValue())
+            .toList();
+    }
+
     @Test
     @DisplayName("a ledger pod shows its partitions next to whether it answered, other services none")
     void a_ledger_pod_shows_its_partitions_next_to_whether_it_answered_other_services_none() throws Exception {
-        var run = running();
-        var sessionId = run.sessionId();
-        var runId = run.runId();
         exporter.serve(LEDGER, "ledger_kafka_assigned_partitions 3");
         exporter.serve(SECOND_LEDGER, "");
         exporter.awaitScrapes(SCRAPES_TO_SETTLE);
 
-        conductor.tick();
+        var pods = podsByJob();
 
-        var pods = new HashMap<Object, Map<?, ?>>();
-        ((List<?>) live(sessionId, runId).get("pods")).forEach(it -> pods.put(((Map<?, ?>) it).get("job"), (Map<?, ?>) it));
         assertThat(upAndPartitions(Objects.requireNonNull(pods.get(LEDGER)))).isEqualTo(Arrays.asList(true, 3));
         assertThat(upAndPartitions(Objects.requireNonNull(pods.get(SECOND_LEDGER)))).isEqualTo(Arrays.asList(true, null));
     }
@@ -154,67 +169,115 @@ class RealPrometheusTest extends IntegrationTest {
     @Test
     @DisplayName("the pods are the project's services only, not the exporters Prometheus scrapes beside them")
     void the_pods_are_the_projects_services_only_not_the_exporters_Prometheus_scrapes_beside_them() throws Exception {
-        var run = running();
-        var sessionId = run.sessionId();
-        var runId = run.runId();
         exporter.serve(LEDGER, "");
         exporter.serve(SECOND_LEDGER, "");
         exporter.serve(NODE_EXPORTER, "node_load1 0.5");
         exporter.awaitScrapes(SCRAPES_TO_SETTLE);
 
-        conductor.tick();
-
-        assertThat(((List<?>) live(sessionId, runId).get("pods")).stream().<Object>map(it -> ((Map<?, ?>) it).get("job")).toList())
-            .contains(LEDGER, SECOND_LEDGER).doesNotContain(NODE_EXPORTER);
+        assertThat(podsByJob().keySet()).contains(LEDGER, SECOND_LEDGER).doesNotContain(NODE_EXPORTER);
     }
 
     @Test
-    @DisplayName("the ledger's duplicates of a run are summed over its instances, apart from a run beside it")
-    void the_ledgers_duplicates_of_a_run_are_summed_over_its_instances_apart_from_a_run_beside_it() throws Exception {
-        var run = running();
-        var sessionId = run.sessionId();
-        var runId = run.runId();
-        var other = UUID.randomUUID();
-        exporter.serve(LEDGER, "ledger_duplicates_total{run=\"" + runId + "\"} 4\nledger_duplicates_total{run=\"" + other + "\"} 50");
-        exporter.serve(SECOND_LEDGER, "ledger_duplicates_total{run=\"" + runId + "\"} 3");
-        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
-
-        conductor.tick();
-
-        assertThat(live(sessionId, runId).get("ledgerDuplicatesAtLeast")).isEqualTo(7);
-    }
-
-    @Test
-    @DisplayName("a killed instance's partitions stop counting, so the ledger is not ready until the live ones hold all")
-    void a_killed_instances_partitions_stop_counting_so_the_ledger_is_not_ready_until_the_live_ones_hold_all() throws Exception {
-        exporter.serve(LEDGER, "ledger_kafka_assigned_partitions 2");
-        exporter.serve(SECOND_LEDGER, "ledger_kafka_assigned_partitions 2");
-        killedExporter.serve(KILLED_LEDGER, "ledger_kafka_assigned_partitions " + (props.ledger().transferPartitions() - 4));
+    @DisplayName("a killed instance is shown as down")
+    void a_killed_instance_is_shown_as_down() throws Exception {
+        killedExporter.serve(KILLED_LEDGER, "ledger_kafka_assigned_partitions 2");
         killedExporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(readiness.isReady()).isTrue();
+        assertThat(Objects.requireNonNull(podsByJob().get(KILLED_LEDGER)).get("up")).isEqualTo(true);
 
         killedExporter.close();
         exporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(readiness.isReady()).isFalse();
 
-        exporter.serve(SECOND_LEDGER, "ledger_kafka_assigned_partitions " + (props.ledger().transferPartitions() - 2));
-        exporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(readiness.isReady()).isTrue();
+        assertThat(Objects.requireNonNull(podsByJob().get(KILLED_LEDGER)).get("up")).isEqualTo(false);
     }
 
     @Test
-    @DisplayName("a gateway instance Prometheus cannot scrape holds the runs back, though the other one is warm")
-    void a_gateway_instance_Prometheus_cannot_scrape_holds_the_runs_back_though_the_other_one_is_warm() throws Exception {
-        gatewayExporter.serve(GATEWAY, "gateway_warm_up_complete 1");
-        unscrapedGateway.serve(GATEWAY, "gateway_warm_up_complete 1");
-        unscrapedGateway.awaitScrapes(SCRAPES_TO_SETTLE);
-        gatewayExporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(warmUp.check()).isTrue();
+    @DisplayName("the charts show the rate of accepted transfers over the gateway's instances and p50 and p99 from its histogram in milliseconds")
+    void the_charts_show_the_rate_of_accepted_transfers_over_the_gateways_instances_and_p50_and_p99_from_its_histogram_in_milliseconds()
+        throws Exception {
+        for (var round = 1; round <= 4; round++) {
+            var metrics = "gateway_transfers_total{outcome=\"accepted\"} " + round * 110 + "\ngateway_transfers_total{outcome=\"refused\"} 7\n"
+                + histogram(round * 100, round * 100, round * 110);
+            gatewayExporter.serve(GATEWAY, metrics);
+            secondGateway.serve(GATEWAY, metrics);
+            gatewayExporter.awaitScrapes(SCRAPES_TO_SETTLE);
+        }
 
-        unscrapedGateway.close();
-        gatewayExporter.awaitScrapes(SCRAPES_TO_SETTLE);
-        assertThat(warmUp.check()).isFalse();
+        var deadline = Instant.now().plus(CHART_SETTLES);
+        while (valuesOf("ACCEPTED_PER_SECOND").stream().noneMatch(it -> it > 0) || valuesOf("BANK_LATENCY_P99_MS").isEmpty()) {
+            assertThat(Instant.now()).as("the charts have values").isBefore(deadline);
+            Thread.sleep(POLL);
+        }
+
+        assertThat(valuesOf("BANK_LATENCY_P50_MS").getLast()).isCloseTo(55.0, within(0.001));
+        assertThat(valuesOf("BANK_LATENCY_P99_MS").getLast()).isCloseTo(2000.0, within(0.001));
+        assertThat(valuesOf("BUSY_PER_SECOND")).allMatch(it -> it == 0.0);
+        var transfers = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.TRANSFERS_IN_MINUTE))).number();
+        var fast = single(Objects.requireNonNull(prometheusClient.query(
+            BankMetrics.FAST_IN_MINUTE.formatted(BankMetrics.bucketBound(Duration.ofSeconds(2)))))).number();
+        assertThat(transfers).isPositive();
+        assertThat(fast / transfers).isCloseTo(100.0 / 110, within(0.001));
+    }
+
+    /** As the gateway's timer publishes it, with a bucket at 2 s: {@code fast} up to 0.1 s, {@code withinThreshold} up to 2 s. */
+    private static String histogram(long fast, long withinThreshold, long count) {
+        return """
+            # TYPE gateway_transfer_latency_seconds histogram
+            gateway_transfer_latency_seconds_bucket{le="0.1"} %d
+            gateway_transfer_latency_seconds_bucket{le="2.0"} %d
+            gateway_transfer_latency_seconds_bucket{le="+Inf"} %d
+            gateway_transfer_latency_seconds_count %d
+            gateway_transfer_latency_seconds_sum %d
+            """.formatted(fast, withinThreshold, count, count, count);
+    }
+
+    @Test
+    @DisplayName("a crashed pod started again leaves the crash outside, an exporter's restart too; a restart of another pod makes it judged")
+    void a_crashed_pod_started_again_leaves_the_crash_outside_an_exporters_restart_too_a_restart_of_another_pod_makes_it_judged()
+        throws Exception {
+        ReflectionTestUtils.setField(collector, "startsReadUpTo", null);
+        var crashedAt = clock.now().minusSeconds(30);
+        exporter.serve(NODE_EXPORTER, startedAt(crashedAt.minus(Duration.ofHours(1))));
+        started(LEDGER, crashedAt.minus(Duration.ofHours(1)));
+        started(SECOND_LEDGER, crashedAt.minus(Duration.ofHours(1)));
+        jdbc.sql("INSERT INTO chaos_events (at, instances) VALUES (:at, ARRAY[:crashed])")
+            .param("at", Timestamp.from(crashedAt))
+            .param("crashed", LEDGER)
+            .update();
+        jdbc.sql("INSERT INTO availability_minutes (minute, total, errors, busy, transfers, slow) VALUES (:minute, 100, 50, 0, 100, 50)")
+            .param("minute", Timestamp.from(crashedAt.truncatedTo(ChronoUnit.MINUTES)))
+            .update();
+
+        exporter.serve(NODE_EXPORTER, startedAt(crashedAt.plusSeconds(20)));
+        started(LEDGER, crashedAt.plusSeconds(20));
+
+        assertThat(availability.slo(clock.now()).outsideMinutes()).isEqualTo(1);
+        assertThat(kept(NODE_EXPORTER, crashedAt.plusSeconds(20))).isFalse();
+        started(SECOND_LEDGER, crashedAt.plusSeconds(25));
+        assertThat(availability.slo(clock.now()).outsideMinutes()).isZero();
+        assertThat(availability.slo(clock.now()).badMinutes()).isEqualTo(1);
+    }
+
+    private static String startedAt(Instant at) {
+        return "process_start_time_seconds " + at.toEpochMilli() / 1000.0;
+    }
+
+    /** The exporter's scrapes count every job's, so the collector reads until it has seen the start. */
+    private void started(String job, Instant at) throws InterruptedException {
+        exporter.serve(job, startedAt(at));
+        var deadline = Instant.now().plus(CHART_SETTLES);
+        while (Instant.now().isBefore(deadline) && !kept(job, at)) {
+            collector.collect(clock.now());
+            Thread.sleep(STARTS_POLL);
+        }
+        assertThat(kept(job, at)).as("the start of %s is kept", job).isTrue();
+    }
+
+    private boolean kept(String job, Instant at) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM service_starts WHERE instance = :job AND started_at = :at)")
+            .param("job", job)
+            .param("at", Timestamp.from(at.truncatedTo(ChronoUnit.MILLIS)))
+            .query(Boolean.class)
+            .single();
     }
 
     /** Serves each job's metrics as text and counts the scrapes, so a test knows Prometheus has seen what it serves. */

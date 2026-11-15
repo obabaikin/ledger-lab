@@ -8,8 +8,8 @@ import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
-import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -21,7 +21,7 @@ public final class ServiceHttp {
     private static final String CONTENT_TYPE = "Content-Type";
     private static final String JSON = "application/json";
     private static final String ERROR_FIELD = "error";
-    private static final String RUN_ID_VARIABLE = "{runId}";
+    private static final String PERIOD_START_VARIABLE = "{periodStart}";
 
     private final String baseUrl;
     private final Duration timeout;
@@ -41,8 +41,8 @@ public final class ServiceHttp {
         this.http = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
 
-    public static String forRun(String path, UUID runId) {
-        return path.replace(RUN_ID_VARIABLE, runId.toString());
+    public static String forPeriod(String path, Instant periodStart) {
+        return path.replace(PERIOD_START_VARIABLE, periodStart.toString());
     }
 
     public <T> Reply<T> call(String method, String path, Class<T> answer) throws InterruptedException {
@@ -104,7 +104,7 @@ public final class ServiceHttp {
         try {
             var error = objectMapper.readTree(body).get(ERROR_FIELD);
             return error == null ? null : error.asString();
-        } catch (Throwable e) {
+        } catch (JacksonException e) {
             return null;
         }
     }

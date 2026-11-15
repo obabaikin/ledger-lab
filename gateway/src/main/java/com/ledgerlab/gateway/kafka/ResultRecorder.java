@@ -1,7 +1,5 @@
 package com.ledgerlab.gateway.kafka;
 
-import static com.ledgerlab.common.Observability.MDC_RUN_ID;
-
 import com.ledgerlab.gateway.service.LedgerResult;
 import com.ledgerlab.gateway.service.TransferService;
 import java.util.ArrayList;
@@ -9,7 +7,6 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
@@ -37,15 +34,7 @@ public class ResultRecorder {
                 results.add(result);
             }
         }
-        var runIds = results.stream().map(LedgerResult::runId).distinct().toList();
-        if (runIds.size() == 1) {
-            MDC.put(MDC_RUN_ID, runIds.getFirst().toString());
-        }
-        try {
-            service.recordResults(results);
-        } finally {
-            MDC.remove(MDC_RUN_ID);
-        }
+        service.recordResults(results);
     }
 
     // In a batch an exception would fail the whole poll; a message that can never be read is skipped on its own.

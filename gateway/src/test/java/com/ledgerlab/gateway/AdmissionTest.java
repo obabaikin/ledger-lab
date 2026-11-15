@@ -37,24 +37,23 @@ class AdmissionTest extends IntegrationTest {
             return call.callRealMethod();
         }).when(service).acceptAll(anyList());
         var refusedBefore = registry.counter("gateway.transfers", "outcome", "refused").count();
-        var runId = UUID.randomUUID();
         var refusedId = UUID.randomUUID();
 
         try (var pool = Executors.newSingleThreadExecutor()) {
-            var first = pool.submit(() -> submit(bodyOfRun(runId)));
+            var first = pool.submit(() -> submit(body()));
             await().atMost(Duration.ofSeconds(10)).until(() -> inside.get() == 1);
 
-            var refused = submit(body(refusedId, runId));
+            var refused = submit(body(refusedId));
 
             assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
             assertThat(refused.getBody().get("error")).isEqualTo(GatewayErrors.BUSY);
             assertThat(refused.getHeaders().getFirst("Retry-After")).isEqualTo("1");
             assertThat(registry.counter("gateway.transfers", "outcome", "refused").count()).isEqualTo(refusedBefore + 1);
-            assertThat(get("/v1/transfers/" + refusedId).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(status(refusedId).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 
             held.countDown();
             assertThat(first.get().getStatusCode().is2xxSuccessful()).isTrue();
         }
-        assertThat(submit(body(refusedId, runId)).getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(submit(body(refusedId)).getStatusCode().is2xxSuccessful()).isTrue();
     }
 }

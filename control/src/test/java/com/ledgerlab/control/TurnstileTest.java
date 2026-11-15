@@ -1,6 +1,6 @@
 package com.ledgerlab.control;
 
-import static com.ledgerlab.control.RunFixtures.mapOf;
+import static com.ledgerlab.control.Fixtures.mapOf;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ledgerlab.control.api.ControlErrors;

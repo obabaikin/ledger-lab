@@ -7,9 +7,9 @@ BOOTSTRAP="${KAFKA_BOOTSTRAP:-localhost:9092}"
 PARTITIONS="${KAFKA_PARTITIONS:-6}"
 REPLICAS="${KAFKA_REPLICAS:-1}"
 TOPICS="transfers transfer-results"
-# Shorter than control's cleanup of a finished run (24 h): a consumer group that reads the topics from the start
-# again finds only events of runs that still exist, and their handling is idempotent.
-RETENTION_MS="${KAFKA_RETENTION_MS:-43200000}"
+# As long as the services hold a period's transfers (4 h, ADR 0022): a command read again later is past the ledger's
+# retention and is not booked.
+RETENTION_MS="${KAFKA_RETENTION_MS:-14400000}"
 # Retention deletes whole segments only; a segment rolls this often.
 SEGMENT_MS="${KAFKA_SEGMENT_MS:-3600000}"
 KAFKA_BIN="${KAFKA_BIN:-/opt/kafka/bin}"

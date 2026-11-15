@@ -74,14 +74,32 @@ gateway:
     duration: 5s
     # All services start cold together after a deploy: 5 s got 519 to 1312 of the 2000 rounds (measured on the server).
     max-duration: 90s
+  periods:
+    # The same in every service: they cut time at the same instants.
+    length: 60m
+    # How long a period's transfers are held after it ended, and how long a repeated key gets the first answer.
+    retention: 4h
+    # Every connection that reads a table keeps a cache entry per partition: 313 partitions took 21 MB a connection and
+    # Postgres out of its memory (k3d, 10-minute periods). Maintenance creates them every minute.
+    partitions-ahead: 6h
+    maintenance-interval: 1m
+    # Creating or dropping a partition holds up every submission while it waits for the table.
+    lock-timeout: 2s
+    # A minute's expired keys at a time: a period's at once (1.44 million at 400 TPS) would be a burst of WAL and dead rows.
+    key-cleanup-interval: 1m
+    # After the warm-up (warm-up.max-duration).
+    key-cleanup-first-delay: 5m
+    key-cleanup-batch: 10000
+    # Rows left outside the partitions are deleted this many a statement: one long delete would hold up another instance's
+    # partition change, and every insert queued behind it.
+    unpartitioned-delete-batch: 10000
+  latency:
+    # The same value as control's control.freshness.threshold, which counts the transfers slower than it.
+    slo-threshold: 2s
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every controller-local error handler is added to every operation.
   override-with-generic-response: false
-
-logging:
-  pattern:
-    correlation: "[run=%X{runId:-}] "
 
 management:
   endpoints:

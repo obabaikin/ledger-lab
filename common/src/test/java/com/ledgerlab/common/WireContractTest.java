@@ -18,6 +18,9 @@ import tools.jackson.databind.ObjectMapper;
  */
 class WireContractTest {
 
+    private static final Instant ACCEPTED_AT = Instant.parse("2026-11-10T10:00:00Z");
+    private static final Instant PROCESSED_AT = Instant.parse("2026-11-10T10:00:01Z");
+
     private final ObjectMapper mapper = new ObjectMapper();
 
     private Set<String> fieldsOf(Object value) {
@@ -26,64 +29,70 @@ class WireContractTest {
 
     @Test
     void a_transfer_command_carries_these_fields() {
-        var command = new TransferCommand(UUID.randomUUID(), UUID.randomUUID(), 1, 2, 100, Instant.now());
+        var command = new TransferCommand(UUID.randomUUID(), 1, 2, 100, ACCEPTED_AT);
 
-        assertThat(fieldsOf(command)).containsExactlyInAnyOrder(
-            "runId", "transferId", "fromAccount", "toAccount", "amountCents", "createdAt");
+        assertThat(fieldsOf(command)).containsExactlyInAnyOrder("transferId", "fromAccount", "toAccount", "amountCents", "acceptedAt");
     }
 
     @Test
     void a_result_event_carries_these_fields() {
-        var event = new TransferResultEvent(
-            UUID.randomUUID(), UUID.randomUUID(), TransferOutcome.REJECTED, RejectReason.SAME_ACCOUNT, Instant.now());
+        var event = new TransferResultEvent(UUID.randomUUID(), TransferOutcome.REJECTED, RejectReason.SAME_ACCOUNT, PROCESSED_AT, ACCEPTED_AT);
 
-        assertThat(fieldsOf(event)).containsExactlyInAnyOrder("runId", "transferId", "outcome", "rejectReason", "processedAt");
+        assertThat(fieldsOf(event)).containsExactlyInAnyOrder("transferId", "outcome", "rejectReason", "processedAt", "acceptedAt");
     }
 
     @Test
     void outcomes_and_reject_reasons_travel_by_these_names() {
         assertThat(Arrays.stream(TransferOutcome.values()).map(Enum::name)).containsExactly("POSTED", "REJECTED");
         assertThat(Arrays.stream(RejectReason.values()).map(Enum::name)).containsExactly(
-            "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS", "DAILY_LIMIT_EXCEEDED");
+            "INVALID_AMOUNT", "SAME_ACCOUNT", "UNKNOWN_ACCOUNT", "BLOCKED_ACCOUNT", "INSUFFICIENT_FUNDS");
+    }
+
+    @Test
+    void transfers_of_one_sender_share_a_partition_key() {
+        var first = new TransferCommand(UUID.randomUUID(), 7, 2, 100, ACCEPTED_AT);
+        var second = new TransferCommand(UUID.randomUUID(), 7, 3, 500, PROCESSED_AT);
+        var other = new TransferCommand(UUID.randomUUID(), 8, 2, 100, ACCEPTED_AT);
+
+        assertThat(first.partitionKey()).isEqualTo(second.partitionKey()).isNotEqualTo(other.partitionKey());
     }
 
     @Test
     void a_result_event_written_by_hand_reads_back() {
-        var runId = UUID.randomUUID();
         var transferId = UUID.randomUUID();
         var json = """
-            {"runId":"%s","transferId":"%s","outcome":"REJECTED","rejectReason":"BLOCKED_ACCOUNT","processedAt":"2026-10-11T10:00:00Z"}"""
-            .formatted(runId, transferId);
+            {"transferId":"%s","outcome":"REJECTED","rejectReason":"BLOCKED_ACCOUNT","processedAt":"2026-11-10T10:00:01Z","acceptedAt":"2026-11-10T10:00:00Z"}"""
+            .formatted(transferId);
 
         var event = mapper.readValue(json, TransferResultEvent.class);
 
-        assertThat(event).isEqualTo(new TransferResultEvent(
-            runId, transferId, TransferOutcome.REJECTED, RejectReason.BLOCKED_ACCOUNT, Instant.parse("2026-10-11T10:00:00Z")));
+        assertThat(event).isEqualTo(new TransferResultEvent(transferId, TransferOutcome.REJECTED, RejectReason.BLOCKED_ACCOUNT, PROCESSED_AT, ACCEPTED_AT));
     }
 
     @Test
     void a_message_without_a_required_field_is_unreadable_and_not_read_as_an_empty_value() {
-        var command = """
-            {"runId":"%s","fromAccount":1,"toAccount":2,"amountCents":100,"createdAt":"2026-10-11T10:00:00Z"}"""
-            .formatted(UUID.randomUUID());
-        var event = """
-            {"runId":"%s","transferId":"%s","outcome":null,"processedAt":"2026-10-11T10:00:00Z"}"""
-            .formatted(UUID.randomUUID(), UUID.randomUUID());
-
+        var withoutId = """
+            {"fromAccount":1,"toAccount":2,"amountCents":100,"acceptedAt":"2026-11-10T10:00:00Z"}""";
         var withoutAmount = """
-            {"runId":"%s","transferId":"%s","fromAccount":1,"toAccount":2,"createdAt":"2026-10-11T10:00:00Z"}"""
-            .formatted(UUID.randomUUID(), UUID.randomUUID());
+            {"transferId":"%s","fromAccount":1,"toAccount":2,"acceptedAt":"2026-11-10T10:00:00Z"}""".formatted(UUID.randomUUID());
+        var withoutAcceptedAt = """
+            {"transferId":"%s","fromAccount":1,"toAccount":2,"amountCents":100}""".formatted(UUID.randomUUID());
+        var eventWithoutOutcome = """
+            {"transferId":"%s","outcome":null,"processedAt":"2026-11-10T10:00:01Z","acceptedAt":"2026-11-10T10:00:00Z"}""".formatted(UUID.randomUUID());
+        var eventWithoutAcceptedAt = """
+            {"transferId":"%s","outcome":"POSTED","processedAt":"2026-11-10T10:00:01Z"}""".formatted(UUID.randomUUID());
 
-        assertThatThrownBy(() -> mapper.readValue(command, TransferCommand.class)).isInstanceOf(JacksonException.class);
+        assertThatThrownBy(() -> mapper.readValue(withoutId, TransferCommand.class)).isInstanceOf(JacksonException.class);
         assertThatThrownBy(() -> mapper.readValue(withoutAmount, TransferCommand.class)).isInstanceOf(JacksonException.class);
-        assertThatThrownBy(() -> mapper.readValue(event, TransferResultEvent.class)).isInstanceOf(JacksonException.class);
+        assertThatThrownBy(() -> mapper.readValue(withoutAcceptedAt, TransferCommand.class)).isInstanceOf(JacksonException.class);
+        assertThatThrownBy(() -> mapper.readValue(eventWithoutOutcome, TransferResultEvent.class)).isInstanceOf(JacksonException.class);
+        assertThatThrownBy(() -> mapper.readValue(eventWithoutAcceptedAt, TransferResultEvent.class)).isInstanceOf(JacksonException.class);
     }
 
     @Test
     void a_result_event_without_a_reject_reason_reads_with_none() {
         var json = """
-            {"runId":"%s","transferId":"%s","outcome":"POSTED","processedAt":"2026-10-11T10:00:00Z"}"""
-            .formatted(UUID.randomUUID(), UUID.randomUUID());
+            {"transferId":"%s","outcome":"POSTED","processedAt":"2026-11-10T10:00:01Z","acceptedAt":"2026-11-10T10:00:00Z"}""".formatted(UUID.randomUUID());
 
         assertThat(mapper.readValue(json, TransferResultEvent.class).rejectReason()).isNull();
     }

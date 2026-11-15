@@ -2,9 +2,11 @@ import { useEffect, useRef } from 'react'
 
 export type Flow = { requested: number; accepted: number; finished: number; rejected: number; acknowledged: number }
 
+export const NO_FLOW = [0, 0, 0, 0, 0, 0, 0]
+
 /** Per second, along the wires in the diagram's order: out to the ledger, the bin, then the way back. */
 export function flowRates(prev: Flow | null, cur: Flow | null, seconds: number): number[] {
-  if (prev === null || cur === null || seconds <= 0) return WIRE_COUNT_ZEROS
+  if (prev === null || cur === null || seconds <= 0) return NO_FLOW
   const per = (key: keyof Flow) => Math.max(0, cur[key] - prev[key]) / seconds
   return [per('requested'), per('accepted'), per('finished'), per('finished'), per('rejected'), per('finished'), per('acknowledged')]
 }
@@ -21,9 +23,8 @@ export function stopLedgerWires(rates: number[], crashAt: number | null, interva
   return rates.map((rate, wire) => (LEDGER_WIRES.has(wire) ? 0 : rate))
 }
 
-const WIRE_COUNT_ZEROS = [0, 0, 0, 0, 0, 0, 0]
 const SVG_NS = 'http://www.w3.org/2000/svg'
-export const DOT_TRAVEL_MS = 600
+const DOT_TRAVEL_MS = 600
 const RATE_CAP = 2000
 /** Runs reach 2000 TPS: at that rate a wire still shows single dots, not a crowd. */
 const DOTS_PER_THOUSAND = 24
@@ -89,6 +90,8 @@ export function FlowDots({ wires, rates }: { wires: string[]; rates: number[] })
       cancelAnimationFrame(frame)
       dots.forEach((d) => d.el.remove())
     }
+    // The parent builds a new array on every render; the effect restarts only when the paths themselves change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wires.join()])
 
   return <g ref={layer} />

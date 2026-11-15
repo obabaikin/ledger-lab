@@ -17,8 +17,8 @@ public class OpenApiConfig {
     public OpenAPI controlApi() {
         return new OpenAPI().info(new Info()
             .title("Ledger Lab control API")
-            .version("1")
-            .description("Invite sessions and the run queue, for the control page."));
+            .version("2")
+            .description("The bank's state, periods and charts, and invite sessions, for the control page."));
     }
 
     /** springdoc does not read the types' nullability: without this every field of the page's types would be optional (ADR 0014). */

@@ -22,11 +22,12 @@ public class ChaosRepository {
         this.jdbc = jdbc;
     }
 
-    public void lock() {
-        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:name, 0))")
+    /** False at once when another press holds the lock; held until this transaction ends. */
+    public boolean tryLock() {
+        return jdbc.sql("SELECT pg_try_advisory_xact_lock(hashtextextended(:name, 0))")
             .param("name", CHAOS_LOCK)
-            .query(rs -> {
-            });
+            .query(Boolean.class)
+            .single();
     }
 
     public @Nullable Instant lastAt() {
@@ -47,6 +48,14 @@ public class ChaosRepository {
     public List<ChaosEvent> since(Instant from) {
         return jdbc.sql("SELECT at, instances FROM chaos_events WHERE at >= :from ORDER BY at")
             .param("from", Timestamp.from(from))
+            .query((rs, rowNum) -> toEvent(rs))
+            .list();
+    }
+
+    public List<ChaosEvent> between(Instant from, Instant to) {
+        return jdbc.sql("SELECT at, instances FROM chaos_events WHERE at >= :from AND at < :to ORDER BY at")
+            .param("from", Timestamp.from(from))
+            .param("to", Timestamp.from(to))
             .query((rs, rowNum) -> toEvent(rs))
             .list();
     }

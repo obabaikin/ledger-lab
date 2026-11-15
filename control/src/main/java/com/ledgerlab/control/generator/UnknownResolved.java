@@ -1,10 +1,7 @@
 package com.ledgerlab.control.generator;
 
-import java.util.Objects;
+import io.swagger.v3.oas.annotations.media.Schema;
 
-public record UnknownResolved(TransferIds accepted, TransferIds notAccepted) {
-    public UnknownResolved {
-        Objects.requireNonNull(accepted, "accepted");
-        Objects.requireNonNull(notAccepted, "notAccepted");
-    }
+@Schema(description = "Transfers the clients did not know the outcome of, settled by asking the bank.")
+public record UnknownResolved(long accepted, long notAccepted) {
 }

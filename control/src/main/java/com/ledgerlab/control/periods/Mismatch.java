@@ -1,0 +1,10 @@
+package com.ledgerlab.control.periods;
+
+public enum Mismatch {
+    ENTRIES_CHANGED_AFTER_CLOSE,
+    BANK_VIEWS_DISAGREE,
+    LEDGER_CHECK_FAILED,
+    BOOKS_OUT_OF_BALANCE,
+    CLIENT_JOURNAL_DISAGREES,
+    STATEMENT_NOT_FINAL,
+}

@@ -1,99 +1,80 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { RUN_ID, report } from './test/fakeControl'
-import { Verdict, verdictLine } from './Verdict'
+import { clock } from './format'
+import { report } from './test/fakeControl'
+import { en } from './texts/en'
+import { Verdict } from './Verdict'
 
-describe('verdict line', () => {
-  it('says what the bank accepted of what the clients sent and how fast it answered, from the report', () => {
-    expect(verdictLine(report())).toBe('Accepted 995 of 1,000 sent (99.5 %) · gateway - ledger p50 0.01 s / p99 0.48 s')
-  })
+const check = (rule: string) => screen.getByLabelText(new RegExp(`^${rule.replace(/[()+=Σ]/g, '.')}: `))
 
-  it('shows a dash for the clients\' side when the client was lost', () => {
-    expect(verdictLine(report({ client: null, bankLatencyP99Ms: null }))).toBe('Accepted 995 of — sent (—) · gateway - ledger p50 0.01 s / p99 —')
-  })
+describe('report of a period', () => {
+  it('shows BALANCED with the sums of the books and every check that ran passed', () => {
+    render(<Verdict report={report({ stats: { periodStart: '', at: '', accepted: 995, posted: 980, rejected: 15, commandsSeen: 995, postedAmountCents: 98_000, rejectionsByReason: {} } })} />)
 
-  it('stands under the verdict word', () => {
-    render(<Verdict report={report({ result: 'BREAKS' })} tps={1000} durationSeconds={30} />)
-    expect(screen.getByTestId('verdict-line')).toHaveTextContent('Accepted 995 of 1,000 sent')
-  })
-})
-
-describe('verdict', () => {
-  it('shows BALANCED with the sums of the books and every check passed', () => {
-    render(<Verdict report={report()} tps={1000} durationSeconds={30} />)
-
-    expect(screen.getByText('Every cent accounted for')).toBeInTheDocument()
+    expect(screen.getByText(en.report.headline.BALANCED)).toBeInTheDocument()
     expect(screen.getByText('€980.00 = €980.00')).toBeInTheDocument()
     expect(screen.getByText('€100,000.00 = €100,000.00')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Reasons')).not.toBeInTheDocument()
+    expect(screen.getByText('995 = 980 + 15')).toBeInTheDocument()
+    expect(screen.queryByLabelText(en.report.mismatchesLabel)).not.toBeInTheDocument()
     expect(screen.queryByText('✗')).not.toBeInTheDocument()
+    expect(screen.getByTestId('lost-or-doubled')).toHaveTextContent('0')
   })
 
-  it('shows BREAKS with ✗ at the failed check of the books', () => {
+  it('shows MISMATCH with every disagreement in words and the ids of the transfers as examples', () => {
     render(
       <Verdict
         report={report({
-          result: 'BREAKS',
-          ledgerBalanced: false,
-          ledgerFailedChecks: ['TOTAL_BALANCE_CONSERVED'],
-          ledger: { posted: 980, rejected: 15, openingTotalCents: 10_000_000, balanceTotalCents: 9_999_900, debitsCents: 98_000, creditsCents: 98_000 },
+          verdict: 'MISMATCH',
+          mismatches: ['CLIENT_JOURNAL_DISAGREES'],
+          client: {
+            ...report().client,
+            balanced: false,
+            breaks: { ...report().client.breaks, notInJournal: { count: 2, transferIds: ['t-1', 't-2'] } },
+          },
         })}
-        tps={1000}
-        durationSeconds={30}
       />,
     )
 
-    expect(screen.getByText('The records do not agree')).toBeInTheDocument()
-    expect(screen.getByLabelText('Σ balances before = after: ✗')).toBeInTheDocument()
-    expect(screen.getByLabelText('Σ debits = Σ credits: ✓')).toBeInTheDocument()
+    expect(screen.getByText(en.report.headline.MISMATCH)).toBeInTheDocument()
+    expect(within(screen.getByLabelText(en.report.mismatchesLabel)).getByText(en.report.mismatch.CLIENT_JOURNAL_DISAGREES)).toBeInTheDocument()
+    expect(screen.getByTestId('lost-or-doubled')).toHaveTextContent('2')
+    expect(check(en.report.clientsAgree)).toHaveTextContent('✗')
+    expect(screen.getByTestId('examples')).toHaveTextContent(`${en.report.breaks.notInJournal}: t-1, t-2`)
   })
 
-  it('shows the projection of the bank\'s events as a check when it matches the books', () => {
-    const stats = {
-      runId: RUN_ID,
-      at: '2026-10-12T09:01:05Z',
-      bankLatency: { p50Ms: null, p99Ms: null },
-      totals: { accepted: 995, posted: 980, rejected: 15, postedAmountCents: 98_000, commandsSeen: 995, inFlight: 0, rejectedByReason: {} },
-      series: [],
+  it('names the account whose balance changed past its journal', () => {
+    const ledgerCheck = {
+      ...report().ledgerCheck,
+      balanced: false,
+      failedChecks: ['EVERY_ACCOUNT_MATCHES_JOURNAL' as const],
+      accountsOutOfBalance: 1,
+      accountExamples: [{ accountNo: 4711, balanceChangeCents: 500, journalCents: 0 }],
     }
-    render(<Verdict report={report({ stats, projectionMatchesBooks: true })} tps={1000} durationSeconds={30} />)
+    render(<Verdict report={report({ verdict: 'MISMATCH', mismatches: ['LEDGER_CHECK_FAILED'], ledgerCheck })} />)
 
-    expect(screen.getByLabelText("bank's events = books: ✓")).toBeInTheDocument()
-    expect(screen.getByText('980 booked · 15 rejected')).toBeInTheDocument()
+    expect(check(en.report.everyAccount)).toHaveTextContent('✗')
+    expect(screen.getByTestId('examples')).toHaveTextContent(en.report.accountExample(4711, '€5.00', '€0.00'))
+  })
+
+  it('shows accounts not compared as a dash with its note, not as a pass or a break', () => {
+    render(<Verdict report={report({ ledgerCheck: { ...report().ledgerCheck, accountsCompared: false }, notes: ['ACCOUNTS_NOT_COMPARED'] })} />)
+
+    expect(check(en.report.everyAccount)).toHaveTextContent('–')
+    expect(screen.getByText(en.report.note.ACCOUNTS_NOT_COMPARED)).toBeInTheDocument()
   })
 
   it('says the projection is behind the books without a ✗, since it may trail them without a break', () => {
-    const stats = {
-      runId: RUN_ID,
-      at: '2026-10-12T09:01:05Z',
-      bankLatency: { p50Ms: null, p99Ms: null },
-      totals: { accepted: 995, posted: 900, rejected: 15, postedAmountCents: 90_000, commandsSeen: 995, inFlight: 80, rejectedByReason: {} },
-      series: [],
-    }
-    render(<Verdict report={report({ stats, projectionMatchesBooks: false })} tps={1000} durationSeconds={30} />)
+    const stats = { periodStart: '', at: '', accepted: 995, posted: 900, rejected: 15, commandsSeen: 995, postedAmountCents: 90_000, rejectionsByReason: {} }
+    render(<Verdict report={report({ stats, notes: ['PROJECTION_BEHIND_BOOKS'] })} />)
 
-    expect(screen.getByLabelText("bank's events = books: –")).toBeInTheDocument()
-    expect(screen.getByText('behind the books')).toBeInTheDocument()
-    expect(screen.queryByText('✗')).not.toBeInTheDocument()
+    expect(check(en.report.projection)).toHaveTextContent('–')
+    expect(screen.getByText(en.report.behind)).toBeInTheDocument()
   })
 
-  it('says the projection was not checked when the reporting service did not answer, without a ✗', () => {
-    const note = 'reporting unavailable: no numbers from the bank\'s events'
-    render(<Verdict report={report({ notes: [note] })} tps={1000} durationSeconds={30} />)
+  it('lists the crashes of the ledger and the pool postings in the period', () => {
+    render(<Verdict report={report({ chaos: [{ at: '2026-11-11T09:12:00Z', instances: ['ledger-0', 'ledger-1'] }], ledger: { ...report().ledger, poolPostings: 42 } })} />)
 
-    expect(screen.getByLabelText("bank's events = books: –")).toBeInTheDocument()
-    expect(screen.getByText('not checked')).toBeInTheDocument()
-    expect(screen.getByText(note)).toBeInTheDocument()
-    expect(screen.queryByText('✗')).not.toBeInTheDocument()
-  })
-
-  it('shows INCOMPLETE with the reasons word for word', () => {
-    const reasons = ['drain timed out: ledger applied 900, gateway results 900, of 995', 'client lost']
-    render(<Verdict report={report({ result: 'INCOMPLETE', reasons, clientBalanced: null, client: null })} tps={100} durationSeconds={10} />)
-
-    expect(screen.getByText('Not everything could be checked')).toBeInTheDocument()
-    const shownReasons = within(screen.getByLabelText('Reasons')).getAllByRole('listitem').map((li) => li.textContent)
-    expect(shownReasons).toEqual(reasons)
-    expect(screen.getByLabelText("clients' journal = bank's statement: –")).toBeInTheDocument()
+    expect(screen.getByText(en.report.poolPostings('42'))).toBeInTheDocument()
+    expect(screen.getByText(en.report.crashedAt(clock('2026-11-11T09:12:00Z'), 2))).toBeInTheDocument()
   })
 })

@@ -74,6 +74,9 @@ spec:
           args:
             - --web.listen-address=:{{ $exporters.postgres.port }}
             - --collector.stat_checkpointer
+            - --collector.stat_statements
+            - --collector.stat_statements.include_query
+            - --collector.stat_statements.limit={{ $exporters.postgres.statementsLimit }}
           env:
             - {name: DATA_SOURCE_URI, value: "postgres:5432/ledgerlab?sslmode=disable"}
             - {name: DATA_SOURCE_USER, value: monitor}

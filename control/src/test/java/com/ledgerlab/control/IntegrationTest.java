@@ -1,14 +1,21 @@
 package com.ledgerlab.control;
 
-import static com.ledgerlab.control.RunFixtures.mapOf;
+import static com.ledgerlab.control.Fixtures.mapOf;
 
-import com.ledgerlab.control.runs.QueueScheduler;
+import com.ledgerlab.control.bank.BankLive;
+import com.ledgerlab.control.periods.PeriodConductor;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
@@ -25,21 +32,19 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(IntegrationTest.Containers.class)
 @ActiveProfiles("test")
+@ExtendWith(AwayFromTheHoursEnd.class)
 @AutoConfigureTestRestTemplate
 abstract class IntegrationTest {
 
     private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT = new ParameterizedTypeReference<>() {
     };
-
-    protected static final int DEFAULT_QUOTA = 100;
-    protected static final int DEFAULT_TPS = 100;
-    protected static final int DEFAULT_DURATION_SECONDS = 10;
 
     @TestConfiguration(proxyBeanMethods = false)
     static class Containers {
@@ -54,7 +59,10 @@ abstract class IntegrationTest {
     @Autowired JdbcClient jdbc;
     @Autowired ObjectMapper objectMapper;
     @Autowired ControlProperties props;
-    @Autowired QueueScheduler queueScheduler;
+    @Autowired BankLive bankLive;
+    @Autowired PeriodConductor conductor;
+    @Autowired DataSource dataSource;
+    @Autowired MeterRegistry meters;
 
     static final StubService ledger = new StubService();
     static final StubService gateway = new StubService();
@@ -83,8 +91,12 @@ abstract class IntegrationTest {
     }
 
     @BeforeEach
-    void cleanDatabase() throws InterruptedException {
-        jdbc.sql("TRUNCATE runs, sessions, invite_visits, invite_mails, invite_requests, invite_emails, invite_tokens, chaos_events").update();
+    void cleanDatabase() {
+        jdbc.sql(
+            """
+            TRUNCATE periods, bank_start, availability_minutes, availability_hours, maintenance_windows, sessions, invite_visits, invite_mails,
+                invite_requests, invite_emails, invite_tokens, chaos_events, load_pulses, service_starts
+            """).update();
         ledger.reset();
         gateway.reset();
         generator.reset();
@@ -93,28 +105,43 @@ abstract class IntegrationTest {
         turnstile.reset();
         mailjet.reset();
         ledgerInstances.forEach(StubService::reset);
-        // The scheduler keeps its last answer for the runs' views; a tick with nothing to read clears what an earlier test left.
-        queueScheduler.tick();
+        // The live numbers are kept between ticks; a test must not start with those an earlier test read.
+        ReflectionTestUtils.setField(bankLive, "snapshot", ReflectionTestUtils.getField(BankLive.Snapshot.class, "EMPTY"));
+        ReflectionTestUtils.setField(conductor, "settling", null);
+    }
+
+    /**
+     * Runs {@code press} while another transaction holds the advisory lock {@code name}, as a press still calling out would.
+     * A press that waits for the lock fails the test after {@code patience} instead of hanging it: the lock is let go then.
+     */
+    protected <T> T whileLockHeld(String name, Duration patience, Callable<T> press) throws Exception {
+        try (var holder = dataSource.getConnection(); var presses = Executors.newVirtualThreadPerTaskExecutor()) {
+            holder.setAutoCommit(false);
+            try (var lock = holder.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+                lock.setString(1, name);
+                lock.execute();
+            }
+            try {
+                return presses.submit(press).get(patience.toMillis(), TimeUnit.MILLISECONDS);
+            } finally {
+                holder.rollback();
+            }
+        }
     }
 
     protected String invite() {
-        return invite(DEFAULT_QUOTA);
+        return invite(Duration.ofDays(1), true);
     }
 
-    protected String invite(int quota) {
-        return invite(quota, Duration.ofDays(1), true);
-    }
-
-    protected String invite(int quota, Duration expiresIn, boolean active) {
+    protected String invite(Duration expiresIn, boolean active) {
         var token = "invite-" + UUID.randomUUID();
         jdbc.sql(
             """
-            INSERT INTO invite_tokens (token, expires_at, quota, active)
-            VALUES (:token, now() + CAST(:millis AS bigint) * interval '1 millisecond', :quota, :active)
+            INSERT INTO invite_tokens (token, expires_at, active)
+            VALUES (:token, now() + CAST(:millis AS bigint) * interval '1 millisecond', :active)
             """)
             .param("token", token)
             .param("millis", expiresIn.toMillis())
-            .param("quota", quota)
             .param("active", active)
             .update();
         return token;
@@ -140,24 +167,6 @@ abstract class IntegrationTest {
         return UUID.fromString((String) enter(token).getBody().get("sessionId"));
     }
 
-    protected ResponseEntity<Map<String, Object>> start(Object sessionId) {
-        return start(sessionId, UUID.randomUUID());
-    }
-
-    protected ResponseEntity<Map<String, Object>> start(Object sessionId, UUID requestId) {
-        return start(sessionId, requestId, DEFAULT_TPS, DEFAULT_DURATION_SECONDS);
-    }
-
-    protected ResponseEntity<Map<String, Object>> startWithTps(Object sessionId, Integer tps) {
-        return start(sessionId, UUID.randomUUID(), tps, DEFAULT_DURATION_SECONDS);
-    }
-
-    protected ResponseEntity<Map<String, Object>> start(Object sessionId, UUID requestId, Integer tps, Integer durationSeconds) {
-        return post(
-            "/api/sessions/" + sessionId + "/runs",
-            mapOf("requestId", requestId, "tps", tps, "durationSeconds", durationSeconds));
-    }
-
     protected ResponseEntity<String> requestLink(String email) {
         return requestLink(email, null);
     }
@@ -171,33 +180,5 @@ abstract class IntegrationTest {
             throw new IllegalArgumentException("expected one element, got " + items.size());
         }
         return items.getFirst();
-    }
-
-    protected ResponseEntity<Map<String, Object>> getRun(UUID sessionId, Object runId) {
-        return get("/api/sessions/" + sessionId + "/runs/" + runId);
-    }
-
-    protected String stateOf(Object runId) {
-        return jdbc.sql("SELECT state FROM runs WHERE run_id = :runId").param("runId", UUID.fromString(runId.toString())).query(String.class).single();
-    }
-
-    protected void setRun(Object runId, String state) {
-        setRun(runId, state, null);
-    }
-
-    protected void setRun(Object runId, Duration createdAgo) {
-        setRun(runId, null, createdAgo);
-    }
-
-    protected void setRun(Object runId, String state, Duration createdAgo) {
-        if (state != null) {
-            jdbc.sql("UPDATE runs SET state = :state WHERE run_id = :runId").param("state", state).param("runId", UUID.fromString(runId.toString())).update();
-        }
-        if (createdAgo != null) {
-            jdbc.sql("UPDATE runs SET created_at = clock_timestamp() - CAST(:millis AS bigint) * interval '1 millisecond' WHERE run_id = :runId")
-                .param("millis", createdAgo.toMillis())
-                .param("runId", UUID.fromString(runId.toString()))
-                .update();
-        }
     }
 }

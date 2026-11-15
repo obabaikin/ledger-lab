@@ -14,6 +14,6 @@ public class OpenApiConfig {
         return new OpenAPI().info(new Info()
             .title("Ledger Lab ledger internal API")
             .version("1")
-            .description("A run's accounts, the ledger's reconciliation and run deletion, for control."));
+            .description("The ledger's view of a period and of the bank's books, for control."));
     }
 }

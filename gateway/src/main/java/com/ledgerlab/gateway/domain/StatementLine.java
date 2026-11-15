@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
-@Schema(description = "A transfer the bank accepted in the closed period.")
+@Schema(description = "A transfer the bank accepted in the period.")
 public record StatementLine(
     UUID transferId,
     int fromAccount,

@@ -1,5 +1,6 @@
 package com.ledgerlab.ledger.kafka;
 
+import com.ledgerlab.ledger.SchedulingConfig;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -16,7 +17,11 @@ public class ResultPublisher {
         this.results = results;
     }
 
-    @Scheduled(fixedDelayString = "${ledger.results.publish-interval}")
+    /**
+     * A thread of its own: on the shared one it waited behind the credits, the pool and partition maintenance, and no
+     * result reached Kafka meanwhile.
+     */
+    @Scheduled(fixedDelayString = "${ledger.results.publish-interval}", scheduler = SchedulingConfig.RESULT_PUBLISHER_SCHEDULER)
     public void publishPending() throws InterruptedException, ExecutionException, TimeoutException {
         int published;
         do {

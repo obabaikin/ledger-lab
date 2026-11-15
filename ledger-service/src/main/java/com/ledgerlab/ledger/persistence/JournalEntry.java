@@ -1,6 +1,7 @@
 package com.ledgerlab.ledger.persistence;
 
+import java.time.Instant;
 import java.util.UUID;
 
-public record JournalEntry(UUID runId, UUID transferId, int accountNo, long amountCents) {
+public record JournalEntry(Instant acceptedAt, UUID transferId, int accountNo, long amountCents) {
 }

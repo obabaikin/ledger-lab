@@ -4,5 +4,5 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties("ledger.reconciliation")
-public record ReconciliationProperties(Duration statementTimeout) {
+public record ReconciliationProperties(Duration statementTimeout, Duration checkTimeout, int exampleLimit) {
 }

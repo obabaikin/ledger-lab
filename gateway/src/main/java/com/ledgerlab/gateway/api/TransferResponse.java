@@ -12,7 +12,6 @@ import org.jspecify.annotations.Nullable;
 @Schema(description = "A transfer as the bank sees it now.")
 public record TransferResponse(
     UUID transferId,
-    UUID runId,
     TransferStatus status,
     @Schema(description = RejectReasons.REJECT_REASON_DESCRIPTION, nullable = true)
     @Nullable RejectReason rejectReason,
@@ -21,7 +20,6 @@ public record TransferResponse(
     @Nullable Instant resultedAt
 ) {
     static TransferResponse of(Transfer transfer) {
-        return new TransferResponse(
-            transfer.transferId(), transfer.runId(), transfer.status(), transfer.rejectReason(), transfer.acceptedAt(), transfer.resultedAt());
+        return new TransferResponse(transfer.transferId(), transfer.status(), transfer.rejectReason(), transfer.acceptedAt(), transfer.resultedAt());
     }
 }

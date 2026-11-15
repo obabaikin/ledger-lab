@@ -1,384 +1,359 @@
-import { screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-import type { LiveView, RunView } from './api/client'
-import { NO_RANDOM_ID, RUN_NOT_FINISHED } from './Controls'
-import { RUNS_LISTED } from './SessionPage'
-import { fakeControl, report, run, RUN_ID, session, SESSION_ID, type Answer } from './test/fakeControl'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { clock, count, dayAndMonth, hoursMinutes } from './format'
+import { bank, fakeControl, period, PERIOD_START, report, series, SERIES, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
 import { en } from './texts/en'
 
 const SESSION = `/api/sessions/${SESSION_ID}`
-const RUNS = `${SESSION}/runs`
-const RUN = `${RUNS}/${RUN_ID}`
+const PERIODS = '/api/bank/periods?limit=10'
+const PERIOD = `/api/bank/periods/${encodeURIComponent(PERIOD_START)}`
 
-const live = (changes: Partial<LiveView> = {}): LiveView => ({
-  stats: {
-    runId: RUN_ID,
-    at: '2026-10-12T09:01:05Z',
-    bankLatency: { p50Ms: null, p99Ms: null },
-    totals: { accepted: 1000, posted: 990, rejected: 5, postedAmountCents: 99_000, commandsSeen: 1000, inFlight: 5, rejectedByReason: {} },
-    series: [],
-  },
-  clients: { requested: 1100, acknowledged: 990, failed: 0, unknown: 0, retries: 0, refused: 0, duplicatesSent: 0, requestedPerSecond: [] },
-  pods: null,
-  ledgerDuplicatesAtLeast: 0,
-  readAt: '2026-10-12T09:01:05Z',
-  chaos: [],
-  ...changes,
-})
+type Answers = Record<string, Answer | (() => Answer | Promise<Answer>)>
 
-function control(runs: RunView[], extra: Record<string, Answer | (() => Answer)> = {}) {
+function control(extra: Answers = {}) {
   return fakeControl({
+    'GET /api/bank': { status: 200, body: bank() },
+    [`GET ${PERIODS}`]: { status: 200, body: { periods: [] } },
+    [SERIES]: { status: 200, body: series() },
     [`GET ${SESSION}`]: { status: 200, body: session() },
-    [`GET ${RUNS}`]: { status: 200, body: { items: runs.map((r) => ({ ...r, live: null })) } },
-    ...Object.fromEntries(runs.map((r) => [`GET ${RUNS}/${r.runId}`, { status: 200, body: r }])),
     ...extra,
   })
 }
 
-describe('session page', () => {
-  it('without runs shows the form and the diagram without numbers, so nothing moves when a run starts', async () => {
-    control([])
-    renderAt(`/s/${SESSION_ID}`)
-
-    expect(await screen.findByRole('button', { name: /Start the run/ })).toBeEnabled()
-    expect(screen.getByRole('img', { name: /Transfers flowing/ })).toBeInTheDocument()
-    expect(screen.getByTestId('gateway-number')).toHaveTextContent('— accepted')
-    expect(screen.queryByText('Transfers per second')).not.toBeInTheDocument()
-  })
-
-  it('shows the runs used this hour on a line of its own under the buttons', async () => {
-    control([])
-    renderAt(`/s/${SESSION_ID}`)
-
-    const start = await screen.findByRole('button', { name: /Start the run/ })
-    const quota = screen.getByText('Runs this hour: 2 of 10')
-    expect(start.closest('form')).not.toContainElement(quota)
-    expect(start.closest('form')!.compareDocumentPosition(quota) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  })
-
-  it('shows a run as soon as Start is pressed, without a reload', async () => {
-    const queued = run({ state: 'QUEUED', position: 1 })
-    let started = false
-    fakeControl({
-      [`GET ${SESSION}`]: { status: 200, body: session() },
-      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: started ? [queued] : [] } }),
-      [`POST ${RUNS}`]: () => {
-        started = true
-        return { status: 202, body: queued }
-      },
-      [`GET ${RUN}`]: { status: 200, body: queued },
-    })
-    renderAt(`/s/${SESSION_ID}`)
-
-    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
-
-    const phases = await screen.findByLabelText('Phases')
-    await waitFor(() => expect(within(phases).getByText(/Queued/)).toHaveTextContent('Queued · #1 in line'), { timeout: 3000 })
-  })
-
-  it('starts a run outside a secure context, where the browser has no crypto.randomUUID', async () => {
-    const browserCrypto = globalThis.crypto
-    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => browserCrypto.getRandomValues(bytes) })
-    const queued = run()
-    const calls = control([], { [`POST ${RUNS}`]: { status: 202, body: queued } })
-    renderAt(`/s/${SESSION_ID}`)
-
-    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
-
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
-    const sent = calls.find((c) => c.method === 'POST')?.body as { requestId: string }
-    expect(sent.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-  })
-
-  it('sends the same request id again after an answer that was lost', async () => {
-    let tries = 0
-    const calls = control([], {
-      [`POST ${RUNS}`]: () => {
-        tries += 1
-        if (tries === 1) throw new TypeError('Failed to fetch')
-        return { status: 202, body: run() }
-      },
-    })
-    renderAt(`/s/${SESSION_ID}`)
-
-    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
-    await screen.findByText(/Control did not answer/)
-    screen.getByRole('button', { name: /Start the run/ }).click()
-
-    await waitFor(() => expect(tries).toBe(2))
-    const [first, second] = calls.filter((c) => c.method === 'POST').map((c) => (c.body as { requestId: string }).requestId)
-    expect(second).toBe(first)
-  })
-
-  it('says control is busy when a start is refused as busy, and a new press sends again', async () => {
-    let tries = 0
-    control([], {
-      [`POST ${RUNS}`]: () => {
-        tries += 1
-        return tries === 1 ? { status: 503, body: { error: 'busy' }, headers: { 'Retry-After': '1' } } : { status: 202, body: run() }
-      },
-    })
-    renderAt(`/s/${SESSION_ID}`)
-
-    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
-    expect(await screen.findByRole('alert')).toHaveTextContent('Control is busy with other starts. Press Start again in a moment.')
-    screen.getByRole('button', { name: /Start the run/ }).click()
-
-    await waitFor(() => expect(tries).toBe(2))
-  })
-
-  it('says the browser gave no random id when it cannot make one, and sends nothing', async () => {
-    vi.stubGlobal('crypto', {
-      getRandomValues: () => {
-        throw new Error('no entropy')
-      },
-    })
-    const calls = control([])
-    renderAt(`/s/${SESSION_ID}`)
-
-    ;(await screen.findByRole('button', { name: /Start the run/ })).click()
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(NO_RANDOM_ID)
-    expect(calls.some((c) => c.method === 'POST')).toBe(false)
-  })
-
-  it('names an unknown session and offers a new link', async () => {
-    fakeControl({ [`GET ${SESSION}`]: { status: 404, body: { error: 'session not found' } } })
-    renderAt(`/s/${SESSION_ID}`)
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(en.sessionEnded.message)
-    expect(screen.getByRole('button', { name: 'Get a link' })).toBeInTheDocument()
-  })
-
-  it('offers a new link once the invite has expired, and keeps the runs readable', async () => {
-    control([], { [`GET ${SESSION}`]: { status: 200, body: session({ inviteValid: false }) } })
-    renderAt(`/s/${SESSION_ID}`)
-
-    expect(await screen.findByRole('button', { name: 'Get a link' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Start the run/ })).toBeDisabled()
-    expect(screen.getByText('Invite expired; runs can still be read')).toBeInTheDocument()
-  })
-
-  it('shows no link form while the invite is valid', async () => {
-    control([])
-    renderAt(`/s/${SESSION_ID}`)
-
-    await screen.findByRole('button', { name: /Start the run/ })
-    expect(screen.queryByRole('button', { name: 'Get a link' })).not.toBeInTheDocument()
-  })
-
-  it('does not call the session unknown when only a run of it is not found', async () => {
-    const running = run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z' })
-    control([running], { [`GET ${RUN}`]: { status: 404, body: { error: 'run not found' } } })
-    renderAt(`/s/${SESSION_ID}`)
-
-    await screen.findByLabelText('Phases')
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(screen.queryByText(/This session has ended/)).not.toBeInTheDocument()
-  })
-
-  it('holds Start back, with the reason on the button, while a run of the session is not finished', async () => {
-    control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live() })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    const startButton = await screen.findByRole('button', { name: /Start the run/ })
-    await waitFor(() => expect(startButton).toBeDisabled())
-    expect(startButton).toHaveTextContent(RUN_NOT_FINISHED)
-  })
-
-  it('lets a new run start once the last one is final', async () => {
-    control([run({ state: 'EXPIRED', failure: 'queue timeout' })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    await screen.findByTestId('expired')
-    expect(screen.getByRole('button', { name: /Start the run/ })).toBeEnabled()
-  })
-
-  it('shows a queued run with its place in line on the phase, the diagram and the charts staying in place', async () => {
-    control([run({ state: 'QUEUED', position: 3 })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    const phases = await screen.findByLabelText('Phases')
-    await waitFor(() => expect(within(phases).getByText(/Queued/)).toHaveTextContent('Queued · #3 in line'))
-    expect(screen.getByRole('img', { name: /Transfers flowing/ })).toBeInTheDocument()
-    expect(screen.getByText('Transfers per second')).toBeInTheDocument()
-  })
-
-  it('says on the queued phase when the run waits for the bank to warm up after a start', async () => {
-    control([run({ state: 'QUEUED', position: 1, waitingFor: 'WARM_UP' })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    const phases = await screen.findByLabelText('Phases')
-    await waitFor(() => expect(within(phases).getByText(/Queued/)).toHaveTextContent('Queued · #1 in line · the bank is getting ready'))
-  })
-
-  it('shows an expired run with its state and reason above the diagram', async () => {
-    control([run({ state: 'EXPIRED', failure: 'waited in the queue longer than 5 min' })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    const expired = await screen.findByTestId('expired')
-    expect(expired).toHaveTextContent('Expired')
-    expect(expired).toHaveTextContent('waited in the queue longer than 5 min')
-    expect(screen.getByRole('img', { name: /Transfers flowing/ })).toBeInTheDocument()
-  })
-
-  it('marks the books final within Bank finishing', async () => {
-    control([run({ state: 'DRAINING', startedAt: '2026-10-12T09:01:00Z', booksFinalAt: '2026-10-12T09:01:40Z', live: live() })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    const phases = await screen.findByLabelText('Phases')
-    await waitFor(() => expect(within(phases).getByText(/Bank finishing/)).toHaveTextContent('Bank finishing · books final ✓'))
-  })
-
-  it('lets Stop act only while the clients are sending, with nothing added to it that would widen it', async () => {
-    control([run({ state: 'DRAINING', startedAt: '2026-10-12T09:01:00Z', live: live() })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    await waitFor(() => expect(within(screen.getByLabelText('Phases')).getByText(/Bank finishing/)).toHaveClass('now'))
-    const stop = screen.getByRole('button', { name: /Stop/ })
-    expect(stop).toBeDisabled()
-    expect(stop).toHaveTextContent(/^■ Stop$/)
-  })
-
-  it('opens with the default transfers per second chosen, not the largest', async () => {
-    control([], { [`GET ${SESSION}`]: { status: 200, body: session({ tpsOptions: [50, 100, 300], defaultTps: 100 }) } })
-    renderAt(`/s/${SESSION_ID}`)
-
-    expect(await screen.findByRole('combobox', { name: 'Transfers per second' })).toHaveValue('100')
-  })
-
-  it('lets Stop act while the clients are sending', async () => {
-    control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live() })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    await waitFor(() => expect(screen.getByRole('button', { name: /Stop/ })).toBeEnabled())
-  })
-
-  it('shows a dash for the clients while the generator has not answered, not 0', async () => {
-    control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: null }) })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
-    expect(screen.getByTestId('clients-number')).toHaveTextContent('— sent')
-  })
-
-  it('counts the busy refusals at the gateway as the run goes, quiet while there are none', async () => {
-    const clients = live().clients!
-    let refused = 0
-    const running = () => run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: { ...clients, refused } }) })
-    fakeControl({
-      [`GET ${SESSION}`]: { status: 200, body: session() },
-      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: [{ ...running(), live: null }] } }),
-      [`GET ${RUN}`]: () => ({ status: 200, body: running() }),
-    })
-    renderAt(`/s/${SESSION_ID}`)
-
-    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('0 refused (503)'))
-    expect(screen.getByTestId('gateway-note')).not.toHaveClass('busy')
-
-    refused = 1_250
-    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('1,250 refused (503)'), { timeout: 3000 })
-    expect(screen.getByTestId('gateway-note')).toHaveClass('busy')
-  })
-
-  it('says the clients are stopping once a stop is taken, until the bank finishes', async () => {
-    let stopped = false
-    const current = () => run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', stopRequested: stopped, live: live() })
-    fakeControl({
-      [`GET ${SESSION}`]: { status: 200, body: session() },
-      [`GET ${RUNS}`]: () => ({ status: 200, body: { items: [{ ...current(), live: null }] } }),
-      [`GET ${RUN}`]: () => ({ status: 200, body: current() }),
-      [`POST ${RUN}/stop`]: () => {
-        stopped = true
-        return { status: 202, body: current() }
-      },
-    })
-    renderAt(`/s/${SESSION_ID}`)
-    const phases = await screen.findByLabelText('Phases')
-    await waitFor(() => expect(within(phases).getByText(/Clients sending/)).toHaveTextContent(/^Clients sending$/))
-
-    screen.getByRole('button', { name: /Stop/ }).click()
-
-    await waitFor(() => expect(within(phases).getByText(/Clients sending/)).toHaveTextContent('Clients sending · stopping'))
-  })
-
-  it('takes the refusal count of a reconciled run from its report', async () => {
-    const reconciled = report({ client: { ...report().client!, refused: 42 } })
-    control([run({ state: 'RECONCILED', result: 'BALANCED' })], { [`GET ${RUN}/report`]: { status: 200, body: reconciled } })
-    renderAt(`/s/${SESSION_ID}`)
-
-    await waitFor(() => expect(screen.getByTestId('gateway-note')).toHaveTextContent('42 refused (503)'))
-  })
-
-  it('shows no refusal count while the generator has not answered', async () => {
-    control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live({ clients: null }) })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
-    expect(screen.getByTestId('gateway-note')).toHaveTextContent('')
-  })
-
-  it('keeps the last numbers and says so when control stops answering', async () => {
-    let up = true
-    const running = run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live() })
-    const answer = (body: unknown) => () => {
-      if (!up) throw new TypeError('Failed to fetch')
-      return { status: 200, body }
-    }
-    fakeControl({
-      [`GET ${SESSION}`]: answer(session()),
-      [`GET ${RUNS}`]: answer({ items: [{ ...running, live: null }] }),
-      [`GET ${RUN}`]: answer(running),
-    })
-    renderAt(`/s/${SESSION_ID}`)
-    await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
-
-    up = false
-
-    expect(await screen.findByText(/Connection lost, retrying/, {}, { timeout: 3000 })).toBeInTheDocument()
-    expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted')
-  })
-
-  it('lists the last runs and offers the rest', async () => {
-    const runs = Array.from({ length: RUNS_LISTED + 2 }, (_, i) => run({ runId: `run-${i}`, state: 'RECONCILED', result: 'BALANCED' }))
-    control(runs, { [`GET ${RUNS}/run-0/report`]: { status: 409, body: { error: 'report not ready' } } })
-    renderAt(`/s/${SESSION_ID}`)
-
-    const showAll = await screen.findByRole('button', { name: `show all (${RUNS_LISTED + 2})` })
-    const listed = () => screen.getAllByRole('button', { name: /BALANCED/ })
-    expect(listed()).toHaveLength(RUNS_LISTED)
-    showAll.click()
-    await waitFor(() => expect(listed()).toHaveLength(RUNS_LISTED + 2))
-  })
-
-  it('shows a legend with the words of the instance dots', async () => {
-    control([run({ state: 'RUNNING', startedAt: '2026-10-12T09:01:00Z', live: live() })])
-    renderAt(`/s/${SESSION_ID}`)
-
-    const legend = await screen.findByLabelText('Instances')
-    expect(legend).toHaveTextContent('consuming')
-    expect(legend).toHaveTextContent('starting')
-    expect(legend).toHaveTextContent('no answer to Prometheus')
-    expect(legend).toHaveTextContent('no data')
-  })
-})
-
-describe('visitor without an invite', () => {
-  it('sees the name, the way a transfer takes without numbers, the links and the field for a link; no run form', async () => {
-    fakeControl({})
+const raise = () => screen.findByRole('button', { name: new RegExp(en.controls.raise) })
+const crash = () => screen.findByRole('button', { name: /Crash the ledger/ })
+const follows = (first: Element, second: Element) => (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+
+describe('the open page', () => {
+  it('shows the bank to a visitor without a session, with no buttons and the line that offers a link above the bank', async () => {
+    control()
     renderAt('/')
 
+    expect(await screen.findByTestId('bank-status')).toHaveTextContent('The bank runs 24/7: since')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Ledger Lab')
-    expect(screen.getByRole('heading', { level: 2, name: en.inviteForm.heading })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Get a link' })).toBeInTheDocument()
+    expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted')
+    expect(screen.queryByRole('button', { name: new RegExp(en.controls.raise) })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Crash the ledger/ })).not.toBeInTheDocument()
+    expect(follows(screen.getByRole('heading', { level: 2, name: en.inviteForm.heading }), screen.getByTestId('bank-status'))).toBe(true)
     expect(screen.getByRole('link', { name: 'Oleksii Babaikin' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
     expect(screen.getAllByRole('link', { name: en.footer.privacy })[0]).toHaveAttribute('href', '/privacy')
     expect(screen.getByRole('link', { name: en.footer.impressum })).toHaveAttribute('href', '/impressum')
     expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', expect.stringContaining('#what-it-does'))
-    expect(screen.getByRole('link', { name: 'Design decisions' })).toHaveAttribute('href', expect.stringContaining('/docs/adr'))
-    expect(screen.queryByRole('button', { name: /Start the run/ })).not.toBeInTheDocument()
-    expect(screen.queryByTestId('in-flight')).toHaveTextContent('')
-    ;['clients-number', 'gateway-number', 'ledger-number'].forEach((id) => expect(screen.getByTestId(id)).toHaveTextContent(''))
+  })
+
+  it('opens the form for a link in place under the line at the top, and keeps no form below the bank', async () => {
+    control()
+    renderAt('/')
+    await screen.findByTestId('bank-status')
+    expect(screen.queryByLabelText(en.inviteForm.emailLabel)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: en.landing.tryIt }))
+
+    const opened = screen.getByTestId('invite-opened')
+    expect(opened).toHaveFocus()
+    expect(screen.getByLabelText(en.inviteForm.emailLabel)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: en.landing.tryIt })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 2, name: en.inviteForm.heading })).toHaveLength(1)
+    expect(follows(opened, screen.getByTestId('bank-status'))).toBe(true)
+  })
+
+  it('shows how fast the clients send now, large, at the top', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(`${en.bank.speed('400')} ${en.bank.speedNow}`)
+    expect(follows(screen.getByTestId('clients-speed'), screen.getByTestId('bank-status'))).toBe(true)
+  })
+
+  it('says the bank has not started before control placed its first period', async () => {
+    control({ 'GET /api/bank': { status: 200, body: bank({ startedAt: null }) } })
+    renderAt('/')
+
+    expect(await screen.findByTestId('bank-status')).toHaveTextContent(en.bank.notStarted)
+  })
+
+  it('shows the books, the money moved and the rejections by reason since the bank started', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('books')).toHaveTextContent(`${en.bank.totalInAccounts} €1,000,000,000.00 ${en.bank.unchanged}`)
+    expect(screen.getByText('100,000')).toBeInTheDocument()
+    expect(screen.getByTestId('rejections')).toHaveTextContent(`${en.bank.rejected('5')}: insufficient funds 4, blocked account 1`)
+    await waitFor(() => expect(screen.getByTestId('moved')).toHaveTextContent('€990.00'))
+  })
+
+  it('shows on the scheme what the clients sent and gave up on since the bank started, and below it their own counts since they restarted', async () => {
+    control()
+    renderAt('/')
+
+    await waitFor(() => expect(screen.getByTestId('clients-number')).toHaveTextContent(en.bank.clientsSent('917,000')))
+    expect(screen.getByTestId('clients-note')).toHaveTextContent(en.bank.clientsGaveUp('600'))
+    expect(screen.getByTestId('clients-restarted')).toHaveTextContent(en.bank.clientsRestarted(hoursMinutes('2026-11-11T07:15:00Z'), '1,100', '3'))
+  })
+
+  it('shows no line of the clients\' own counts when no clients sent before them', async () => {
+    control({ 'GET /api/bank': { status: 200, body: bank({ clients: { ...bank().clients!, restarted: false } }) } })
+    renderAt('/')
+
+    expect(await screen.findByTestId('clients-number')).toBeInTheDocument()
+    expect(screen.queryByTestId('clients-restarted')).toBeNull()
+  })
+
+  it('shows every visitor a raised load and the last crash of the ledger', async () => {
+    const until = '2026-11-11T10:30:20Z'
+    const crashedAt = '2026-11-11T10:29:50Z'
+    control({
+      'GET /api/bank': {
+        status: 200,
+        body: bank({
+          clients: { ...bank().clients!, targetTps: 1500, pulse: { tps: 1500, until } },
+          chaos: { available: true, readyInSeconds: 60, recent: [{ at: crashedAt, instances: ['ledger-0', 'ledger-1'] }] },
+        }),
+      },
+    })
+    renderAt('/')
+
+    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(`${en.bank.speed('1,500')} ${en.bank.speedUntil(clock(until), '400')}`)
+    expect(screen.getByTestId('last-crash')).toHaveTextContent(en.bank.lastCrash(clock(crashedAt), 2))
+  })
+
+  it('shows the error budget used, in the words of the page texts', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('budget')).toHaveTextContent(en.availability.budget(17, 43))
+    expect(screen.getByRole('meter', { name: en.availability.budget(17, 43) })).toHaveAttribute('aria-valuenow', '17')
+    expect(screen.getByTestId('budget-split')).toHaveTextContent(en.availability.split(17, 12, 2))
+  })
+
+  it('shows a second budget for the time to posting, with its threshold, and links to how both are measured', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('freshness-budget')).toHaveTextContent(en.availability.budget(5, 43))
+    expect(screen.getByText(en.availability.freshnessTitle(2))).toBeInTheDocument()
+    expect(screen.getByRole('meter', { name: en.availability.budget(5, 43) })).toHaveAttribute('aria-valuenow', '5')
+    expect(screen.getByTestId('freshness-budget-split')).toHaveTextContent(en.availability.split(5, 1, 3))
+    expect(screen.getByRole('link', { name: en.availability.howMeasured })).toHaveAttribute(
+      'href', 'https://github.com/obabaikin/ledger-lab/blob/main/docs/guides/slo.md')
+  })
+
+  it('shows the planned update in the visitor\'s time, and says when none is planned', async () => {
+    const window = { from: '2026-11-12T02:00:00Z', to: '2026-11-12T02:30:00Z' }
+    control({ 'GET /api/bank': { status: 200, body: bank({ maintenance: window }) } })
+    renderAt('/')
+
+    expect(await screen.findByTestId('maintenance')).toHaveTextContent(
+      en.availability.update(dayAndMonth(window.from), hoursMinutes(window.from), hoursMinutes(window.to)),
+    )
+  })
+
+  it('says no update is planned without a window', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('maintenance')).toHaveTextContent(en.availability.noUpdate)
+  })
+
+  it('keeps the last numbers and says the connection is lost when a poll gets a 502 from the proxy', async () => {
+    let up = true
+    control({ 'GET /api/bank': () => (up ? { status: 200, body: bank() } : { status: 502, body: { error: 'bad gateway' } }) })
+    renderAt('/')
+    await waitFor(() => expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted'))
+
+    up = false
+
+    expect(await screen.findByText(en.connection.lost, {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted')
+  })
+
+  it('says when the charts or the periods could not be read, instead of leaving them out', async () => {
+    control({ [SERIES]: { status: 502 }, [`GET ${PERIODS}`]: { status: 502 } })
+    renderAt('/')
+
+    expect(await screen.findByText(en.charts.unavailable)).toBeInTheDocument()
+    expect(await screen.findByText(en.periods.unavailable)).toBeInTheDocument()
+  })
+
+  it('says the first period closes at its time while none is over', async () => {
+    control()
+    renderAt('/')
+
+    expect(await screen.findByTestId('current-period')).toHaveTextContent(en.periods.firstCloses(hoursMinutes('2026-11-11T11:01:00Z')))
+  })
+
+  it('lists the periods with their verdicts and opens the report of one on a click', async () => {
+    control({
+      [`GET ${PERIODS}`]: { status: 200, body: { periods: [period()] } },
+      [`GET ${PERIOD}`]: { status: 200, body: { period: period(), report: report() } },
+    })
+    renderAt('/')
+
+    const row = await screen.findByRole('button', { name: new RegExp(en.periods.verdict.BALANCED) })
+    expect(row).toHaveTextContent(en.periods.transfers(count(1_440_000)))
+    fireEvent.click(row)
+
+    expect(await screen.findByTestId('verdict')).toHaveTextContent(en.report.headline.BALANCED)
+  })
+
+  it('names why a failed period has no verdict', async () => {
+    const failed = period({ state: 'FAILED', verdict: null, failure: 'DRAIN_TIMED_OUT', numbers: null })
+    control({
+      [`GET ${PERIODS}`]: { status: 200, body: { periods: [failed] } },
+      [`GET ${PERIOD}`]: { status: 200, body: { period: failed, report: null } },
+    })
+    renderAt('/')
+
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(en.periods.state.FAILED) }))
+
+    expect(await screen.findByTestId('period-failed')).toHaveTextContent(en.periods.failure.DRAIN_TIMED_OUT)
+  })
+
+  it('shows a legend with the words of the instance dots', async () => {
+    control()
+    renderAt('/')
+
+    const legend = await screen.findByLabelText('Instances')
+    expect(legend).toHaveTextContent('consuming')
+    expect(legend).toHaveTextContent('no answer to Prometheus')
+  })
+})
+
+describe('session page', () => {
+  it('offers the speeds and lengths of the session, the defaults chosen, and the crash button', async () => {
+    control()
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await raise()).toBeEnabled()
+    expect(screen.getByRole('combobox', { name: en.controls.tpsLabel })).toHaveValue('1000')
+    expect(screen.getByRole('combobox', { name: en.controls.secondsLabel })).toHaveValue('10')
+    expect(within(screen.getByRole('combobox', { name: en.controls.tpsLabel })).getAllByRole('option').map((o) => o.textContent)).toEqual(
+      ['400', '500', '1,000', '2,000'].map(en.controls.tpsOption),
+    )
+    expect(await crash()).toBeEnabled()
+  })
+
+  it('raises the load with the speed and length chosen and says until when', async () => {
+    const until = '2026-11-11T10:31:00Z'
+    const calls = control({ [`POST ${SESSION}/load`]: { status: 202, body: { tps: 2000, until } } })
+    renderAt(`/s/${SESSION_ID}`)
+    const button = await raise()
+
+    fireEvent.change(screen.getByRole('combobox', { name: en.controls.tpsLabel }), { target: { value: '2000' } })
+    fireEvent.change(screen.getByRole('combobox', { name: en.controls.secondsLabel }), { target: { value: '30' } })
+    fireEvent.click(button)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.controls.raised('2,000', clock(until)))
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ tps: 2000, seconds: 30 })
+  })
+
+  it('holds the load button while the session says a pulse or its pause runs', async () => {
+    control({ [`GET ${SESSION}`]: { status: 200, body: session({ loadReadyInSeconds: 42 }) } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    const button = await raise()
+    await waitFor(() => expect(button).toBeDisabled())
+    expect(button).toHaveTextContent(en.controls.availableIn(42))
+  })
+
+  it.each([
+    [{ status: 429, body: { error: 'load-running' }, headers: { 'Retry-After': '65' } }, en.controls.load['load-running'](65)],
+    [{ status: 429, body: { error: 'load-used-recently' }, headers: { 'Retry-After': '30' } }, en.controls.load['load-used-recently'](30)],
+    [{ status: 400, body: { error: 'invalid-load' } }, en.controls.load['invalid-load']],
+    [{ status: 503, body: { error: 'generator-did-not-answer' } }, en.controls.load['generator-did-not-answer']],
+    [{ status: 403, body: { error: 'invite not valid' } }, en.controls.inviteNotValid],
+  ])('says in words why the load was not raised: %j', async (answer, text) => {
+    control({ [`POST ${SESSION}/load`]: answer })
+    renderAt(`/s/${SESSION_ID}`)
+
+    fireEvent.click(await raise())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(text)
+  })
+
+  it("holds the button for a refusal's Retry-After, though the session still says ready, then asks the session again", async () => {
+    const calls = control({ [`POST ${SESSION}/load`]: { status: 429, body: { error: 'load-running' }, headers: { 'Retry-After': '2' } } })
+    renderAt(`/s/${SESSION_ID}`)
+    const button = await raise()
+
+    fireEvent.click(button)
+
+    await waitFor(() => expect(button).toHaveTextContent(en.controls.availableIn(2)))
+    expect(button).toBeDisabled()
+    const sessionReads = calls.filter((c) => c.path === SESSION).length
+    await waitFor(() => expect(calls.filter((c) => c.path === SESSION).length).toBeGreaterThan(sessionReads), { timeout: 3500 })
+    await waitFor(() => expect(button).toBeEnabled())
+  })
+
+  it('keeps the crash button free while the load waits for its answer', async () => {
+    control({ [`POST ${SESSION}/load`]: () => new Promise<Answer>(() => {}) })
+    renderAt(`/s/${SESSION_ID}`)
+
+    fireEvent.click(await raise())
+
+    await waitFor(() => expect(screen.getByRole('button', { name: new RegExp(en.controls.raise) })).toBeDisabled())
+    expect(await crash()).toBeEnabled()
+  })
+
+  it('crashes the ledger and says the bank goes on', async () => {
+    control({ [`POST ${SESSION}/chaos`]: { status: 202, body: { at: '2026-11-11T10:30:00Z', instances: ['ledger-0', 'ledger-1'] } } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    fireEvent.click(await crash())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.controls.crashed(2))
+  })
+
+  it('says when the crash may be pressed again after a refusal', async () => {
+    control({ [`POST ${SESSION}/chaos`]: { status: 429, body: { error: 'chaos used recently' }, headers: { 'Retry-After': '80' } } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    fireEvent.click(await crash())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.controls.chaos.usedRecently(80))
+  })
+
+  it('names an unknown session, offers a new link and still shows the bank', async () => {
+    control({ [`GET ${SESSION}`]: { status: 404, body: { error: 'session not found' } } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.sessionEnded.message)
+    expect(screen.getByRole('button', { name: 'Get a link' })).toBeInTheDocument()
+    expect(await screen.findByTestId('bank-status')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: new RegExp(en.controls.raise) })).not.toBeInTheDocument()
+  })
+
+  it('holds both buttons and offers a new link once the invite has expired', async () => {
+    control({ [`GET ${SESSION}`]: { status: 200, body: session({ inviteValid: false }) } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByRole('button', { name: 'Get a link' })).toBeInTheDocument()
+    expect(await raise()).toBeDisabled()
+    expect(await crash()).toBeDisabled()
+  })
+
+  it('shows the clients\' speed but no line offering a link on a session page', async () => {
+    control()
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(en.bank.speed('400'))
+    expect(screen.queryByRole('button', { name: en.landing.tryIt })).not.toBeInTheDocument()
+  })
+
+  it('shows no link form while the invite is valid', async () => {
+    control()
+    renderAt(`/s/${SESSION_ID}`)
+
+    await raise()
+    expect(screen.queryByRole('button', { name: 'Get a link' })).not.toBeInTheDocument()
+  })
+
+  it('says the connection is lost when the session poll gets an unexpected status, not that the session ended', async () => {
+    control({ [`GET ${SESSION}`]: { status: 502 } })
+    renderAt(`/s/${SESSION_ID}`)
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/Connection lost/)
+    expect(screen.queryByText(en.sessionEnded.message)).not.toBeInTheDocument()
   })
 })

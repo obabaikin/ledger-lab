@@ -1,9 +1,28 @@
 spring:
   application:
     name: generator
+  lifecycle:
+    # Per phase of the stop: open requests get their answers, then the journal writes what is left.
+    timeout-per-shutdown-phase: 20s
   threads:
     virtual:
       enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ledgerlab?reWriteBatchedInserts=true
+    username: generator
+    password: generator
+    hikari:
+      schema: generator
+      # The journal's writer and the reconciliation; the clients themselves hold no connection.
+      maximum-pool-size: 6
+      # Milliseconds. While the database is away no transfer is sent; a short wait tells the clients sooner.
+      connection-timeout: 2000
+      data-source-properties:
+        # Seconds. A statement whose database froze would otherwise hold the journal's writer, and the stop, for good;
+        # longer than the reconciliation's statement-timeout, which the database ends itself.
+        socketTimeout: 90
+  flyway:
+    default-schema: generator
 
 server:
   port: 8082
@@ -15,12 +34,46 @@ generator:
   max-attempts: 3
   retry-backoff: 1s
   max-in-flight: 2000
-  max-duration: 30s
-  retention: 1h
-  retention-sweep-interval: 1m
+  load:
+    enabled: true
+    tps: 400
+    max-pulse-tps: 2000
+    max-pulse: 10m
+    wait-share: 0.1
+    wait-timeout: 5s
+    minutes-retention: 48h
+  accounts:
+    # The same as the ledger's: the clients pay between the accounts the bank has.
+    count: 100000
+    blocked: 100
+    hot: 5
   journal:
-    retention: 10m
-    max-entries: 300000
+    batch-size: 500
+    # A commit per transfer would be 400 commits a second on the bank's database; a batch waits this long to gather.
+    flush-interval: 20ms
+  periods:
+    # The same in every service: they cut time at the same instants.
+    length: 60m
+    # How long the journal is held after its hour ended; the bank holds its transfers as long.
+    retention: 4h
+    # Every connection that reads a table keeps a cache entry per partition: 313 partitions took 21 MB a connection and
+    # Postgres out of its memory (k3d, 10-minute periods). Maintenance creates them every minute.
+    partitions-ahead: 6h
+    maintenance-interval: 1m
+    lock-timeout: 2s
+    # Rows left outside the partitions are deleted this many a statement: one long delete would hold up another instance's
+    # partition change, and every insert queued behind it.
+    unpartitioned-delete-batch: 10000
+  reconciliation:
+    statement-timeout: 60s
+    # Per hash, times Postgres's hash_mem_multiplier (2), and a comparison holds up to two: sized for Postgres's 912Mi.
+    work-mem: 32MB
+    example-limit: 20
+    resolve-concurrency: 16
+  totals:
+    read-interval: 1s
+    # Up to 50 increments a second wait for the fold: about 3,000 rows to sum on a read.
+    rollup-interval: 1m
   profile:
     duplicate-share: 0.02
     # 0: both inserts race on the key; 50ms: accepted, no result yet; 1s: the result is in.
@@ -31,10 +84,6 @@ generator:
 springdoc:
   # Otherwise every controller-local error handler is added to every operation as a possible answer.
   override-with-generic-response: false
-
-logging:
-  pattern:
-    correlation: "[run=%X{runId:-}] "
 
 management:
   endpoints:

@@ -7,11 +7,11 @@ import com.ledgerlab.common.RejectReason;
 import com.ledgerlab.common.TransferOutcome;
 import com.ledgerlab.common.TransferResultEvent;
 import com.ledgerlab.ledger.service.LedgerService;
-import com.ledgerlab.ledger.service.RunService;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -26,7 +26,6 @@ import tools.jackson.databind.ObjectMapper;
 class ResultPublisherTest extends IntegrationTest {
 
     @Autowired LedgerService ledger;
-    @Autowired RunService runs;
     @Autowired JdbcClient jdbc;
     @Autowired ConsumerFactory<String, String> consumerFactory;
     @Autowired ObjectMapper objectMapper;
@@ -34,10 +33,10 @@ class ResultPublisherTest extends IntegrationTest {
 
     @Test
     void publishes_one_result_event_per_processed_transfer_and_marks_the_row_published() {
-        var runId = UUID.randomUUID();
-        runs.openAccounts(runId, setup(3, 1_000, 1));
-        var posted = transfer(runId, 1, 2, 100);
-        var rejected = transfer(runId, 1, 3, 100);
+        openBank(3, 1_000, 1);
+        var posted = transfer(1, 2, 100);
+        var rejected = transfer(1, 3, 100);
+        var sent = Set.of(posted.transferId(), rejected.transferId());
 
         var received = new ArrayList<TransferResultEvent>();
         var overrides = new Properties();
@@ -52,20 +51,20 @@ class ResultPublisherTest extends IntegrationTest {
             await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
                 consumer.poll(Duration.ofMillis(200)).forEach(record ->
                     received.add(objectMapper.readValue(record.value(), TransferResultEvent.class)));
-                assertThat(received).filteredOn(event -> event.runId().equals(runId)).hasSize(2);
+                assertThat(received).filteredOn(event -> sent.contains(event.transferId())).hasSize(2);
             });
         }
 
         var byTransfer = received.stream()
-            .filter(event -> event.runId().equals(runId))
+            .filter(event -> sent.contains(event.transferId()))
             .collect(Collectors.toMap(TransferResultEvent::transferId, Function.identity()));
         assertThat(byTransfer.get(posted.transferId()).outcome()).isEqualTo(TransferOutcome.POSTED);
         assertThat(byTransfer.get(rejected.transferId()).outcome()).isEqualTo(TransferOutcome.REJECTED);
         assertThat(byTransfer.get(rejected.transferId()).rejectReason()).isEqualTo(RejectReason.BLOCKED_ACCOUNT);
+        assertThat(byTransfer.get(posted.transferId()).acceptedAt()).isEqualTo(posted.acceptedAt());
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
-            var unpublished = jdbc.sql("SELECT count(*) FROM transfers WHERE run_id = :r AND result_published_at IS NULL")
-                .param("r", runId).query(Long.class).single();
+            var unpublished = jdbc.sql("SELECT count(*) FROM transfers WHERE result_published_at IS NULL").query(Long.class).single();
             assertThat(unpublished).isZero();
         });
     }

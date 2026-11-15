@@ -1,13 +1,15 @@
 package com.ledgerlab.gateway.api;
 
-/** Error texts of the gateway's API; clients tell the cases apart by status code, the text names it. */
+/** Error codes of the gateway's API. */
 public final class GatewayErrors {
-    public static final String PERIOD_CLOSED = "period closed";
-    public static final String PERIOD_NOT_CLOSED = "period not closed";
-    public static final String CLOSE_LOCK_TIMEOUT = "inserts in flight did not finish in time";
-    public static final String BAD_REQUEST = "bad request";
-    public static final String CONFLICT = "conflict";
+    public static final String UNKNOWN_PERIOD = "unknown-period";
+    public static final String PERIOD_NOT_CLOSED = "period-not-closed";
+    public static final String CLOSE_LOCK_TIMEOUT = "close-lock-timeout";
+    public static final String INVALID_LIMIT = "invalid-limit";
+    public static final String INVALID_CURSOR = "invalid-cursor";
+    public static final String IDEMPOTENCY_CONFLICT = "idempotency-conflict";
     public static final String BUSY = "busy";
+    public static final String STOPPING = "stopping";
 
     private GatewayErrors() {
     }

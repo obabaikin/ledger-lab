@@ -27,7 +27,6 @@ class WarmUpDoneTest extends IntegrationTest {
 
         assertThat(registry.get(TransferWarmUp.WARM).gauge().value()).isEqualTo(1.0);
         assertThat(output.getOut()).contains("Warm-up: 20 rounds in").doesNotContain("reached its limit");
-        // The name control queries in Prometheus before it admits a run.
         assertThat(http.getForObject("/actuator/prometheus", String.class))
             .containsPattern("(?m)^gateway_warm_up_complete 1");
     }

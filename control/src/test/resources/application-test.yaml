@@ -3,22 +3,17 @@ spring:
     # A key of its own shows how a mail text with an apostrophe is written.
     basename: i18n/mail,i18n/mail-test
 control:
-  queue:
-    # Tests drive the queue and the conductor themselves.
+  periods:
+    # Tests drive the conductor themselves.
+    tick-interval: 1h
+    # Above services.request-timeout, so a count slower than an ordinary call still counts.
+    count-timeout: 2s
+  availability:
     poll-interval: 1h
-  runs:
-    # The race tests start dozens of runs at once against the queue's lock; StartAdmissionTest holds the real bound.
-    max-concurrent-starts: 100
+  series:
+    cache: 0s
   services:
     request-timeout: 500ms
-  ledger:
-    reconciliation-timeout: 500ms
-  gateway:
-    summary-timeout: 500ms
-  generator:
-    reconciliation-timeout: 500ms
-  reporting:
-    final-stats-timeout: 500ms
   prometheus:
     # Through a placeholder: a dynamic property of the base test class would win over a subclass's real Prometheus (E100).
     base-url: ${stub.prometheus-url}

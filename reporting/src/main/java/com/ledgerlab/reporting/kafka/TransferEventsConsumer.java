@@ -3,6 +3,8 @@ package com.ledgerlab.reporting.kafka;
 import com.ledgerlab.common.TransferCommand;
 import com.ledgerlab.common.TransferResultEvent;
 import com.ledgerlab.reporting.persistence.AcceptedTransfer;
+import com.ledgerlab.reporting.persistence.SecondStatsRepository;
+import com.ledgerlab.reporting.persistence.TransferKey;
 import com.ledgerlab.reporting.persistence.TransferOutcomeRow;
 import com.ledgerlab.reporting.persistence.TransferStatsRepository;
 import java.util.ArrayList;
@@ -25,13 +27,22 @@ public class TransferEventsConsumer {
     private static final Logger log = LoggerFactory.getLogger(TransferEventsConsumer.class);
     private static final String REJECT_REASON_FIELD = "rejectReason";
 
-    private final TransferStatsRepository repository;
+    private final TransferStatsRepository transfers;
+    private final SecondStatsRepository seconds;
+    private final BankLatency bankLatency;
     private final ObjectMapper objectMapper;
     private final ObjectReader commandReader;
     private final ObjectReader resultReader;
 
-    public TransferEventsConsumer(TransferStatsRepository repository, ObjectMapper objectMapper) {
-        this.repository = repository;
+    public TransferEventsConsumer(
+        TransferStatsRepository transfers,
+        SecondStatsRepository seconds,
+        BankLatency bankLatency,
+        ObjectMapper objectMapper
+    ) {
+        this.transfers = transfers;
+        this.seconds = seconds;
+        this.bankLatency = bankLatency;
         this.objectMapper = objectMapper;
         this.commandReader = objectMapper.readerFor(TransferCommand.class);
         this.resultReader = objectMapper.readerFor(TransferResultEvent.class)
@@ -45,10 +56,10 @@ public class TransferEventsConsumer {
         for (var payload : payloads) {
             TransferCommand command = parsed(payload, () -> commandReader.readValue(payload));
             if (command != null) {
-                rows.add(new AcceptedTransfer(command.transferId(), command.runId(), command.amountCents(), command.createdAt()));
+                rows.add(new AcceptedTransfer(new TransferKey(command.acceptedAt(), command.transferId()), command.amountCents()));
             }
         }
-        repository.upsertAccepted(rows);
+        seconds.add(transfers.writeAccepted(rows));
     }
 
     @KafkaListener(topics = "${reporting.results-topic}", batch = "true")
@@ -61,7 +72,8 @@ public class TransferEventsConsumer {
                 rows.add(row);
             }
         }
-        repository.upsertOutcomes(rows);
+        seconds.add(transfers.writeOutcomes(rows));
+        rows.forEach(row -> bankLatency.record(row.key().acceptedAt(), row.processedAt()));
     }
 
     /** Tolerant reader (ADR 0011): a reject reason this service does not know yet is kept as text. */
@@ -70,7 +82,7 @@ public class TransferEventsConsumer {
         TransferResultEvent event = resultReader.readValue(tree);
         var reasonNode = tree.get(REJECT_REASON_FIELD);
         var reason = reasonNode == null || reasonNode.isNull() ? null : reasonNode.asString();
-        return new TransferOutcomeRow(event.transferId(), event.runId(), event.outcome().name(), reason, event.processedAt());
+        return new TransferOutcomeRow(new TransferKey(event.acceptedAt(), event.transferId()), event.outcome().name(), reason, event.processedAt());
     }
 
     private <T> @Nullable T parsed(String payload, Supplier<T> read) {

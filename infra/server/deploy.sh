@@ -1,6 +1,8 @@
 #!/bin/sh
 # Deploys a release's images from GHCR to the server through the SSH tunnel: cert-manager, then the chart.
-# Usage: infra/server/deploy.sh <release tag> [--force] [helm args]. --force deploys while runs are in progress.
+# Usage: infra/server/deploy.sh <release tag> [--contract] [helm args]. Without --contract the release changes logic only
+# and deploys at any time; with it the release changes a contract between services and deploys only within a declared
+# maintenance window (infra/server/maintenance.sh).
 # The first deploy on a new domain: add --set ingress.tls.issuer=letsencrypt-staging, then deploy again without it.
 set -eu
 
@@ -16,7 +18,7 @@ MANIFEST_TYPES="application/vnd.oci.image.index.v1+json,application/vnd.oci.imag
 CHART="$ROOT/infra/helm/ledger-lab"
 PASSWORDS="$CONFIG_DIR/values-server.yaml"
 PLACEHOLDER_PASSWORD=change-me
-USAGE="usage: $0 <release tag, vX.Y.Z or vX.Y.Z-rc.N> [--force] [helm args]"
+USAGE="usage: $0 <release tag, vX.Y.Z or vX.Y.Z-rc.N> [--contract] [helm args]"
 # Mailed invites and the imprint (ADR 0017); the values stay in server.env, outside the repository.
 REQUIRED_SETTINGS="TURNSTILE_SITE_KEY TURNSTILE_SECRET MAILJET_API_KEY MAILJET_API_SECRET OPERATOR_NAME OPERATOR_ADDRESS OPERATOR_EMAIL"
 
@@ -31,9 +33,9 @@ if ! git -C "$ROOT" ls-remote --exit-code --tags origin "refs/tags/$RELEASE" >/d
   echo "$RELEASE is not on GitHub: git tag -a $RELEASE <sha> && git push origin $RELEASE, then wait for CI" >&2
   exit 1
 fi
-force=false
-if [ "${1:-}" = --force ]; then
-  force=true
+contract=false
+if [ "${1:-}" = --contract ]; then
+  contract=true
   shift
 fi
 require_domain
@@ -46,15 +48,32 @@ for setting in $REQUIRED_SETTINGS; do
 done
 require_cluster
 
-# Only a first install skips the check; a database that cannot be asked refuses the deploy like a running run.
-if [ "$force" = false ] && helm status ledger-lab --namespace "$NAMESPACE" >/dev/null 2>&1; then
-  if ! has_runs=$(psql_admin -tAc "SELECT to_regclass('control.runs') IS NOT NULL") \
-    || { [ "$has_runs" = t ] && ! active=$(psql_admin -tAc "SELECT count(*) FROM control.runs WHERE state IN ($ACTIVE_RUN_STATES)"); }; then
-    echo "cannot read the runs from Postgres: fix that, or deploy with --force" >&2
+installed=false
+if helm status ledger-lab --namespace "$NAMESPACE" >/dev/null 2>&1; then
+  installed=true
+fi
+
+# Postgres creates the generator's role only on an empty volume, and the chart's volume sizes reach only new volumes.
+if [ "$installed" = true ]; then
+  if ! has_generator=$(psql_admin -tAc "SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = 'generator')"); then
+    echo "cannot read the roles from Postgres: fix that first" >&2
     exit 1
   fi
-  if [ "$has_runs" = t ] && [ "$active" -gt 0 ]; then
-    echo "$active runs in progress: wait for them to finish, or deploy with --force" >&2
+  if [ "$has_generator" != t ]; then
+    echo "the server runs the chart from before the bank ran 24/7: move it as docs/guides/operations.md," \
+      "\"Moving from runs to one bank\", describes" >&2
+    exit 1
+  fi
+fi
+
+# Only a first install skips the check; a database that cannot be asked refuses the deploy like a missing window.
+if [ "$contract" = true ] && [ "$installed" = true ]; then
+  if ! in_window=$(psql_admin -tAc "SELECT EXISTS (SELECT FROM control.maintenance_windows WHERE cancelled_at IS NULL AND starts_at <= now() AND now() < ends_at)"); then
+    echo "cannot read the maintenance windows from Postgres: fix that first" >&2
+    exit 1
+  fi
+  if [ "$in_window" != t ]; then
+    echo "a contract change deploys within a maintenance window: declare one with infra/server/maintenance.sh add" >&2
     exit 1
   fi
 fi
@@ -114,5 +133,5 @@ echo "control: https://$DOMAIN"
 
 # Updates install without a reboot (apt-unattended-upgrades.conf), so a new kernel waits for one by hand.
 if [ -n "${SERVER:-}" ] && ssh -o BatchMode=yes "root@$SERVER" test -f /var/run/reboot-required; then
-  echo "the server needs a reboot to finish its updates; between runs: ssh root@$SERVER systemctl reboot" >&2
+  echo "the server needs a reboot to finish its updates; in a maintenance window: ssh root@$SERVER systemctl reboot" >&2
 fi

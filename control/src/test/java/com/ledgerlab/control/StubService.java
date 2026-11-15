@@ -20,12 +20,13 @@ import tools.jackson.databind.ObjectMapper;
 final class StubService implements AutoCloseable {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String QUERY_PARAM = "query";
 
     volatile int status = 200;
     volatile Duration delay = Duration.ZERO;
 
-    /** {@link #headers} by lowercased name. */
-    record Call(String method, String path, String body, Map<String, String> headers) {
+    /** {@link #headers} by lowercased name; {@link #params} form-decoded, empty without a query string. */
+    record Call(String method, String path, String body, Map<String, String> headers, Map<String, String> params) {
     }
 
     private record Answer(int status, String body, Duration delay) {
@@ -55,9 +56,13 @@ final class StubService implements AutoCloseable {
         var path = exchange.getRequestURI().getPath();
         var headers = new HashMap<String, String>();
         exchange.getRequestHeaders().forEach((name, values) -> headers.put(name.toLowerCase(Locale.ROOT), String.join(",", values)));
-        calls.add(new Call(method, path, new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8), headers));
         var rawQuery = exchange.getRequestURI().getRawQuery();
+        var params = paramsOf(rawQuery);
+        calls.add(new Call(method, path, new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8), headers, params));
         var answer = rawQuery == null ? null : answers.get(method + " " + path + "?" + URLDecoder.decode(rawQuery, StandardCharsets.UTF_8));
+        if (answer == null && params.containsKey(QUERY_PARAM)) {
+            answer = answers.get(method + " " + path + "?" + QUERY_PARAM + "=" + params.get(QUERY_PARAM));
+        }
         if (answer == null) {
             answer = answers.get(method + " " + path);
         }
@@ -76,6 +81,19 @@ final class StubService implements AutoCloseable {
         exchange.close();
     }
 
+    private static Map<String, String> paramsOf(String rawQuery) {
+        var params = new HashMap<String, String>();
+        if (rawQuery != null) {
+            for (var pair : rawQuery.split("&", -1)) {
+                var at = pair.indexOf('=');
+                params.put(
+                    URLDecoder.decode(at < 0 ? pair : pair.substring(0, at), StandardCharsets.UTF_8),
+                    at < 0 ? "" : URLDecoder.decode(pair.substring(at + 1), StandardCharsets.UTF_8));
+            }
+        }
+        return params;
+    }
+
     void answer(String method, String path, int status) {
         answer(method, path, status, null);
     }
@@ -89,7 +107,10 @@ final class StubService implements AutoCloseable {
         answers.put(method + " " + path, new Answer(status, text, delay));
     }
 
-    /** An answer to one query string only, e.g. one PromQL query; {@code query} is the whole query string, form-decoded as Prometheus reads it. */
+    /**
+     * An answer to one query string only, e.g. one PromQL query; {@code query} is the whole query string, form-decoded as
+     * Prometheus reads it. A range query is matched by its PromQL alone, {@code query=<PromQL>}, whatever its range.
+     */
     void answerQuery(String method, String path, String query, int status, Object body) {
         answer(method, path + "?" + query, status, body);
     }

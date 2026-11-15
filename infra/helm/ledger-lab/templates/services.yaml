@@ -1,9 +1,8 @@
 {{- $root := . }}
-{{- if ne (empty .Values.runs.tpsOptions) (empty .Values.runs.defaultTps) }}
-{{- fail "runs.tpsOptions and runs.defaultTps must be set together: control refuses a default that is not one of the options" }}
-{{- end }}
+{{- $_ := include "ledger-lab.checkNumbers" . }}
+{{- $periodLength := printf "%dm" (int .Values.periodMinutes) }}
+{{- $retention := printf "%dh" (int .Values.retentionHours) }}
 {{- range $name, $service := .Values.services }}
-{{- $usesDatabase := ne $name "generator" }}
 {{- $usesKafka := has $name (list "ledger" "gateway" "reporting") }}
 ---
 apiVersion: v1
@@ -54,14 +53,12 @@ spec:
       securityContext:
         seccompProfile: {type: RuntimeDefault}
       initContainers:
-        {{- if $usesDatabase }}
         - name: wait-for-postgres
           image: {{ $root.Values.postgres.image }}
           command: ["sh", "-c", "until pg_isready -h postgres -p 5432; do sleep 1; done"]
           securityContext: {{- include "ledger-lab.restricted" $root | nindent 12 }}
           resources:
             limits: {memory: {{ $root.Values.initMemory }}}
-        {{- end }}
         {{- if $usesKafka }}
         - name: wait-for-topics
           image: {{ $root.Values.kafka.image }}
@@ -74,6 +71,17 @@ spec:
           resources:
             limits: {memory: {{ $root.Values.kafka.toolsMemory }}}
         {{- end }}
+        {{- if eq $name "generator" }}
+        # The clients start once the bank takes requests: the Service lets a connection through only to a ready gateway,
+        # and the gateway is ready after its warm-up. Started beside a cold gateway, they gave up on thousands of
+        # transfers in the first minute of a deploy.
+        - name: wait-for-gateway
+          image: {{ $root.Values.postgres.image }}
+          command: ["sh", "-c", "until nc -z -w 2 gateway {{ $root.Values.services.gateway.port }}; do sleep 2; done"]
+          securityContext: {{- include "ledger-lab.restricted" $root | nindent 12 }}
+          resources:
+            limits: {memory: {{ $root.Values.initMemory }}}
+        {{- end }}
       containers:
         - name: {{ $name }}
           image: {{ include "ledger-lab.image" (dict "root" $root "service" $service) }}
@@ -84,11 +92,20 @@ spec:
           env:
             - {name: SERVER_PORT, value: {{ $service.port | quote }}}
             - {name: MANAGEMENT_SERVER_PORT, value: {{ $root.Values.managementPort | quote }}}
-            {{- if $usesDatabase }}
             - {name: SPRING_DATASOURCE_URL, value: "jdbc:postgresql://postgres:5432/ledgerlab?reWriteBatchedInserts=true"}
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef: {name: db-passwords, key: {{ $name }}}
+            {{- if eq $name "control" }}
+            - {name: CONTROL_PERIODS_LENGTH, value: {{ $periodLength | quote }}}
+            - {name: CONTROL_PERIODS_DETAILSRETENTION, value: {{ $retention | quote }}}
+            - {name: CONTROL_PERIODS_SETTLEDELAY, value: {{ $root.Values.closing.settleDelay | quote }}}
+            - {name: CONTROL_PERIODS_CHECKWAIT, value: {{ $root.Values.closing.checkWait | quote }}}
+            - {name: CONTROL_PERIODS_RETRYWAIT, value: {{ $root.Values.closing.retryWait | quote }}}
+            - {name: CONTROL_PERIODS_VERDICTDEADLINE, value: {{ $root.Values.closing.verdictDeadline | quote }}}
+            {{- else }}
+            - {name: {{ upper $name }}_PERIODS_LENGTH, value: {{ $periodLength | quote }}}
+            - {name: {{ upper $name }}_PERIODS_RETENTION, value: {{ $retention | quote }}}
             {{- end }}
             {{- if $usesKafka }}
             - {name: SPRING_KAFKA_BOOTSTRAPSERVERS, value: "kafka:9092"}
@@ -103,18 +120,32 @@ spec:
               valueFrom:
                 fieldRef: {fieldPath: metadata.name}
             - {name: LEDGER_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
+            - {name: LEDGER_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
+            # The hot accounts' surplus goes to the pool once a period.
+            - {name: LEDGER_POOL_HOTSWEEPINTERVAL, value: {{ $periodLength | quote }}}
+            {{- end }}
+            {{- if eq $name "gateway" }}
+            - {name: GATEWAY_LATENCY_SLOTHRESHOLD, value: {{ $root.Values.slo.freshnessThreshold | quote }}}
             {{- end }}
             {{- if eq $name "generator" }}
             - {name: GENERATOR_GATEWAYURL, value: "http://gateway:{{ $root.Values.services.gateway.port }}"}
+            - {name: GENERATOR_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
+            - {name: GENERATOR_LOAD_TPS, value: {{ int64 $root.Values.load.baseTps | quote }}}
+            - {name: GENERATOR_LOAD_MAXPULSETPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
             {{- end }}
             {{- if eq $name "control" }}
             {{- range $other := list "ledger" "gateway" "generator" "reporting" }}
             - {name: CONTROL_{{ upper $other }}_BASEURL, value: "http://{{ $other }}:{{ (get $root.Values.services $other).port }}"}
             {{- end }}
-            - {name: CONTROL_LEDGER_TRANSFERPARTITIONS, value: {{ $root.Values.kafka.partitions | quote }}}
             - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
-            - {name: CONTROL_RUNS_MAXTOTALTPS, value: {{ $root.Values.runs.maxTotalTps | quote }}}
+            - {name: CONTROL_LOAD_MINTPS, value: {{ int64 $root.Values.load.baseTps | quote }}}
+            - {name: CONTROL_LOAD_MAXTPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
+            - {name: CONTROL_LOAD_TPSSTEP, value: {{ int64 $root.Values.load.tpsStep | quote }}}
+            - {name: CONTROL_LOAD_DEFAULTTPS, value: {{ int64 $root.Values.load.defaultPulseTps | quote }}}
+            # Read back by infra/server/maintenance.sh, which tells whether a window is declared in time.
+            - {name: CONTROL_MAINTENANCE_NOTICE, value: "{{ int $root.Values.maintenance.noticeHours }}h"}
+            - {name: CONTROL_FRESHNESS_THRESHOLD, value: {{ $root.Values.slo.freshnessThreshold | quote }}}
             - {name: CONTROL_SITE_VERSION, value: {{ $root.Values.version | quote }}}
             {{- with $root.Values.ingress.host }}
             - {name: CONTROL_SITE_BASEURL, value: "https://{{ . }}"}
@@ -130,15 +161,6 @@ spec:
             - name: {{ $variable }}
               valueFrom:
                 secretKeyRef: {name: control-keys, key: {{ $key }}}
-            {{- end }}
-            {{- with $root.Values.runs.tpsOptions }}
-            - {name: CONTROL_RUNS_TPSOPTIONS, value: {{ join "," . | quote }}}
-            {{- end }}
-            {{- with $root.Values.runs.defaultTps }}
-            - {name: CONTROL_RUNS_DEFAULTTPS, value: {{ . | quote }}}
-            {{- end }}
-            {{- with $root.Values.runs.accountCount }}
-            - {name: CONTROL_RUNS_ACCOUNTS_COUNT, value: {{ . | quote }}}
             {{- end }}
             {{- range $i := until (int $root.Values.services.ledger.replicas) }}
             - {name: CONTROL_CHAOS_LEDGERINSTANCES_{{ $i }}_NAME, value: "ledger-{{ $i }}"}

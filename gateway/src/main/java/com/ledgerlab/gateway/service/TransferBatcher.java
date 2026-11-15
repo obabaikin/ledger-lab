@@ -2,6 +2,7 @@ package com.ledgerlab.gateway.service;
 
 import com.ledgerlab.gateway.GatewayProperties;
 import com.ledgerlab.gateway.domain.Transfer;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -41,6 +42,7 @@ public class TransferBatcher {
     private final int maxBatch;
     private final Duration answerTimeout;
     private final DistributionSummary batchSizes;
+    private final Counter refusedAsStopping;
     private final List<Thread> writers;
 
     private volatile boolean stopping = false;
@@ -63,6 +65,7 @@ public class TransferBatcher {
             .description("submissions committed in one transaction")
             .publishPercentiles(BATCH_PERCENTILES)
             .register(registry);
+        this.refusedAsStopping = Counter.builder("gateway.transfers").tag("outcome", "stopping").register(registry);
         this.writers = IntStream.range(0, props.accept().writers())
             .mapToObj(index -> Thread.ofPlatform().name(WRITER_THREAD + index).daemon().unstarted(this::write))
             .toList();
@@ -86,17 +89,18 @@ public class TransferBatcher {
             writer.join(STOP_WAIT.toMillis());
         }
         for (var pending = queue.poll(); pending != null; pending = queue.poll()) {
-            pending.result().completeExceptionally(new GatewayStoppingException());
+            pending.result().completeExceptionally(refusedAsStopping());
         }
     }
 
     /** Returns after the commit, with the outcome a request of its own would have had. */
     public Transfer accept(TransferRequest request) throws InterruptedException {
-        if (stopping) {
-            throw new GatewayStoppingException();
-        }
         var pending = new Pending(request);
         queue.put(pending);
+        // After the put, not before: a stop that emptied the queue just before it would leave this request to its timeout.
+        if (stopping && queue.remove(pending)) {
+            throw refusedAsStopping();
+        }
         try {
             return pending.result().get(answerTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (ExecutionException e) {
@@ -109,6 +113,11 @@ public class TransferBatcher {
         } catch (TimeoutException e) {
             throw new AcceptTimeoutException(answerTimeout);
         }
+    }
+
+    private GatewayStoppingException refusedAsStopping() {
+        refusedAsStopping.increment();
+        return new GatewayStoppingException();
     }
 
     private void write() {
