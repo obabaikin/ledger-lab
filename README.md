@@ -2,8 +2,7 @@
 
 [![CI](https://github.com/obabaikin/ledger-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/obabaikin/ledger-lab/actions/workflows/ci.yml)
 
-An event-driven double-entry ledger that runs around the clock under load, with chaos testing and hourly
-reconciliation.
+**24/7:** an event-driven double-entry ledger under load, with chaos testing and hourly reconciliation.
 
 **Live demo: [ledger-lab.de](https://ledger-lab.de)** — watch the bank; enter your email to get a link, then raise the
 load or crash the ledger yourself.
@@ -252,7 +251,6 @@ Each goal names how it is checked; a goal is done when the check holds.
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
 | Nothing received goes unaccounted | every message a service took is booked or reported | planned |
-| IBAN account numbers at the API (optional) | the gateway validates and maps IBANs | planned |
 
 ## Design notes
 

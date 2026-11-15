@@ -157,7 +157,7 @@ curl -s localhost:8083/api/sessions/$SESSION/runs/$RUN/report   # the verdict an
 ```
 
 Every step control takes, by hand against the services' internal APIs, and how a client reads the
-gateway's answers: [docs/guides/run-by-hand.md](../guides/run-by-hand.md). Only control is meant to
+gateway's answers: [docs/v1/run-by-hand.md](run-by-hand.md). Only control is meant to
 be reached from outside; gateway, ledger, generator and reporting stay internal.
 
 Local Kubernetes, the server, invites and work on the page: [docs/guides/operations.md](../guides/operations.md).

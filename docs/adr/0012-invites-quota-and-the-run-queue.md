@@ -1,6 +1,6 @@
 # ADR 0012: Invites, quota and the run queue
 
-Status: accepted · Date: 2026-10-12
+Status: superseded by [ADR 0021](0021-one-bank-around-the-clock.md) · Date: 2026-10-12 · Superseded: 2026-11-15
 
 ## Context
 

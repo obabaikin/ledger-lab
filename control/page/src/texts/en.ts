@@ -20,7 +20,7 @@ export const en = {
   },
   deletePage: {
     title: 'Delete your address',
-    explanation: 'This deletes the email address this link was mailed to. Its invite and runs stay, without the address.',
+    explanation: 'This deletes the email address this link was mailed to. Its invite and sessions stay, without the address.',
     button: 'Delete my address',
     asked: (hours: number) => `Deletion of your address starts in ${hours} hours.`,
     askedBefore: (hours: number) => `Deletion of your address starts ${hours} hours after your first request.`,
@@ -32,14 +32,14 @@ export const en = {
   privacy: {
     title: 'Privacy',
     heading1: 'What is stored',
-    text1: 'The email address you enter, when you ask for a link, which emails were sent to it, and, for the invite it carries, its visits, sessions and runs.',
+    text1: 'The email address you enter, when you ask for a link, which emails were sent to it, and, for the invite it carries, its visits and sessions.',
     heading2: 'Why, and on what basis',
     text2:
       "We use your email address to send the access link you requested and to control access to the service (Art. 6(1)(b) GDPR). Access links, request limits and bot protection help prevent automated use, abuse and the use of the site's email facility for spam; we process this data on the basis of our legitimate interest in operating and protecting the service (Art. 6(1)(f) GDPR).",
     heading3: 'How long',
     text3: (retentionDays: number) =>
       `The address is deleted ${retentionDays} days after its last use: your last request or your last visit using the link.`,
-    text3Remains: 'The invite, its sessions and runs, and the records of the emails sent remain after that, without the email address.',
+    text3Remains: 'The invite, its sessions and the records of the emails sent remain after that, without the email address.',
     heading4: 'Who else processes it',
     text4:
       'The site runs on a server rented from Contabo in Germany; Contabo hosts all data listed here. Mailjet sends the emails, from servers in the EU, with open and click tracking switched off. Cloudflare Turnstile checks that a request comes from a person; it loads only when you click into the email field or start typing in it, and processes technical information about your browser and connection, including your IP address, but not your email address. Cloudflare is based in the USA; the transfer relies on the EU-US Data Privacy Framework, and on the EU standard contractual clauses where that does not apply. All three process the data on our behalf (Art. 28 GDPR).',

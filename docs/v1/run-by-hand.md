@@ -1,7 +1,7 @@
 # A run by hand
 
 The steps control takes for a run, against the services' internal APIs, and how a client reads the
-bank's answers. Start the services as in the [README](../../README.md#running-locally).
+bank's answers. Start the services as in the [README](README.md#running-locally).
 
 ## The steps control takes
 

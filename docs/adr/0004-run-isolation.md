@@ -1,6 +1,6 @@
 # ADR 0004: Logical isolation of runs
 
-Status: accepted · Date: 2026-10-07
+Status: superseded by [ADR 0021](0021-one-bank-around-the-clock.md) · Date: 2026-10-07 · Superseded: 2026-11-15
 
 ## Context
 
