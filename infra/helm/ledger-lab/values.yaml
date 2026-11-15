@@ -77,7 +77,7 @@ postgres:
   # operator); while the gateway is replaced, its old and new pod hold their pools at once.
   maxConnections: 150
   # Which statements take the time (pg_stat_statements, read by the exporter), and any statement slower than this in
-  # the log.
+  # the log, without its parameters: they can carry a visitor's email address, which must not outlive its deletion.
   preloadLibraries: pg_stat_statements
   logMinDuration: 1s
 
