@@ -2,16 +2,19 @@ import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { api, DEFAULT_CHART_RANGE, type BankView, type ChartRange, type PeriodView, type SeriesView } from './api/client'
 import { Availability } from './Availability'
 import { BuildInfo } from './BuildInfo'
-import { ClientsSpeed } from './ClientsSpeed'
 import { Charts } from './Charts'
 import { flowRates, NO_FLOW, stopLedgerWires, type Flow } from './FlowDots'
 import { dayAndMonth, hoursMinutes, MS_PER_SECOND } from './format'
 import { Hero } from './Hero'
 import { LiveScheme } from './LiveScheme'
 import { Periods } from './Periods'
+import { SummaryBar } from './SummaryBar'
+import type { Section } from './sections'
 import { t } from './texts'
 import { usePolling } from './usePolling'
 
+const LIVE: Section = 'live'
+const CHARTS: Section = 'charts'
 const BANK_POLL_MS = 1000
 const PERIODS_POLL_MS = 5000
 const SERIES_POLL_MS = 15000
@@ -119,15 +122,10 @@ export function BankPage(props: {
 
   return (
     <main aria-busy={bank === null}>
-      <Hero />
+      <Hero bank={bank} action={props.invite} />
       {props.top}
-      {(props.invite || bank?.clients) && (
-        <section className="intro">
-          {props.invite}
-          {bank?.clients && <ClientsSpeed clients={bank.clients} load={bank.load} />}
-        </section>
-      )}
-      {props.controls}
+      <SummaryBar bank={bank} periods={periods} />
+      {bank === null && props.controls}
       {lost && (
         <p role="status" className="banner">
           {bank === null ? t.connection.lostBeforeFirst : t.connection.lost}
@@ -135,16 +133,25 @@ export function BankPage(props: {
       )}
       {bank && (
         <>
-          <section className="card">
-            <p className="status" data-testid="bank-status">
-              {bank.startedAt === null
-                ? t.bank.notStarted
-                : t.bank.running(`${dayAndMonth(bank.startedAt)}, ${hoursMinutes(bank.startedAt)}`, age(Date.parse(bank.startedAt), Date.now()))}
+          <section className="card" id={LIVE} aria-label={t.bank.heading}>
+            <h2>{t.bank.heading}</h2>
+            <p className="question">
+              {t.bank.question}{' '}
+              <span data-testid="bank-status">
+                {bank.startedAt === null
+                  ? t.bank.notStarted
+                  : t.bank.running(`${dayAndMonth(bank.startedAt)}, ${hoursMinutes(bank.startedAt)}`, age(Date.parse(bank.startedAt), Date.now()))}
+              </span>
             </p>
+            {props.controls}
             <LiveScheme bank={bank} rates={rates ?? undefined} intervalMs={BANK_POLL_MS} />
           </section>
-          {seriesLost && <p className="hint">{t.charts.unavailable}</p>}
-          <Charts view={series} chaos={bank.chaos.recent} range={range} onRange={pickRange} />
+          <section className="card" id={CHARTS} aria-label={t.charts.heading}>
+            <h2>{t.charts.heading}</h2>
+            <p className="question">{t.charts.question}</p>
+            {seriesLost && <p className="hint">{t.charts.unavailable}</p>}
+            <Charts view={series} chaos={bank.chaos.recent} range={range} onRange={pickRange} />
+          </section>
           <Availability bank={bank} />
           <Periods bank={bank} periods={periods} lost={periodsLost} />
         </>

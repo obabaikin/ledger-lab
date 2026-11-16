@@ -9,7 +9,7 @@ const NOW = Date.parse('2026-11-30T15:00:00Z')
 const day = (daysBack: number) => new Date(Date.parse('2026-11-30T00:00:00Z') - daysBack * 86_400_000).toISOString().slice(0, 10)
 
 describe('service levels', () => {
-  it('color a level green below half of the budget, yellow from half to 90 %, red above it or with the target missed', () => {
+  it('color a level green below half of the budget, yellow from half to 90 %, red above it or with the SLO missed', () => {
     expect(health(0.49, false)).toBe('ok')
     expect(health(0.5, false)).toBe('warn')
     expect(health(0.9, false)).toBe('warn')
@@ -73,7 +73,9 @@ describe('service levels', () => {
 
     expect(screen.getByTestId('slo-posting-0-value')).toHaveTextContent(en.availability.notMeasured)
     expect(screen.queryByTestId('slo-posting-0-used')).toBeNull()
-    expect(screen.getByTestId('posting-since')).toHaveTextContent(en.availability.postingSince(dayAndMonth('2026-11-17T03:00:00Z')))
+    expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.ofTransfers('95 %', en.availability.windowSince(dayAndMonth('2026-11-17T03:00:00Z'))))
+    expect(screen.getByTestId('slo-availability')).toHaveTextContent(en.availability.ofMinutes('99.9 %', en.availability.windowDays(30)))
+    expect(screen.queryByText(/Transfers counted since/)).toBeNull()
   })
 
   it('name a bar by its UTC day for a visitor west of UTC too', () => {
@@ -89,7 +91,7 @@ describe('service levels', () => {
     }
   })
 
-  it('fill the budget bar to its share and cap it at the whole bar when the target is missed', () => {
+  it('fill the budget bar to its share and cap it at the whole bar when the SLO is missed', () => {
     const view = bank()
     render(<Availability bank={{ ...view, posting: { ...view.posting, targets: [{ ...view.posting.targets[0]!, share: 0.94, budgetUsed: 1.2 }, view.posting.targets[1]!] } }} />)
 

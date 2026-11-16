@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { api, ApiFailure } from './api/client'
 import { BuildInfo } from './BuildInfo'
-import { Hero } from './Hero'
+import { TopBar } from './Hero'
 import { ControlError } from './api/errors'
 import { ErrorText } from './InviteForm'
 import { t } from './texts'
@@ -39,7 +39,7 @@ export function DeletePage() {
 
   return (
     <main>
-      <Hero />
+      <TopBar />
       <section className="card legal">
         <h2>{text.title}</h2>
         {outcome !== null && outcome !== 'failed' && <p role="status">{STATUS_TEXT[outcome]}</p>}

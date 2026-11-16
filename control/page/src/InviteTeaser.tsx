@@ -11,18 +11,13 @@ export function InviteTeaser() {
     if (open) form.current?.focus()
   }, [open])
 
-  return (
-    <div className="teaser">
-      <h2>{t.inviteForm.heading}</h2>
-      {open ? (
-        <div ref={form} tabIndex={-1} data-testid="invite-opened">
-          <InviteForm withHeading={false} />
-        </div>
-      ) : (
-        <button type="button" className="primary" onClick={() => setOpen(true)}>
-          {t.landing.tryIt}
-        </button>
-      )}
+  return open ? (
+    <div ref={form} tabIndex={-1} className="teaser" data-testid="invite-opened">
+      <InviteForm withHeading={false} />
     </div>
+  ) : (
+    <button type="button" className="primary" onClick={() => setOpen(true)}>
+      {t.landing.tryIt}
+    </button>
   )
 }

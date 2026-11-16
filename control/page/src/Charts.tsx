@@ -8,9 +8,8 @@ type Line = { name: SeriesName; color: string; points: Point[] }
 type Guide = { name: keyof typeof t.charts.guides; value: number; color: string }
 type Scale = { y: (v: number) => number | null; ticks: { value: number; label: string }[] }
 
-const W = 420
+const W = 340
 const H = 170
-const SMALL_H = 110
 const LEFT = 44
 const RIGHT = 8
 const BOTTOM = 22
@@ -18,8 +17,8 @@ const TOP = 8
 const HEADROOM = 1.15
 const MIN_TOP = 10
 const LINEAR_TICKS = 3
-/** The latency's log scale, in milliseconds: from below the fastest transfers to the gateway's longest bucket. */
-const LOG_FLOOR_MS = 5
+/** The latency's log scale, in milliseconds, up to the gateway's longest bucket; its floor lies on the axis, as 0 does on the others. */
+const LOG_FLOOR_MS = 10
 const LOG_CEILING_MS = 60_000
 const LOG_TICKS_MS = [10, 100, 1000, 10_000]
 /** Where the latency lines ought to stay: guides only, not objectives. */
@@ -137,16 +136,16 @@ function Chart(props: {
         return y === null ? null : (
           <g key={value}>
             <line x1={LEFT} x2={W - RIGHT} y1={y} y2={y} stroke="var(--line)" />
-            <text x={LEFT - 6} y={y + 4} textAnchor="end" fontSize={10} fill="var(--muted)">
+            <text x={LEFT - 6} y={y + 4} textAnchor="end" className="axis" fill="var(--muted)">
               {label}
             </text>
           </g>
         )
       })}
-      <text x={LEFT} y={height - 4} fontSize={10} fill="var(--muted)">
+      <text x={LEFT} y={height - 4} className="axis" fill="var(--muted)">
         {edges[0]}
       </text>
-      <text x={W - RIGHT} y={height - 4} fontSize={10} fill="var(--muted)" textAnchor="end">
+      <text x={W - RIGHT} y={height - 4} className="axis" fill="var(--muted)" textAnchor="end">
         {edges[1]}
       </text>
       {guides.map((g) => {
@@ -154,7 +153,7 @@ function Chart(props: {
         return y === null ? null : (
           <g key={g.name} data-testid="latency-guide">
             <line x1={LEFT} x2={W - RIGHT} y1={y} y2={y} stroke={g.color} strokeDasharray="4 3" opacity={0.8} />
-            <text x={W - RIGHT} y={y - 3} fontSize={10} fill={g.color} textAnchor="end">
+            <text x={W - RIGHT} y={y - 3} className="axis" fill={g.color} textAnchor="end">
               {t.charts.guides[g.name](g.value)}
             </text>
           </g>
@@ -163,7 +162,7 @@ function Chart(props: {
       {bands.map(([from, to]) => (
         <g key={from} data-testid="crash-band">
           <rect x={x(from)} y={TOP} width={Math.max(2, x(to) - x(from))} height={height - TOP - BOTTOM} fill="var(--bad)" opacity={0.12} />
-          <text x={x(from) + 3} y={TOP + 12} fontSize={10} fill="var(--bad)">
+          <text x={x(from) + 3} y={TOP + 12} className="axis" fill="var(--bad)">
             {t.charts.crashed}
           </text>
         </g>
@@ -209,7 +208,13 @@ function Readout({ lines, at, from, step, as }: { lines: Line[]; at: number; fro
       {hoursMinutes(new Date(from + at * step * MS_PER_SECOND).toISOString())}
       {lines.map((l) => {
         const v = l.points[at]?.[1] ?? null
-        return <span key={l.name}>{` · ${t.charts.series[l.name]} ${v === null ? NO_DATA : as(v)}`}</span>
+        return (
+          <span key={l.name}>
+            <span className="sep"> · </span>
+            <i style={{ background: l.color }} />
+            {`${t.charts.short[l.name]} ${v === null ? NO_DATA : as(v)}`}
+          </span>
+        )
       })}
     </p>
   )
@@ -230,7 +235,7 @@ export function Charts(props: { view: SeriesView | null; chaos: ChaosEvent[]; ra
       </select>
     </label>
   )
-  if (view === null) return <section className="charts">{picker}</section>
+  if (view === null) return <div className="charts">{picker}</div>
   const span = Math.max(0, (view.points - 1) * view.stepSeconds)
   const line = (name: SeriesName, color: string): Line => ({ name, color, points: seriesPoints(view, name) })
   const flow = [line('ACCEPTED_PER_SECOND', 'var(--flow)'), line('POSTED_PER_SECOND', 'var(--ok)')]
@@ -251,27 +256,29 @@ export function Charts(props: { view: SeriesView | null; chaos: ChaosEvent[]; ra
     return shown === null ? <p className="readout">{NO_DATA}</p> : <Readout lines={lines} at={shown} from={from} step={view.stepSeconds} as={as} />
   }
   return (
-    <section className="charts" aria-label={t.charts.flow}>
+    <div className="charts">
       <div className="chartsHead">{picker}</div>
-      <div className="card chart">
+      <div className="chart">
         <h3>{t.charts.flow}</h3>
         <Legend lines={flow} />
-        {view.series.length === 0 && <p className="hint">{t.charts.noData}</p>}
-        <Chart {...common} lines={flow} scale={linearScale(flow, H)} height={H} label={t.charts.flow} />
+        <div>
+          {view.series.length === 0 && <p className="hint">{t.charts.noData}</p>}
+          <Chart {...common} lines={flow} scale={linearScale(flow, H)} height={H} label={t.charts.flow} />
+        </div>
         {readout(flow, count)}
       </div>
-      <div className="card chart">
+      <div className="chart">
         <h3>{t.charts.latency}</h3>
         <Legend lines={latency} />
         <Chart {...common} lines={latency} scale={logScale(H)} height={H} guides={guides} label={t.charts.latency} />
         {readout(latency, duration)}
       </div>
-      <div className="card chart">
+      <div className="chart">
         <h3>{t.charts.refused}</h3>
         <Legend lines={refused} />
-        <Chart {...common} lines={refused} scale={linearScale(refused, SMALL_H)} height={SMALL_H} label={t.charts.refused} />
+        <Chart {...common} lines={refused} scale={linearScale(refused, H)} height={H} label={t.charts.refused} />
         {readout(refused, count)}
       </div>
-    </section>
+    </div>
   )
 }

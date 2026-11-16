@@ -21,3 +21,6 @@ export const dayAndMonth = (iso: string) => new Date(iso).toLocaleDateString('en
 export const utcDayAndMonth = (day: string) => new Date(day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 
 export const percent = (share: number, digits: number) => `${(share * 100).toFixed(digits)} %`
+
+/** A speed in transfers per second, without thousands separators: 1400/s. */
+export const rate = (tps: number) => String(Math.round(tps))

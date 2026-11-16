@@ -1,6 +1,7 @@
 import type { BankView } from './api/client'
 import { REPOSITORY_URL } from './Diagram'
 import { count, dayAndMonth, hoursMinutes, MS_PER_SECOND, percent, utcDayAndMonth } from './format'
+import type { Section } from './sections'
 import { t } from './texts'
 
 const VALUE_DIGITS = 2
@@ -15,14 +16,30 @@ const MS_PER_DAY = 86_400_000
 const BAR_WIDTH = 10
 const BAR_GAP = 2
 const BARS_HEIGHT = 40
+const SLO: Section = 'slo'
 const SLO_URL = `${REPOSITORY_URL}/blob/main/docs/guides/slo.md`
 
-type Health = keyof typeof t.availability.health
+export type Health = keyof typeof t.availability.health
 type Day = BankView['slo']['days'][number]
 type Posting = BankView['posting']
+type Target = Posting['targets'][number]
 
 export const health = (used: number, missed: boolean): Health =>
   missed || used > BAD_ABOVE ? 'bad' : used >= WARN_FROM ? 'warn' : 'ok'
+
+export type Level = { value: string | null; used: number | null; state: Health | null }
+
+const level = (share: number | null, used: number | null, missed: boolean): Level => ({
+  value: share === null ? null : percent(share, VALUE_DIGITS),
+  used,
+  state: used === null ? null : health(used, missed),
+})
+
+export const availabilityLevel = (slo: BankView['slo']): Level =>
+  level(slo.availability, slo.availability === null ? null : slo.badMinutes / slo.budgetMinutes, slo.availability !== null && slo.availability < slo.target)
+
+export const postingLevel = (target: Target): Level =>
+  level(target.share, target.budgetUsed, target.share !== null && target.share < target.target)
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
@@ -66,11 +83,9 @@ function DayBars(props: { days: Day[]; windowDays: number; budget: number; label
 type CardProps = {
   testId: string
   title: string
-  value: string | null
+  level: Level
   sub: string
-  used: number | null
   usedText: string
-  missed: boolean
   days: Day[]
   windowDays: number
   budget: number
@@ -78,20 +93,20 @@ type CardProps = {
 }
 
 function Card(p: CardProps) {
-  const state = p.used === null ? null : health(p.used, p.missed)
+  const { value, used, state } = p.level
   return (
     <div className="sloCard" data-testid={p.testId}>
       <h4>{p.title}</h4>
       <p className="sloValue" data-testid={`${p.testId}-value`}>
         {state && <span className={`dot ${state}`} role="img" aria-label={t.availability.health[state]} />}
-        {p.value ?? t.availability.notMeasured}
+        {value ?? t.availability.notMeasured}
       </p>
       <p className="cap">{p.sub}</p>
-      {p.used !== null && state && (
+      {used !== null && state && (
         <>
           <div className="budgetRow">
-            <div className="budgetBar" role="meter" aria-label={t.availability.budgetUsed} aria-valuemin={0} aria-valuemax={1} aria-valuenow={Math.min(p.used, 1)}>
-              <i className={state} style={{ width: `${Math.min(p.used, 1) * 100}%` }} />
+            <div className="budgetBar" role="meter" aria-label={t.availability.budgetUsed} aria-valuemin={0} aria-valuemax={1} aria-valuenow={Math.min(used, 1)}>
+              <i className={state} style={{ width: `${Math.min(used, 1) * 100}%` }} />
             </div>
             <span className="used" data-testid={`${p.testId}-used`}>{p.usedText}</span>
           </div>
@@ -103,6 +118,9 @@ function Card(p: CardProps) {
   )
 }
 
+const postingWindow = (posting: Posting) =>
+  posting.since === null ? t.availability.windowDays(posting.windowDays) : t.availability.windowSince(dayAndMonth(posting.since))
+
 function postingCards(posting: Posting) {
   return posting.targets.map((target, index) => {
     const goal = percent(target.target, POSTING_TARGET_DIGITS)
@@ -111,11 +129,9 @@ function postingCards(posting: Posting) {
         key={target.thresholdMs}
         testId={`slo-posting-${index}`}
         title={t.availability.postingTitle(target.thresholdMs / MS_PER_SECOND)}
-        value={target.share === null ? null : percent(target.share, VALUE_DIGITS)}
-        sub={t.availability.ofTransfers(goal)}
-        used={target.budgetUsed}
+        level={postingLevel(target)}
+        sub={t.availability.ofTransfers(goal, postingWindow(posting))}
         usedText={target.budgetUsed === null ? '' : percent(target.budgetUsed, BUDGET_DIGITS)}
-        missed={target.share !== null && target.share < target.target}
         days={target.days}
         windowDays={posting.windowDays}
         budget={posting.judged * (1 - target.target)}
@@ -128,22 +144,16 @@ function postingCards(posting: Posting) {
 export function Availability({ bank }: { bank: BankView }) {
   const { slo, posting, maintenance } = bank
   return (
-    <section className="card" aria-label={t.availability.heading}>
-      <h3>{t.availability.heading}</h3>
-      {posting.since !== null && (
-        <p className="hint" data-testid="posting-since">
-          {t.availability.postingSince(dayAndMonth(posting.since))}
-        </p>
-      )}
+    <section className="card" id={SLO} aria-label={t.availability.heading}>
+      <h2>{t.availability.heading}</h2>
+      <p className="question">{t.availability.question}</p>
       <div className="sloCards">
         <Card
           testId="slo-availability"
           title={t.availability.availabilityTitle}
-          value={slo.availability === null ? null : percent(slo.availability, VALUE_DIGITS)}
-          sub={t.availability.ofMinutes(percent(slo.target, AVAILABILITY_TARGET_DIGITS))}
-          used={slo.availability === null ? null : slo.badMinutes / slo.budgetMinutes}
+          level={availabilityLevel(slo)}
+          sub={t.availability.ofMinutes(percent(slo.target, AVAILABILITY_TARGET_DIGITS), t.availability.windowDays(slo.windowDays))}
           usedText={t.availability.usedMinutes(slo.badMinutes, slo.budgetMinutes)}
-          missed={slo.availability !== null && slo.availability < slo.target}
           days={slo.days}
           windowDays={slo.windowDays}
           budget={slo.budgetMinutes}
@@ -163,7 +173,7 @@ export function Availability({ bank }: { bank: BankView }) {
       <details className="hint">
         <summary>{t.availability.ruleSummary}</summary>
         <p>
-          {t.availability.rule}{' '}
+          {t.availability.sliIntro(slo.windowDays)} {t.availability.rule}{' '}
           <a href={SLO_URL} target="_blank" rel="noopener">
             {t.availability.howMeasured}
           </a>
