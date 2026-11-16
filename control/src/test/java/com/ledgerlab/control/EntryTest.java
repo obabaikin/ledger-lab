@@ -79,7 +79,7 @@ class EntryTest extends IntegrationTest {
 
         assertThat(view).isEqualTo(Map.of(
             "sessionId", sessionId.toString(), "inviteValid", true, "chaosAvailable", false, "chaosReadyInSeconds", 0,
-            "loadTpsOptions", List.of(400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000),
+            "loadTpsOptions", List.of(900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000),
             "defaultLoadTps", 1000, "loadDurationOptions", List.of(10, 20, 30), "defaultLoadSeconds", 10, "loadReadyInSeconds", 0));
     }
 

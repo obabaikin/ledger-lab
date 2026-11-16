@@ -15,6 +15,7 @@ import com.ledgerlab.control.ledger.LedgerCheck;
 import com.ledgerlab.control.ledger.LedgerReconciliation;
 import com.ledgerlab.control.ledger.PeriodCheck;
 import com.ledgerlab.control.periods.Mismatch;
+import com.ledgerlab.control.periods.PeriodLoad;
 import com.ledgerlab.control.periods.PeriodNote;
 import com.ledgerlab.control.periods.PeriodReport;
 import com.ledgerlab.control.periods.Verdict;
@@ -28,6 +29,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class VerdictTest {
+
+    private static final PeriodLoad NO_LOAD = new PeriodLoad(null, null, null);
 
     private static final Instant PERIOD = Instant.parse("2026-11-10T11:00:00Z");
     private static final Map<String, Long> REASONS = Map.of("INSUFFICIENT_FUNDS", 100L);
@@ -67,7 +70,7 @@ class VerdictTest {
     }
 
     private static PeriodReport verdict(PeriodSummary gateway, LedgerReconciliation ledger) {
-        return Verdicts.verdictOf(gateway.accepted(), gateway, ledger, check(true), books(true), client(), stats(1000, 900, 100), List.of());
+        return Verdicts.verdictOf(gateway.accepted(), gateway, ledger, check(true), books(true), client(), stats(1000, 900, 100), List.of(), NO_LOAD);
     }
 
     @Test
@@ -83,7 +86,7 @@ class VerdictTest {
     @Test
     @DisplayName("a period without transfers is balanced with zeros")
     void a_period_without_transfers_is_balanced_with_zeros() {
-        var report = Verdicts.verdictOf(0, gateway(0, 0, 0), ledger(0, 0), check(true), books(true), client(), stats(0, 0, 0), List.of());
+        var report = Verdicts.verdictOf(0, gateway(0, 0, 0), ledger(0, 0), check(true), books(true), client(), stats(0, 0, 0), List.of(), NO_LOAD);
 
         assertThat(report.verdict()).isEqualTo(Verdict.BALANCED);
         assertThat(report.gateway().accepted()).isZero();
@@ -97,7 +100,7 @@ class VerdictTest {
 
         var report = Verdicts.verdictOf(
             1000, gateway, ledger(900, 100), check(true), books(true), client(false, true, new TransferIds(1, List.of(lost))),
-            stats(1000, 900, 100), List.of());
+            stats(1000, 900, 100), List.of(), NO_LOAD);
 
         assertThat(report.verdict()).isEqualTo(Verdict.MISMATCH);
         assertThat(report.mismatches()).containsExactly(Mismatch.CLIENT_JOURNAL_DISAGREES);
@@ -109,7 +112,7 @@ class VerdictTest {
     void an_account_whose_balance_moved_past_its_journal_is_a_mismatch_with_the_account() {
         var gateway = gateway(1000, 900, 100);
 
-        var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(false), books(true), client(), stats(1000, 900, 100), List.of());
+        var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(false), books(true), client(), stats(1000, 900, 100), List.of(), NO_LOAD);
 
         assertThat(report.mismatches()).containsExactly(Mismatch.LEDGER_CHECK_FAILED);
         assertThat(report.ledgerCheck().accountExamples()).containsExactly(new AccountMismatch(17, -500, -400));
@@ -119,7 +122,7 @@ class VerdictTest {
     void books_that_do_not_add_up_to_the_opening_sum_are_a_mismatch() {
         var gateway = gateway(1000, 900, 100);
 
-        var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(true), books(false), client(), stats(1000, 900, 100), List.of());
+        var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(true), books(false), client(), stats(1000, 900, 100), List.of(), NO_LOAD);
 
         assertThat(report.mismatches()).containsExactly(Mismatch.BOOKS_OUT_OF_BALANCE);
     }
@@ -141,7 +144,7 @@ class VerdictTest {
         var gateway = gateway(1000, 900, 100);
         var notCompared = new PeriodCheck(1800, 5000, 5000, 0, List.of(), false, 0, List.of(), List.of(), true, null, null);
 
-        var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), notCompared, books(true), client(), stats(1000, 900, 100), List.of());
+        var report = Verdicts.verdictOf(1000, gateway, ledger(900, 100), notCompared, books(true), client(), stats(1000, 900, 100), List.of(), NO_LOAD);
 
         assertThat(report.verdict()).isEqualTo(Verdict.BALANCED);
         assertThat(report.notes()).containsExactly(PeriodNote.ACCOUNTS_NOT_COMPARED);
@@ -152,7 +155,7 @@ class VerdictTest {
     void a_period_that_holds_another_number_of_transfers_than_when_it_was_closed_is_a_mismatch() {
         var gateway = gateway(1000, 900, 100);
 
-        var report = Verdicts.verdictOf(999, gateway, ledger(900, 100), check(true), books(true), client(), stats(1000, 900, 100), List.of());
+        var report = Verdicts.verdictOf(999, gateway, ledger(900, 100), check(true), books(true), client(), stats(1000, 900, 100), List.of(), NO_LOAD);
 
         assertThat(report.mismatches()).containsExactly(Mismatch.ENTRIES_CHANGED_AFTER_CLOSE);
     }
@@ -162,7 +165,7 @@ class VerdictTest {
         var gateway = gateway(1000, 900, 100);
 
         var report = Verdicts.verdictOf(
-            1000, gateway, ledger(900, 100), check(true), books(true), client(true, false, NO_IDS), stats(1000, 900, 100), List.of());
+            1000, gateway, ledger(900, 100), check(true), books(true), client(true, false, NO_IDS), stats(1000, 900, 100), List.of(), NO_LOAD);
 
         assertThat(report.mismatches()).containsExactly(Mismatch.STATEMENT_NOT_FINAL);
     }
@@ -172,8 +175,8 @@ class VerdictTest {
     void numbers_from_the_events_that_are_missing_or_behind_are_noted_and_do_not_change_the_verdict() {
         var gateway = gateway(1000, 900, 100);
 
-        var missing = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(true), books(true), client(), null, List.of());
-        var behind = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(true), books(true), client(), stats(1000, 899, 100), List.of());
+        var missing = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(true), books(true), client(), null, List.of(), NO_LOAD);
+        var behind = Verdicts.verdictOf(1000, gateway, ledger(900, 100), check(true), books(true), client(), stats(1000, 899, 100), List.of(), NO_LOAD);
 
         assertThat(missing.verdict()).isEqualTo(Verdict.BALANCED);
         assertThat(missing.notes()).containsExactly(PeriodNote.REPORTING_UNAVAILABLE);

@@ -88,6 +88,7 @@ spec:
             - {name: KAFKA_BOOTSTRAP, value: "kafka:9092"}
             - {name: KAFKA_PARTITIONS, value: {{ .Values.kafka.partitions | quote }}}
             - {name: KAFKA_RETENTION_MS, value: {{ mul (int64 .Values.retentionHours) 3600000 | quote }}}
+            - {name: KAFKA_RETENTION_BYTES, value: {{ int64 .Values.kafka.retentionBytesPerPartition | quote }}}
           resources:
             limits: {memory: {{ .Values.kafka.toolsMemory }}}
           volumeMounts:

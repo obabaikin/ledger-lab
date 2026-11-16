@@ -125,13 +125,25 @@ spec:
             - {name: LEDGER_POOL_HOTSWEEPINTERVAL, value: {{ $periodLength | quote }}}
             {{- end }}
             {{- if eq $name "gateway" }}
-            - {name: GATEWAY_LATENCY_SLOTHRESHOLD, value: {{ $root.Values.slo.freshnessThreshold | quote }}}
+            - {name: GATEWAY_LATENCY_SLOTHRESHOLDS, value: "{{ $root.Values.slo.posting.typical.threshold }},{{ $root.Values.slo.posting.tail.threshold }}"}
             {{- end }}
             {{- if eq $name "generator" }}
             - {name: GENERATOR_GATEWAYURL, value: "http://gateway:{{ $root.Values.services.gateway.port }}"}
             - {name: GENERATOR_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
             - {name: GENERATOR_LOAD_TPS, value: {{ int64 $root.Values.load.baseTps | quote }}}
             - {name: GENERATOR_LOAD_MAXPULSETPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
+            {{- with $root.Values.load.profile }}
+            - {name: GENERATOR_LOAD_PROFILE_ENABLED, value: {{ .enabled | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_SEED, value: {{ int64 .seed | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_NIGHTTPS, value: {{ int64 .nightTps | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_DAYMINTPS, value: {{ int64 .dayMinTps | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_DAYMAXTPS, value: {{ int64 .dayMaxTps | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_STEPS, value: {{ join "," .steps | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_STEPMINUTES, value: {{ int64 .stepMinutes | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_NIGHTSTART, value: {{ .nightStart | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_NIGHTEND, value: {{ .nightEnd | quote }}}
+            - {name: GENERATOR_LOAD_PROFILE_TIMEZONE, value: {{ .timeZone | quote }}}
+            {{- end }}
             {{- end }}
             {{- if eq $name "control" }}
             {{- range $other := list "ledger" "gateway" "generator" "reporting" }}
@@ -139,13 +151,16 @@ spec:
             {{- end }}
             - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
-            - {name: CONTROL_LOAD_MINTPS, value: {{ int64 $root.Values.load.baseTps | quote }}}
+            - {name: CONTROL_LOAD_MINTPS, value: {{ int64 $root.Values.load.minPulseTps | quote }}}
             - {name: CONTROL_LOAD_MAXTPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
             - {name: CONTROL_LOAD_TPSSTEP, value: {{ int64 $root.Values.load.tpsStep | quote }}}
             - {name: CONTROL_LOAD_DEFAULTTPS, value: {{ int64 $root.Values.load.defaultPulseTps | quote }}}
             # Read back by infra/server/maintenance.sh, which tells whether a window is declared in time.
             - {name: CONTROL_MAINTENANCE_NOTICE, value: "{{ int $root.Values.maintenance.noticeHours }}h"}
-            - {name: CONTROL_FRESHNESS_THRESHOLD, value: {{ $root.Values.slo.freshnessThreshold | quote }}}
+            {{- range $name, $target := $root.Values.slo.posting }}
+            - {name: CONTROL_POSTING_{{ upper $name }}_THRESHOLD, value: {{ $target.threshold | quote }}}
+            - {name: CONTROL_POSTING_{{ upper $name }}_TARGET, value: {{ $target.target | quote }}}
+            {{- end }}
             - {name: CONTROL_SITE_VERSION, value: {{ $root.Values.version | quote }}}
             {{- with $root.Values.ingress.host }}
             - {name: CONTROL_SITE_BASEURL, value: "https://{{ . }}"}

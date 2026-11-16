@@ -1,6 +1,7 @@
 package com.ledgerlab.control.metrics;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * The chart queries take their window as {@code %s}, in Prometheus' form ({@code 3s}, {@code 1m}). Each point is the speed
@@ -18,10 +19,12 @@ public final class BankMetrics {
     public static final String LATENCY_P50_MS = latencyQuantileMs("0.5");
     public static final String LATENCY_P99_MS = latencyQuantileMs("0.99");
 
-    /** The gateway's transfers whose result came in the minute before the instant asked about. */
-    public static final String TRANSFERS_IN_MINUTE = "sum(increase(gateway_transfer_latency_seconds_count[1m]))";
-    /** Of them, those not slower than a bound, given as {@code %s} by {@link #bucketBound}. */
-    public static final String FAST_IN_MINUTE = "sum(increase(gateway_transfer_latency_seconds_bucket{le=\"%s\"}[1m]))";
+    /**
+     * The gateway's transfers whose result came in the minute before the instant asked about and not slower than a bound,
+     * given as {@code %s} by {@link #bucketBound}.
+     */
+    public static final String WITHIN_IN_MINUTE = "sum(increase(gateway_transfer_latency_seconds_bucket{le=\"%s\"}[1m]))";
+    private static final String LATENCY_COUNT_IN_MINUTE = "increase(gateway_transfer_latency_seconds_count[1m])";
     /**
      * The latest start time of each process of the project's services in the window before the instant asked about,
      * given as {@code %s}, by pod: the value is the start itself, so a restart shows as a new value whenever it is read.
@@ -33,6 +36,17 @@ public final class BankMetrics {
 
     private static String latencyQuantileMs(String quantile) {
         return "1000 * histogram_quantile(" + quantile + ", sum by (le) (irate(gateway_transfer_latency_seconds_bucket[%s])))";
+    }
+
+    /**
+     * The gateway's transfers whose result came in the minute before the instant asked about, counted only on the
+     * instances with a bucket at each of the bounds: one without them, as before an update, would count all its transfers
+     * as slower than the bounds.
+     */
+    public static String transfersInMinute(List<Duration> bounds) {
+        var query = new StringBuilder(LATENCY_COUNT_IN_MINUTE);
+        bounds.forEach(bound -> query.append(" and on(instance) gateway_transfer_latency_seconds_bucket{le=\"%s\"}".formatted(bucketBound(bound))));
+        return "sum(" + query + ")";
     }
 
     /** As Prometheus stores a histogram's bucket bound: seconds with at least one decimal, 2 s as {@code 2.0}. */

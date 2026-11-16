@@ -77,4 +77,21 @@ describe('report of a period', () => {
     expect(screen.getByText(en.report.poolPostings('42'))).toBeInTheDocument()
     expect(screen.getByText(en.report.crashedAt(clock('2026-11-11T09:12:00Z'), 2))).toBeInTheDocument()
   })
+
+  it('shows the range of the base load in the period and the highest pulse that met it', () => {
+    render(<Verdict report={report({ load: { minBaseTps: 300, maxBaseTps: 800, maxPulseTps: 1400 } })} />)
+
+    expect(screen.getByText(en.report.base('300', '800'))).toBeInTheDocument()
+    expect(screen.getByText(en.report.pulse('1,400'))).toBeInTheDocument()
+  })
+
+  it('shows no load for a report made before control kept it, or a period without a base told and without a pulse', () => {
+    const { unmount } = render(<Verdict report={report({ load: null })} />)
+    expect(screen.queryByText(/Base/)).toBeNull()
+    unmount()
+
+    render(<Verdict report={report({ load: { minBaseTps: null, maxBaseTps: null, maxPulseTps: null } })} />)
+    expect(screen.queryByText(/Base/)).toBeNull()
+    expect(screen.queryByText(/pulse/)).toBeNull()
+  })
 })

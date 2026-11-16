@@ -124,7 +124,7 @@ export function BankPage(props: {
       {(props.invite || bank?.clients) && (
         <section className="intro">
           {props.invite}
-          {bank?.clients && <ClientsSpeed clients={bank.clients} />}
+          {bank?.clients && <ClientsSpeed clients={bank.clients} load={bank.load} />}
         </section>
       )}
       {props.controls}

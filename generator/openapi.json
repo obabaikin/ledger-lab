@@ -78,7 +78,7 @@
             "type" : "integer"
           },
           "baseTps" : {
-            "description" : "New transfers a second without a pulse.",
+            "description" : "New transfers a second without a pulse, now.",
             "format" : "int32",
             "type" : "integer"
           },
@@ -95,6 +95,11 @@
           "inFlight" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "nextChangeAt" : {
+            "description" : "When the base changes next; null while it is constant.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
           },
           "notJournaled" : {
             "description" : "Transfers not sent because the client journal could not store them first.",
@@ -176,6 +181,11 @@
       "MinuteResponses" : {
         "description" : "How the bank answered the clients' requests that ended in one minute.",
         "properties" : {
+          "baseTps" : {
+            "description" : "The base load at the start of the minute, in new transfers a second.",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "busy" : {
             "description" : "Of them refused as busy (503): an answer, the transfer was not taken.",
             "format" : "int64",

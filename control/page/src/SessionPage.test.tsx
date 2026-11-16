@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { clock, count, dayAndMonth, hoursMinutes } from './format'
 import { bank, fakeControl, period, PERIOD_START, report, series, SERIES, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
@@ -127,16 +127,74 @@ describe('the open page', () => {
     expect(screen.getByTestId('budget-split')).toHaveTextContent(en.availability.split(17, 12, 2))
   })
 
-  it('shows a second budget for the time to posting, with its threshold, and links to how both are measured', async () => {
+  it('shows the time to posting as a row per threshold with its share, target and budget used, the transfers left out, and links to how it is measured', async () => {
     control()
     renderAt('/')
 
-    expect(await screen.findByTestId('freshness-budget')).toHaveTextContent(en.availability.budget(5, 43))
-    expect(screen.getByText(en.availability.freshnessTitle(2))).toBeInTheDocument()
-    expect(screen.getByRole('meter', { name: en.availability.budget(5, 43) })).toHaveAttribute('aria-valuenow', '5')
-    expect(screen.getByTestId('freshness-budget-split')).toHaveTextContent(en.availability.split(5, 1, 3))
+    expect(await screen.findByTestId('posting-0')).toHaveTextContent(en.availability.postingValue(3, '99.97 %', '95 %'))
+    expect(screen.getByTestId('posting-0-budget')).toHaveTextContent(en.availability.postingBudget('1 %'))
+    expect(screen.getByTestId('posting-1')).toHaveTextContent(en.availability.postingValue(5, '99.98 %', '99 %'))
+    expect(screen.getByRole('meter', { name: en.availability.postingBudget('2 %') })).toHaveAttribute('aria-valuenow', '0.02')
+    expect(screen.getByTestId('posting-split')).toHaveTextContent(en.availability.postingSplit('12,000', '3,400'))
+    expect(screen.getByTestId('posting-window')).toHaveTextContent(en.availability.postingWindow(30))
+    expect(screen.getByText(en.availability.postingTitle)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: en.availability.howMeasured })).toHaveAttribute(
       'href', 'https://github.com/obabaikin/ledger-lab/blob/main/docs/guides/slo.md')
+  })
+
+  it('says the time to posting is not measured before the first judged transfer, not 100 %, and since when it is counted', async () => {
+    const since = '2026-11-17T03:00:00Z'
+    const posting = bank().posting
+    control({
+      'GET /api/bank': {
+        status: 200,
+        body: bank({
+          posting: {
+            ...posting,
+            since,
+            judged: 0,
+            targets: posting.targets.map((target) => ({ ...target, within: 0, share: null, budgetUsed: null })),
+          },
+        }),
+      },
+    })
+    renderAt('/')
+
+    expect(await screen.findByTestId('posting-0')).toHaveTextContent(en.availability.postingNotMeasured(3, '95 %'))
+    expect(screen.getByTestId('posting-1')).toHaveTextContent(en.availability.postingNotMeasured(5, '99 %'))
+    expect(screen.queryByTestId('posting-0-budget')).toBeNull()
+    expect(screen.getByTestId('posting-window')).toHaveTextContent(en.availability.postingSince(dayAndMonth(since)))
+  })
+
+  it('shows the target missed when more transfers were slow than it allows', async () => {
+    const posting = bank().posting
+    const [typical, tail] = posting.targets
+    control({
+      'GET /api/bank': { status: 200, body: bank({ posting: { ...posting, targets: [{ ...typical!, share: 0.94, budgetUsed: 1.2 }, tail!] } }) },
+    })
+    renderAt('/')
+
+    expect(await screen.findByTestId('posting-0-budget')).toHaveTextContent(en.availability.postingBudget('120 %'))
+    expect(screen.getByRole('meter', { name: en.availability.postingBudget('120 %') })).toHaveAttribute('aria-valuenow', '1')
+  })
+
+  it('shows the base load and in how many minutes it changes, the base alone while it is constant, and nothing without an answer from the clients', async () => {
+    const now = Date.parse('2026-11-11T10:30:30Z')
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    control({ 'GET /api/bank': { status: 200, body: bank({ load: { baseTps: 600, nextChangeAt: '2026-11-11T10:35:00Z' } }) } })
+    renderAt('/')
+    expect(await screen.findByTestId('base-load')).toHaveTextContent(en.bank.baseChangesIn('600', 5))
+    cleanup()
+
+    control({ 'GET /api/bank': { status: 200, body: bank({ load: { baseTps: 400, nextChangeAt: null } }) } })
+    renderAt('/')
+    expect(await screen.findByTestId('base-load')).toHaveTextContent(en.bank.base('400'))
+    cleanup()
+
+    control({ 'GET /api/bank': { status: 200, body: bank({ load: null }) } })
+    renderAt('/')
+    await screen.findByTestId('clients-speed')
+    expect(screen.queryByTestId('base-load')).toBeNull()
   })
 
   it('shows the planned update in the visitor\'s time, and says when none is planned', async () => {
@@ -229,7 +287,7 @@ describe('session page', () => {
     expect(screen.getByRole('combobox', { name: en.controls.tpsLabel })).toHaveValue('1000')
     expect(screen.getByRole('combobox', { name: en.controls.secondsLabel })).toHaveValue('10')
     expect(within(screen.getByRole('combobox', { name: en.controls.tpsLabel })).getAllByRole('option').map((o) => o.textContent)).toEqual(
-      ['400', '500', '1,000', '2,000'].map(en.controls.tpsOption),
+      ['900', '1,000', '2,000'].map(en.controls.tpsOption),
     )
     expect(await crash()).toBeEnabled()
   })

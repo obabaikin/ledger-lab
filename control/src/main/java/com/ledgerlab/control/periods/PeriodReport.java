@@ -29,7 +29,9 @@ public record PeriodReport(
     @Schema(description = "What the report could not show; does not decide the verdict.")
     List<PeriodNote> notes,
     @Schema(description = "Ledger crashes within the period, in order; empty if none.")
-    List<ChaosEvent> chaos
+    List<ChaosEvent> chaos,
+    @Schema(description = "null in reports made before control kept the load.", nullable = true)
+    @Nullable PeriodLoad load
 ) {
 
     public PeriodReport {

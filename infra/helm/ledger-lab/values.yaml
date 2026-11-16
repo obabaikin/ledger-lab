@@ -30,20 +30,37 @@ retentionHours: 4
 accounts:
   count: 100000
 load:
-  # The generator's steady speed, also the lowest option of a visitor's pulse.
+  # The generator's steady speed while the profile is off.
   baseTps: 400
+  # The base over a day: night at nightTps, then a random walk of steps between dayMinTps and dayMaxTps, back at nightTps
+  # when the night starts. The seed and the date fix each day's walk.
+  profile:
+    enabled: false
+    seed: 20261116
+    nightTps: 200
+    dayMinTps: 300
+    dayMaxTps: 800
+    steps: [100, 200]
+    stepMinutes: 5
+    nightStart: "00:00"
+    nightEnd: "06:00"
+    timeZone: Europe/Berlin
+  # The lowest option of a visitor's pulse, above the day's highest base.
+  minPulseTps: 900
   # The highest pulse the generator takes, also the highest option a visitor is offered.
   maxTps: 2000
-  # A visitor's options run from baseTps to maxTps in steps of this; the pulse offered first is one of them.
+  # A visitor's options run from minPulseTps to maxTps in steps of this; the pulse offered first is one of them.
   tpsStep: 100
   defaultPulseTps: 1000
 maintenance:
   # A window declared this long before its start keeps its bad minutes out of the error budget.
   noticeHours: 3
 slo:
-  # A transfer slower than this from acceptance to result is slow: the gateway's histogram has a bucket at it, and
-  # control counts a minute with more than 1 % of them as bad (docs/guides/slo.md).
-  freshnessThreshold: 2s
+  # Of the transfers judged over 30 days, target should take at most threshold from acceptance to result: the gateway's
+  # histogram has a bucket at each threshold (docs/guides/slo.md).
+  posting:
+    typical: {threshold: 3s, target: "0.95"}
+    tail: {threshold: 5s, target: "0.99"}
 
 # The services' roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand
 # in Postgres. The monitor role is created or updated on every install and upgrade.
@@ -59,8 +76,11 @@ passwords:
 kafka:
   image: apache/kafka:4.2.1
   partitions: 6
-  # About 1 GB an hour at 400 TPS, held for retentionHours.
+  # Measured on the server: about 380 B a transfer, so 5 hours at 800 TPS take about 5.5 GB, held for retentionHours.
+  # The volume claim cannot grow on an upgrade; retentionBytesPerPartition keeps the topics within it under any load.
   storage: 8Gi
+  # 600 MiB: 12 partitions of the two topics stay below 7.1 GiB.
+  retentionBytesPerPartition: 629145600
   heap: 768m
   memory: 1268Mi
   toolsMemory: 512Mi

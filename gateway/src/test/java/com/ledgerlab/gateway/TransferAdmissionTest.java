@@ -7,6 +7,7 @@ import com.ledgerlab.gateway.service.GatewayBusyException;
 import com.ledgerlab.gateway.service.TransferAdmission;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,7 @@ class TransferAdmissionTest {
             new GatewayProperties.WarmUp(0, Duration.ZERO, Duration.ZERO),
             new GatewayProperties.Periods(
                 Duration.ofHours(1), Duration.ofHours(4), Duration.ofHours(48), Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofHours(1), 100, 100),
-            new GatewayProperties.Latency(Duration.ofSeconds(2)));
+            new GatewayProperties.Latency(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5))));
     }
 
     @Test

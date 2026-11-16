@@ -33,16 +33,17 @@ public class BankLive {
     private static final String JOB = "job";
     private static final double UP_VALUE = 1.0;
 
-    /** {@link #stats} holds the periods not reconciled yet, by their start. */
+    /** {@link #stats} holds the periods not reconciled yet, by their start; {@link #clients} may be from an earlier read than the last. */
     public record Snapshot(
         @Nullable LoadStatus clients,
+        boolean clientsAnswered,
         @Nullable List<PodView> pods,
         @Nullable Books books,
         @Nullable Instant booksReadAt,
         Map<Instant, PeriodStats> stats,
         @Nullable Instant readAt
     ) {
-        static final Snapshot EMPTY = new Snapshot(null, null, null, null, Map.of(), null);
+        static final Snapshot EMPTY = new Snapshot(null, false, null, null, null, Map.of(), null);
     }
 
     private record Target(String job, String instance) {
@@ -91,6 +92,7 @@ public class BankLive {
             var booksNow = books == null ? null : books.get();
             snapshot = new Snapshot(
                 clientsNow != null ? clientsNow : last.clients(),
+                clientsNow != null,
                 podsNow != null ? podsNow : last.pods(),
                 booksNow != null ? booksNow : last.books(),
                 booksNow != null ? now : last.booksReadAt(),

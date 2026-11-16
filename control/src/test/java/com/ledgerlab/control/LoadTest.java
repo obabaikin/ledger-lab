@@ -92,7 +92,7 @@ class LoadTest extends IntegrationTest {
         var sessionId = visitor();
         var refused = new ArrayList<ResponseEntity<Map<String, Object>>>();
         refused.add(load(sessionId, 1550, 10));
-        refused.add(load(sessionId, 300, 10));
+        refused.add(load(sessionId, 800, 10));
         refused.add(load(sessionId, 2100, 10));
         refused.add(load(sessionId, 1000, 15));
         refused.add(load(sessionId, null, 10));
@@ -109,6 +109,12 @@ class LoadTest extends IntegrationTest {
         assertThat(pulseCalls()).isEmpty();
         assertThat(pulses()).isEmpty();
         assertThat(load(sessionId, 2000, 30).getStatusCode().value()).isEqualTo(202);
+    }
+
+    @Test
+    @DisplayName("the lowest speed of a pulse is 900, above the day's highest base")
+    void the_lowest_speed_of_a_pulse_is_900_above_the_days_highest_base() {
+        assertThat(load(visitor(), 900, 10).getStatusCode().value()).isEqualTo(202);
     }
 
     @Test
@@ -298,7 +304,7 @@ class LoadTest extends IntegrationTest {
         var sessionId = visitor();
         var fresh = session(sessionId);
         assertThat(fresh.get("loadTpsOptions")).isEqualTo(List.of(
-            400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000));
+            900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000));
         assertThat(fresh.get("defaultLoadTps")).isEqualTo(1000);
         assertThat(fresh.get("loadDurationOptions")).isEqualTo(List.of(10, 20, 30));
         assertThat(fresh.get("defaultLoadSeconds")).isEqualTo(10);

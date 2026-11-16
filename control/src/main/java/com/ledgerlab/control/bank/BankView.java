@@ -1,7 +1,7 @@
 package com.ledgerlab.control.bank;
 
-import com.ledgerlab.control.availability.Freshness;
 import com.ledgerlab.control.availability.MaintenanceWindow;
+import com.ledgerlab.control.availability.Posting;
 import com.ledgerlab.control.availability.Slo;
 import com.ledgerlab.control.chaos.ChaosEvent;
 import com.ledgerlab.control.generator.ClientTotals;
@@ -27,8 +27,10 @@ public record BankView(
     @Nullable Clients clients,
     @Schema(description = "null until Prometheus answered once.", nullable = true)
     @Nullable List<PodView> pods,
+    @Schema(description = "The clients' base load from the generator's last answer; null if it did not answer.", nullable = true)
+    @Nullable BaseLoad load,
     Slo slo,
-    Freshness freshness,
+    Posting posting,
     @Schema(description = "The maintenance window that is on, else the next one; null if none is declared.", nullable = true)
     @Nullable MaintenanceWindow maintenance,
     Chaos chaos,
@@ -68,6 +70,14 @@ public record BankView(
         @Nullable ClientTotals total,
         @Schema(description = "Whether clients sent before this generator started: the counts other than total then cover only its part.")
         boolean restarted
+    ) {
+    }
+
+    @Schema(description = "New transfers a second without a visitor's pulse; it changes in steps over the day.")
+    public record BaseLoad(
+        int baseTps,
+        @Schema(description = "When the base changes next; null while it is constant.", nullable = true)
+        @Nullable Instant nextChangeAt
     ) {
     }
 

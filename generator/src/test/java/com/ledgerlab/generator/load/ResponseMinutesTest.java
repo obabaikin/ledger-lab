@@ -2,6 +2,7 @@ package com.ledgerlab.generator.load;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ledgerlab.generator.GeneratorProperties;
 import com.ledgerlab.generator.TestData;
 import com.ledgerlab.generator.gateway.ResponseKind;
 import java.time.Clock;
@@ -33,7 +34,8 @@ class ResponseMinutesTest {
             return now.get();
         }
     };
-    private final ResponseMinutes minutes = new ResponseMinutes(clock, TestData.settings("http://localhost:1").build());
+    private static final GeneratorProperties SETTINGS = TestData.settings("http://localhost:1").build();
+    private final ResponseMinutes minutes = new ResponseMinutes(clock, SETTINGS, new BaseSchedule(SETTINGS));
 
     private void record(ResponseKind kind, int times) {
         for (var i = 0; i < times; i++) {
@@ -53,7 +55,7 @@ class ResponseMinutesTest {
         record(ResponseKind.NO_RESPONSE, 2);
         now.set(NOON.plusSeconds(60));
 
-        assertThat(minutes.completeAfter(null)).containsExactly(new MinuteResponses(NOON, 100, 5, 4));
+        assertThat(minutes.completeAfter(null)).containsExactly(new MinuteResponses(NOON, 100, 100, 5, 4));
     }
 
     @Test
@@ -63,7 +65,7 @@ class ResponseMinutesTest {
         record(ResponseKind.SEND_ERROR, 2);
         now.set(NOON.plusSeconds(60));
 
-        assertThat(minutes.completeAfter(null)).containsExactly(new MinuteResponses(NOON, 1, 0, 0));
+        assertThat(minutes.completeAfter(null)).containsExactly(new MinuteResponses(NOON, 100, 1, 0, 0));
     }
 
     @Test

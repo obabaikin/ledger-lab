@@ -41,9 +41,10 @@ that are dropped whole; Kafka keeps the same 4 hours. Period reports and hourly 
 account is brought back to its opening balance, and the busiest accounts' surplus is swept to the pool every hour,
 so the load never runs out of money.
 
-**Service levels instead of a run's verdict.** Availability and time to posting are measured per minute, each with
-a 99.9 % objective over 30 days and an error budget on the page; crashes from the page, load above the promised rate
-and declared maintenance windows are left out, with the rules in [the SLO guide](../guides/slo.md).
+**Service levels instead of a run's verdict.** Availability is measured per minute, with a 99.9 % objective over 30
+days; the time to posting by transfer, 95 % within 3 s and 99 % within 5 s over 30 days, which replaced a first
+per-minute rule. Each has an error budget on the page; crashes from the page, load above the promised rate and
+declared maintenance windows are left out, with the rules in [the SLO guide](../guides/slo.md).
 
 ## Consequences
 

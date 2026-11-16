@@ -83,8 +83,13 @@
           "currentPeriod" : {
             "$ref" : "#/components/schemas/CurrentPeriod"
           },
-          "freshness" : {
-            "$ref" : "#/components/schemas/Freshness"
+          "load" : {
+            "description" : "The clients' base load from the generator's last answer; null if it did not answer.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/BaseLoad"
+            }, {
+              "type" : "null"
+            } ]
           },
           "maintenance" : {
             "description" : "The maintenance window that is on, else the next one; null if none is declared.",
@@ -105,6 +110,9 @@
             },
             "type" : [ "array", "null" ]
           },
+          "posting" : {
+            "$ref" : "#/components/schemas/Posting"
+          },
           "readAt" : {
             "description" : "When control last read the live parts; null before the first read.",
             "format" : "date-time",
@@ -123,7 +131,23 @@
             "description" : "Transfers since the bank started: the reconciled periods and the live numbers of those still open."
           }
         },
-        "required" : [ "books", "chaos", "clients", "currentPeriod", "freshness", "maintenance", "periodMinutes", "pods", "readAt", "slo", "startedAt", "totals" ],
+        "required" : [ "books", "chaos", "clients", "currentPeriod", "load", "maintenance", "periodMinutes", "pods", "posting", "readAt", "slo", "startedAt", "totals" ],
+        "type" : "object"
+      },
+      "BaseLoad" : {
+        "description" : "New transfers a second without a visitor's pulse; it changes in steps over the day.",
+        "properties" : {
+          "baseTps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "nextChangeAt" : {
+            "description" : "When the base changes next; null while it is constant.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "baseTps", "nextChangeAt" ],
         "type" : "object"
       },
       "Books" : {
@@ -368,42 +392,6 @@
         "required" : [ "closesAt", "end", "start" ],
         "type" : "object"
       },
-      "Freshness" : {
-        "description" : "How soon the bank posts transfers, by minute: a minute is bad if more than a small share of its transfers took longer than the threshold from acceptance to result.",
-        "properties" : {
-          "badMinutes" : {
-            "description" : "Bad minutes that use up the budget.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "budgetMinutes" : {
-            "description" : "Bad minutes the target allows in a full window.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "outsideMinutes" : {
-            "description" : "Bad minutes during a crash or a load above the promised one, with their aftermath; they do not use up the budget.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "plannedMinutes" : {
-            "description" : "Bad minutes within a maintenance window declared in time; they do not use up the budget.",
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "target" : {
-            "description" : "Share of good minutes the bank aims for.",
-            "type" : "number"
-          },
-          "thresholdMs" : {
-            "description" : "Longest time from acceptance to result a transfer may take to count as fast.",
-            "format" : "int64",
-            "type" : "integer"
-          }
-        },
-        "required" : [ "badMinutes", "budgetMinutes", "outsideMinutes", "plannedMinutes", "target", "thresholdMs" ],
-        "type" : "object"
-      },
       "GatewayCounts" : {
         "description" : "The period's transfers as the gateway counts them.",
         "properties" : {
@@ -628,6 +616,28 @@
         "required" : [ "periods" ],
         "type" : "object"
       },
+      "PeriodLoad" : {
+        "description" : "The clients' load in the period: the range of the base by minute, and the highest pulse that met the period.",
+        "properties" : {
+          "maxBaseTps" : {
+            "description" : "Highest base of the period's minutes; null if no minute told it.",
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "maxPulseTps" : {
+            "description" : "Highest pulse in effect at some time in the period; null without one.",
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "minBaseTps" : {
+            "description" : "Lowest base of the period's minutes; null if no minute told it.",
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          }
+        },
+        "required" : [ "maxBaseTps", "maxPulseTps", "minBaseTps" ],
+        "type" : "object"
+      },
       "PeriodNumbers" : {
         "description" : "A period's transfers by outcome.",
         "properties" : {
@@ -685,6 +695,14 @@
           "ledgerCheck" : {
             "$ref" : "#/components/schemas/PeriodCheck"
           },
+          "load" : {
+            "description" : "null in reports made before control kept the load.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/PeriodLoad"
+            }, {
+              "type" : "null"
+            } ]
+          },
           "mismatches" : {
             "description" : "What disagreed; empty for BALANCED.",
             "items" : {
@@ -722,7 +740,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "books", "chaos", "client", "gateway", "ledger", "ledgerCheck", "mismatches", "notes", "rejectionsByReason", "stats", "verdict" ],
+        "required" : [ "books", "chaos", "client", "gateway", "ledger", "ledgerCheck", "load", "mismatches", "notes", "rejectionsByReason", "stats", "verdict" ],
         "type" : "object"
       },
       "PeriodStats" : {
@@ -840,6 +858,44 @@
           }
         },
         "required" : [ "instance", "job", "partitions", "up" ],
+        "type" : "object"
+      },
+      "Posting" : {
+        "description" : "How soon the bank posts transfers, from acceptance to result, over the last days: the share of transfers within each threshold.",
+        "properties" : {
+          "judged" : {
+            "description" : "Transfers judged: all counted, but those of minutes left out.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "outside" : {
+            "description" : "Transfers left out: their minute met a crash or a load above the promised one, with its aftermath.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "planned" : {
+            "description" : "Transfers left out: their minute lay in a maintenance window declared in time.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "since" : {
+            "description" : "The first hour counted, when later than the window's start; null when the counts cover the whole window or none are in yet.",
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "targets" : {
+            "description" : "One per threshold, the shortest first.",
+            "items" : {
+              "$ref" : "#/components/schemas/Target"
+            },
+            "type" : "array"
+          },
+          "windowDays" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "judged", "outside", "planned", "since", "targets", "windowDays" ],
         "type" : "object"
       },
       "Pulse" : {
@@ -1102,6 +1158,35 @@
           }
         },
         "required" : [ "amountCents", "byStatus", "rows", "unknownToClient" ],
+        "type" : "object"
+      },
+      "Target" : {
+        "properties" : {
+          "budgetUsed" : {
+            "description" : "Judged transfers over the threshold, as a share of those the target allows; above 1 the target is missed. Null before the first judged transfer.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "share" : {
+            "description" : "within / judged; null before the first judged transfer.",
+            "format" : "double",
+            "type" : [ "number", "null" ]
+          },
+          "target" : {
+            "description" : "Share of the judged transfers that should be within the threshold.",
+            "type" : "number"
+          },
+          "thresholdMs" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "within" : {
+            "description" : "Judged transfers within the threshold.",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "budgetUsed", "share", "target", "thresholdMs", "within" ],
         "type" : "object"
       },
       "TransferIds" : {

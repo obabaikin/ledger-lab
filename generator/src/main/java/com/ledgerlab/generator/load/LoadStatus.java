@@ -11,8 +11,10 @@ import org.jspecify.annotations.Nullable;
 public record LoadStatus(
     @Schema(description = "When this generator began to send; null while the load is off. The counts start from zero with it.", nullable = true)
     @Nullable Instant startedAt,
-    @Schema(description = "New transfers a second without a pulse.")
+    @Schema(description = "New transfers a second without a pulse, now.")
     int baseTps,
+    @Schema(description = "When the base changes next; null while it is constant.", nullable = true)
+    @Nullable Instant nextChangeAt,
     @Schema(description = "New transfers a second now, the highest pulse included.")
     int targetTps,
     @Schema(description = "The highest pulse in effect; null without one.", nullable = true)
@@ -47,7 +49,7 @@ public record LoadStatus(
 ) {
     public LoadStatus withTotal(@Nullable ClientTotals total, boolean restarted) {
         return new LoadStatus(
-            startedAt, baseTps, targetTps, pulse, requested, acknowledged, posted, rejected, rejectedByReason, failed, unknown, retries, refused,
+            startedAt, baseTps, nextChangeAt, targetTps, pulse, requested, acknowledged, posted, rejected, rejectedByReason, failed, unknown, retries, refused,
             duplicatesSent, skipped, notJournaled, inFlight, total, restarted);
     }
 

@@ -6,8 +6,11 @@ import com.ledgerlab.control.generator.GeneratorClient;
 import com.ledgerlab.control.generator.MinutesPage;
 import com.ledgerlab.control.http.Reply;
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,29 +25,29 @@ public class Availability {
 
     private final AvailabilityRepository minutes;
     private final GeneratorClient generator;
-    private final FreshnessCollector freshness;
+    private final PostingCollector posting;
     private final DatabaseClock clock;
     private final ControlProperties.Availability props;
-    private final ControlProperties.Freshness freshnessProps;
+    private final ControlProperties.Posting postingProps;
     private final AvailabilityRepository.Rules rules;
     private volatile boolean lastAnswered = true;
 
     public Availability(
         AvailabilityRepository minutes,
         GeneratorClient generator,
-        FreshnessCollector freshness,
+        PostingCollector posting,
         DatabaseClock clock,
         ControlProperties props
     ) {
         this.minutes = minutes;
         this.generator = generator;
-        this.freshness = freshness;
+        this.posting = posting;
         this.clock = clock;
         this.props = props.availability();
-        this.freshnessProps = props.freshness();
+        this.postingProps = props.posting();
         var outside = props.outside();
         this.rules = new AvailabilityRepository.Rules(
-            this.props.goodMinuteAnsweredPercent(), props.maintenance().notice(), freshnessProps.badSharePercent(), outside.guaranteedTps(),
+            this.props.goodMinuteAnsweredPercent(), props.maintenance().notice(), outside.guaranteedTps(),
             outside.chaosAftermath(), outside.loadAftermath(), outside.restartMargin());
     }
 
@@ -59,7 +62,7 @@ public class Availability {
             log.warn("Minutes of the clients' answers read: {}; the generator hands over those it kept once it answers again", answered);
         }
         lastAnswered = answered;
-        freshness.collect(clock.now());
+        posting.collect(clock.now());
         minutes.rollUpHours(clock.now(), props.minutesRetention(), rules);
     }
 
@@ -70,14 +73,18 @@ public class Availability {
     /** Both objectives from one read of the minutes, so that they cover the same ones. */
     public Objectives objectives(Instant now) {
         var counts = counts(now);
-        return new Objectives(slo(counts), freshness(counts));
+        return new Objectives(slo(counts), posting(counts, now));
     }
 
-    public record Objectives(Slo slo, Freshness freshness) {
+    public record Objectives(Slo slo, Posting posting) {
     }
 
     private AvailabilityRepository.Counts counts(Instant now) {
-        return minutes.countsSince(now.minus(props.sloWindow()), rules);
+        return minutes.countsSince(windowStart(now), rules);
+    }
+
+    private Instant windowStart(Instant now) {
+        return now.minus(props.sloWindow()).truncatedTo(ChronoUnit.HOURS);
     }
 
     private Slo slo(AvailabilityRepository.Counts counts) {
@@ -94,14 +101,31 @@ public class Availability {
             counts.total() == 0 ? null : (double) counts.busy() / counts.total());
     }
 
-    private Freshness freshness(AvailabilityRepository.Counts counts) {
-        return new Freshness(
-            freshnessProps.sloTarget(),
-            freshnessProps.threshold().toMillis(),
-            counts.freshBad(),
-            budget(freshnessProps.sloTarget()),
-            counts.freshPlanned(),
-            counts.freshOutside());
+    private Posting posting(AvailabilityRepository.Counts counts, Instant now) {
+        var since = counts.postingSince();
+        var judged = counts.postedJudged();
+        return new Posting(
+            (int) props.sloWindow().toDays(),
+            since != null && since.isAfter(windowStart(now)) ? since : null,
+            judged,
+            counts.postedPlanned(),
+            counts.postedOutside(),
+            List.of(
+                target(postingProps.typical(), judged, counts.postedWithinTypical()),
+                target(postingProps.tail(), judged, counts.postedWithinTail())));
+    }
+
+    private static Posting.Target target(ControlProperties.Target target, long judged, long within) {
+        if (judged == 0) {
+            return new Posting.Target(target.threshold().toMillis(), target.target(), within, null, null);
+        }
+        var allowed = BigDecimal.valueOf(judged).multiply(BigDecimal.ONE.subtract(target.target()));
+        return new Posting.Target(
+            target.threshold().toMillis(),
+            target.target(),
+            within,
+            BigDecimal.valueOf(within).divide(BigDecimal.valueOf(judged), MathContext.DECIMAL64).doubleValue(),
+            BigDecimal.valueOf(judged - within).divide(allowed, MathContext.DECIMAL64).doubleValue());
     }
 
     private long budget(BigDecimal target) {

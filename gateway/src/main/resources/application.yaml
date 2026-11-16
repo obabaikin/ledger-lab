@@ -94,8 +94,8 @@ gateway:
     # partition change, and every insert queued behind it.
     unpartitioned-delete-batch: 10000
   latency:
-    # The same value as control's control.freshness.threshold, which counts the transfers slower than it.
-    slo-threshold: 2s
+    # The same values as control's control.posting.typical and tail, which count the transfers within each of them.
+    slo-thresholds: 3s, 5s
 
 springdoc:
   # Each endpoint lists its own answers; otherwise every controller-local error handler is added to every operation.

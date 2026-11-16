@@ -21,6 +21,7 @@ public class ResponseMinutes {
     private static final long SECONDS_PER_MINUTE = Duration.ofMinutes(1).toSeconds();
 
     private final Clock clock;
+    private final BaseSchedule schedule;
     private final Duration retention;
     private final ConcurrentSkipListMap<Long, Counts> byMinute = new ConcurrentSkipListMap<>();
 
@@ -30,8 +31,9 @@ public class ResponseMinutes {
         private final LongAdder busy = new LongAdder();
     }
 
-    public ResponseMinutes(Clock clock, GeneratorProperties props) {
+    public ResponseMinutes(Clock clock, GeneratorProperties props, BaseSchedule schedule) {
         this.clock = clock;
+        this.schedule = schedule;
         this.retention = props.load().minutesRetention();
     }
 
@@ -58,9 +60,11 @@ public class ResponseMinutes {
             return List.of();
         }
         return byMinute.subMap(from, false, running, false).entrySet().stream()
-            .map(entry -> new MinuteResponses(
-                Instant.ofEpochSecond(entry.getKey() * SECONDS_PER_MINUTE),
-                entry.getValue().total.sum(), entry.getValue().errors.sum(), entry.getValue().busy.sum()))
+            .map(entry -> {
+                var minute = Instant.ofEpochSecond(entry.getKey() * SECONDS_PER_MINUTE);
+                return new MinuteResponses(
+                    minute, schedule.baseAt(minute), entry.getValue().total.sum(), entry.getValue().errors.sum(), entry.getValue().busy.sum());
+            })
             .toList();
     }
 

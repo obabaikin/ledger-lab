@@ -3,10 +3,11 @@ package com.ledgerlab.gateway.service;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * A histogram rather than percentiles: buckets add up over the gateway's instances and over any minute, and a bucket at
- * the threshold counts the slow transfers exactly (docs/guides/slo.md).
+ * each threshold counts the transfers within it exactly (docs/guides/slo.md).
  */
 public final class TransferLatency {
 
@@ -17,13 +18,13 @@ public final class TransferLatency {
     private TransferLatency() {
     }
 
-    public static Timer timer(MeterRegistry registry, Duration sloThreshold) {
+    public static Timer timer(MeterRegistry registry, List<Duration> sloThresholds) {
         return Timer.builder(NAME)
             .description("accepted at the edge to result known")
             .publishPercentileHistogram()
             .minimumExpectedValue(SHORTEST)
             .maximumExpectedValue(LONGEST)
-            .serviceLevelObjectives(sloThreshold)
+            .serviceLevelObjectives(sloThresholds.toArray(Duration[]::new))
             .register(registry);
     }
 }

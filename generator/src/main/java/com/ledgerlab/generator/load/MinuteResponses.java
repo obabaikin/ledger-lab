@@ -7,6 +7,8 @@ import java.time.Instant;
 public record MinuteResponses(
     @Schema(description = "Start of the minute.")
     Instant minute,
+    @Schema(description = "The base load at the start of the minute, in new transfers a second.")
+    int baseTps,
     @Schema(description = "Requests that ended in the minute, retries and duplicates included.")
     long total,
     @Schema(description = "Of them without a usable answer: a 5xx other than busy, no connection, or no answer in time.")

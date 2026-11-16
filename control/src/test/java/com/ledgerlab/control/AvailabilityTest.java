@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ledgerlab.control.availability.Availability;
 import com.ledgerlab.control.availability.AvailabilityRepository;
+import com.ledgerlab.control.availability.Posting;
 import com.ledgerlab.control.availability.Slo;
 import com.ledgerlab.control.generator.GeneratorApi;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -46,23 +48,36 @@ class AvailabilityTest extends IntegrationTest {
             .update();
     }
 
-    private void freshMinute(Instant minute, long errors, @Nullable Long transfers, @Nullable Long slow) {
+    private void postedMinute(Instant minute, long errors, @Nullable Long transfers, @Nullable Long withinTypical, @Nullable Long withinTail) {
         jdbc.sql(
             """
-            INSERT INTO availability_minutes (minute, total, errors, busy, transfers, slow)
-            VALUES (:minute, :total, :errors, 0, :transfers, :slow)
+            INSERT INTO availability_minutes (minute, total, errors, busy, transfers, within_typical, within_tail)
+            VALUES (:minute, :total, :errors, 0, :transfers, :withinTypical, :withinTail)
             """)
             .param("minute", Timestamp.from(minute))
             .param("total", REQUESTS)
             .param("errors", errors)
             .param("transfers", transfers)
-            .param("slow", slow)
+            .param("withinTypical", withinTypical)
+            .param("withinTail", withinTail)
             .update();
     }
 
-    /** Bad for both objectives: half the requests unanswered, half the transfers slow. */
+    /** Bad for availability, half the requests unanswered; and half the transfers over 3 s, a quarter over 5 s. */
     private void badForBoth(Instant minute) {
-        freshMinute(minute, REQUESTS / 2, TRANSFERS, TRANSFERS / 2);
+        postedMinute(minute, REQUESTS / 2, TRANSFERS, TRANSFERS / 2, TRANSFERS * 3 / 4);
+    }
+
+    private Posting posting() {
+        return objectives().posting();
+    }
+
+    private static Posting.Target typical(Posting posting) {
+        return posting.targets().getFirst();
+    }
+
+    private static Posting.Target tail(Posting posting) {
+        return posting.targets().getLast();
     }
 
     private void started(String instance, Instant at) {
@@ -89,12 +104,6 @@ class AvailabilityTest extends IntegrationTest {
 
     private Availability.Objectives objectives() {
         return availability.objectives(clock.now());
-    }
-
-    private AvailabilityRepository.Counts counts() {
-        return repository.countsSince(clock.now().minus(Duration.ofDays(30)), new AvailabilityRepository.Rules(
-            props.availability().goodMinuteAnsweredPercent(), NOTICE, props.freshness().badSharePercent(), GUARANTEED_TPS,
-            props.outside().chaosAftermath(), props.outside().loadAftermath(), props.outside().restartMargin()));
     }
 
     private void goodMinute(Instant minute) {
@@ -173,36 +182,70 @@ class AvailabilityTest extends IntegrationTest {
         assertThat(slo.budgetMinutes()).isEqualTo(43);
         assertThat(slo.windowDays()).isEqualTo(30);
         assertThat(slo.target()).isEqualByComparingTo("0.999");
-        var freshness = objectives().freshness();
-        assertThat(freshness.budgetMinutes()).isEqualTo(43);
-        assertThat(freshness.thresholdMs()).isEqualTo(2000);
-        assertThat(freshness.target()).isEqualByComparingTo("0.999");
-        assertThat(freshness.badMinutes()).isZero();
     }
 
     @Test
-    @DisplayName("a minute is fresh with exactly 1 % of its transfers slow and bad for freshness with one transfer more")
-    void a_minute_is_fresh_with_exactly_1_percent_of_its_transfers_slow_and_bad_for_freshness_with_one_transfer_more() {
-        freshMinute(minuteAgo(3), 0, TRANSFERS, TRANSFERS / 100);
-        assertThat(objectives().freshness().badMinutes()).isZero();
+    @DisplayName("without a posted transfer in 30 days both shares are null, not 100 %, and nothing says since when")
+    void without_a_posted_transfer_in_30_days_both_shares_are_null_not_100_percent_and_nothing_says_since_when() {
+        postedMinute(minuteAgo(4), 0, null, null, null);
+        postedMinute(minuteAgo(3), 0, 0L, 0L, 0L);
 
-        freshMinute(minuteAgo(2), 0, TRANSFERS, TRANSFERS / 100 + 1);
-        assertThat(objectives().freshness().badMinutes()).isEqualTo(1);
+        var posting = posting();
+
+        assertThat(posting.judged()).isZero();
+        assertThat(posting.since()).isNull();
+        assertThat(posting.windowDays()).isEqualTo(30);
+        assertThat(posting.targets()).extracting(Posting.Target::thresholdMs).containsExactly(3000L, 5000L);
+        assertThat(posting.targets()).extracting(Posting.Target::target).usingElementComparator(BigDecimal::compareTo)
+            .containsExactly(new BigDecimal("0.95"), new BigDecimal("0.99"));
+        assertThat(posting.targets()).allSatisfy(target -> {
+            assertThat(target.share()).isNull();
+            assertThat(target.budgetUsed()).isNull();
+        });
+    }
+
+    @Test
+    @DisplayName("1000 transfers, 40 over 3 s and 5 over 5 s, no events: 96 % within 3 s and 99.5 % within 5 s, 80 % and 50 % of the budgets used")
+    void a_thousand_transfers_40_over_3_s_and_5_over_5_s_no_events_96_percent_within_3_s_and_99_5_percent_within_5_s() {
+        postedMinute(minuteAgo(3), 0, 600L, 600L - 30, 600L - 3);
+        postedMinute(minuteAgo(2), 0, 400L, 400L - 10, 400L - 2);
+
+        var posting = posting();
+
+        assertThat(posting.judged()).isEqualTo(1000);
+        assertThat(typical(posting).within()).isEqualTo(960);
+        assertThat(typical(posting).share()).isEqualTo(0.96);
+        assertThat(typical(posting).budgetUsed()).isEqualTo(0.8);
+        assertThat(tail(posting).share()).isEqualTo(0.995);
+        assertThat(tail(posting).budgetUsed()).isEqualTo(0.5);
         assertThat(slo().badMinutes()).isZero();
     }
 
     @Test
-    @DisplayName("a minute without transfers, or not read from monitoring, is not measured for freshness")
-    void a_minute_without_transfers_or_not_read_from_monitoring_is_not_measured_for_freshness() {
-        freshMinute(minuteAgo(4), 0, null, null);
-        freshMinute(minuteAgo(3), 0, 0L, 0L);
-        freshMinute(minuteAgo(2), 0, TRANSFERS, 0L);
+    @DisplayName("exactly 95.00 % within 3 s uses exactly the whole budget: the target is met")
+    void exactly_95_percent_within_3_s_uses_exactly_the_whole_budget_the_target_is_met() {
+        postedMinute(minuteAgo(2), 0, TRANSFERS, TRANSFERS * 95 / 100, TRANSFERS);
 
-        var counts = counts();
+        var typical = typical(posting());
 
-        assertThat(counts.measuredMinutes()).isEqualTo(3);
-        assertThat(counts.freshMeasured()).isEqualTo(1);
-        assertThat(counts.freshBad()).isZero();
+        assertThat(typical.share()).isEqualTo(0.95);
+        assertThat(typical.budgetUsed()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("a minute in a window declared in time takes all its 100 transfers out of the count, the 90 fast ones too")
+    void a_minute_in_a_window_declared_in_time_takes_all_its_100_transfers_out_of_the_count_the_90_fast_ones_too() {
+        var inWindow = minuteAgo(20);
+        postedMinute(inWindow, 0, 100L, 90L, 95L);
+        window(inWindow, inWindow.plusSeconds(60), inWindow.minus(NOTICE));
+        postedMinute(minuteAgo(5), 0, 1000L, 1000L, 1000L);
+
+        var posting = posting();
+
+        assertThat(posting.judged()).isEqualTo(1000);
+        assertThat(posting.planned()).isEqualTo(100);
+        assertThat(typical(posting).within()).isEqualTo(1000);
+        assertThat(typical(posting).share()).isEqualTo(1.0);
     }
 
     @Test
@@ -216,8 +259,8 @@ class AvailabilityTest extends IntegrationTest {
 
         assertThat(objectives.slo().plannedMinutes()).isEqualTo(1);
         assertThat(objectives.slo().badMinutes()).isZero();
-        assertThat(objectives.freshness().plannedMinutes()).isEqualTo(1);
-        assertThat(objectives.freshness().badMinutes()).isZero();
+        assertThat(objectives.posting().planned()).isEqualTo(TRANSFERS);
+        assertThat(objectives.posting().judged()).isZero();
     }
 
     @Test
@@ -233,8 +276,8 @@ class AvailabilityTest extends IntegrationTest {
 
         assertThat(objectives.slo().outsideMinutes()).isEqualTo(2);
         assertThat(objectives.slo().badMinutes()).isEqualTo(1);
-        assertThat(objectives.freshness().outsideMinutes()).isEqualTo(2);
-        assertThat(objectives.freshness().badMinutes()).isEqualTo(1);
+        assertThat(objectives.posting().outside()).isEqualTo(2 * TRANSFERS);
+        assertThat(objectives.posting().judged()).isEqualTo(TRANSFERS);
         assertThat(objectives.slo().availability()).isEqualTo(0.0);
     }
 
@@ -251,8 +294,8 @@ class AvailabilityTest extends IntegrationTest {
 
         assertThat(objectives.slo().outsideMinutes()).isEqualTo(2);
         assertThat(objectives.slo().badMinutes()).isEqualTo(1);
-        assertThat(objectives.freshness().outsideMinutes()).isEqualTo(2);
-        assertThat(objectives.freshness().badMinutes()).isEqualTo(1);
+        assertThat(objectives.posting().outside()).isEqualTo(2 * TRANSFERS);
+        assertThat(objectives.posting().judged()).isEqualTo(TRANSFERS);
     }
 
     @Test
@@ -266,7 +309,8 @@ class AvailabilityTest extends IntegrationTest {
 
         assertThat(objectives.slo().badMinutes()).isEqualTo(1);
         assertThat(objectives.slo().outsideMinutes()).isZero();
-        assertThat(objectives.freshness().badMinutes()).isEqualTo(1);
+        assertThat(objectives.posting().judged()).isEqualTo(TRANSFERS);
+        assertThat(objectives.posting().outside()).isZero();
     }
 
     @Test
@@ -289,8 +333,8 @@ class AvailabilityTest extends IntegrationTest {
 
         assertThat(objectives.slo().outsideMinutes()).isEqualTo(2);
         assertThat(objectives.slo().badMinutes()).isEqualTo(2);
-        assertThat(objectives.freshness().outsideMinutes()).isEqualTo(2);
-        assertThat(objectives.freshness().badMinutes()).isEqualTo(2);
+        assertThat(objectives.posting().outside()).isEqualTo(2 * TRANSFERS);
+        assertThat(objectives.posting().judged()).isEqualTo(2 * TRANSFERS);
     }
 
     @Test
@@ -312,7 +356,8 @@ class AvailabilityTest extends IntegrationTest {
 
         assertThat(objectives.slo().badMinutes()).isEqualTo(2);
         assertThat(objectives.slo().outsideMinutes()).isZero();
-        assertThat(objectives.freshness().badMinutes()).isEqualTo(2);
+        assertThat(objectives.posting().judged()).isEqualTo(2 * TRANSFERS);
+        assertThat(objectives.posting().outside()).isZero();
     }
 
     @Test
@@ -446,6 +491,47 @@ class AvailabilityTest extends IntegrationTest {
         assertThat(slo.measuredMinutes()).isEqualTo(60);
     }
 
+    @Test
+    @DisplayName("posted transfers count from the hour the 30 days begin in, not the hour before; since is null when they cover the window")
+    void posted_transfers_count_from_the_hour_the_30_days_begin_in_not_the_hour_before_since_is_null_when_they_cover_the_window() {
+        var now = clock.now();
+        var windowStart = now.minus(Duration.ofDays(30));
+        postedHour(windowStart, 1000, 990);
+        postedHour(windowStart.minus(Duration.ofHours(1)), 1000, 0);
+        postedMinute(minuteAgo(2), 0, 1000L, 1000L, 1000L);
+
+        var posting = availability.objectives(now).posting();
+
+        assertThat(posting.judged()).isEqualTo(2000);
+        assertThat(typical(posting).within()).isEqualTo(1990);
+        assertThat(posting.since()).isNull();
+    }
+
+    @Test
+    @DisplayName("posted transfers counted for a few days only tell since which hour")
+    void posted_transfers_counted_for_a_few_days_only_tell_since_which_hour() {
+        var now = clock.now();
+        var firstHour = now.minus(Duration.ofDays(3)).truncatedTo(ChronoUnit.HOURS);
+        hour(now.minus(Duration.ofDays(10)), 60, 0);
+        postedHour(firstHour, 1000, 1000);
+
+        assertThat(availability.objectives(now).posting().since()).isEqualTo(firstHour);
+    }
+
+    private void postedHour(Instant within, long judged, long withinTypical) {
+        jdbc.sql(
+            """
+            INSERT INTO availability_hours (hour, measured_minutes, bad_minutes, planned_minutes, total, errors, busy,
+                                            posted_judged, posted_within_typical, posted_within_tail)
+            VALUES (date_trunc('hour', CAST(:within AS timestamptz), 'UTC'), 60, 0, 0, :total, 0, 0, :judged, :withinTypical, :judged)
+            """)
+            .param("within", Timestamp.from(within))
+            .param("total", 60 * REQUESTS)
+            .param("judged", judged)
+            .param("withinTypical", withinTypical)
+            .update();
+    }
+
     private void hour(Instant within, int measured, int bad) {
         jdbc.sql(
             """
@@ -501,16 +587,16 @@ class AvailabilityTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("an hour that is over keeps both objectives' planned, outside and bad minutes once its minutes are deleted")
-    void an_hour_that_is_over_keeps_both_objectives_planned_outside_and_bad_minutes_once_its_minutes_are_deleted() throws Exception {
+    @DisplayName("an hour that is over keeps its planned, outside and bad minutes and its posted transfers once its minutes are deleted")
+    void an_hour_that_is_over_keeps_its_planned_outside_and_bad_minutes_and_its_posted_transfers_once_its_minutes_are_deleted() throws Exception {
         var lastHour = clock.now().truncatedTo(ChronoUnit.HOURS).minus(Duration.ofHours(1));
         badForBoth(lastHour.plusSeconds(60));
-        freshMinute(lastHour.plusSeconds(120), 0, TRANSFERS, TRANSFERS / 2);
+        postedMinute(lastHour.plusSeconds(120), 0, TRANSFERS, TRANSFERS / 2, TRANSFERS);
         badForBoth(lastHour.plusSeconds(600));
         window(lastHour.plusSeconds(600), lastHour.plusSeconds(660), lastHour.minus(Duration.ofDays(1)));
         badForBoth(lastHour.plusSeconds(1200));
         chaos(lastHour.plusSeconds(1200));
-        freshMinute(lastHour.plusSeconds(1800), 0, null, null);
+        postedMinute(lastHour.plusSeconds(1800), 0, null, null, null);
         generatorHandsOver(List.of());
         prometheus.status = 503;
         var before = objectives();
@@ -518,15 +604,21 @@ class AvailabilityTest extends IntegrationTest {
         availability.collect();
 
         assertThat(jdbc.sql(
-            "SELECT measured_minutes, bad_minutes, planned_minutes, outside_minutes, fresh_measured, fresh_bad, fresh_planned, fresh_outside FROM availability_hours")
+            """
+            SELECT measured_minutes, bad_minutes, planned_minutes, outside_minutes,
+                   posted_judged, posted_within_typical, posted_within_tail, posted_planned, posted_outside
+            FROM availability_hours
+            """)
             .query().listOfRows())
-            .containsExactly(Map.of(
+            .containsExactly(mapOf(
                 "measured_minutes", 5, "bad_minutes", 1, "planned_minutes", 1, "outside_minutes", 1,
-                "fresh_measured", 4, "fresh_bad", 2, "fresh_planned", 1, "fresh_outside", 1));
+                "posted_judged", 2 * TRANSFERS, "posted_within_typical", TRANSFERS, "posted_within_tail", TRANSFERS * 3 / 4 + TRANSFERS,
+                "posted_planned", TRANSFERS, "posted_outside", TRANSFERS));
         assertThat(objectives()).isEqualTo(before);
         jdbc.sql("DELETE FROM availability_minutes WHERE minute < :hourEnd").param("hourEnd", Timestamp.from(lastHour.plus(Duration.ofHours(1)))).update();
         assertThat(objectives()).isEqualTo(before);
-        assertThat(before.freshness().badMinutes()).isEqualTo(2);
+        assertThat(before.posting().judged()).isEqualTo(2 * TRANSFERS);
+        assertThat(before.posting().since()).isEqualTo(lastHour);
         assertThat(before.slo().outsideMinutes()).isEqualTo(1);
     }
 
