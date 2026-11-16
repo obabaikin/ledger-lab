@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Availability, health } from './Availability'
-import { dayAndMonth } from './format'
+import { dayAndMonth, utcDayAndMonth } from './format'
 import { bank } from './test/fakeControl'
 import { en } from './texts/en'
 
@@ -43,7 +43,7 @@ describe('service levels', () => {
     const card = within(screen.getByTestId('slo-availability'))
     const bars = card.getAllByTestId('day-bar')
     expect(bars).toHaveLength(30)
-    expect(bars.at(-1)).toHaveAccessibleName(en.availability.badMinutesOn(dayAndMonth(day(0)), '3'))
+    expect(bars.at(-1)).toHaveAccessibleName(en.availability.badMinutesOn(utcDayAndMonth(day(0)), '3'))
     expect(bars.at(-1)!.getAttribute('height')).toBe('40')
     expect(card.getByTestId('even-pace').getAttribute('y1')).toBe(String(40 - (43 / 30 / 3) * 40))
     expect(card.getByText(en.availability.daysAgo(30))).toBeInTheDocument()
@@ -58,7 +58,7 @@ describe('service levels', () => {
     const bars = within(screen.getByTestId('slo-posting-0')).getAllByTestId('day-bar')
     expect(bars).toHaveLength(2)
     expect(bars.map((b) => b.getAttribute('x'))).toEqual([String(19 * 12), String(29 * 12)])
-    expect(bars[0]).toHaveAccessibleName(en.availability.slowTransfersOn(dayAndMonth(day(10)), '50'))
+    expect(bars[0]).toHaveAccessibleName(en.availability.slowTransfersOn(utcDayAndMonth(day(10)), '50'))
   })
 
   it('say not measured before the first judged transfer, without a budget, and since when transfers are counted while the window is short', () => {
@@ -74,6 +74,19 @@ describe('service levels', () => {
     expect(screen.getByTestId('slo-posting-0-value')).toHaveTextContent(en.availability.notMeasured)
     expect(screen.queryByTestId('slo-posting-0-used')).toBeNull()
     expect(screen.getByTestId('posting-since')).toHaveTextContent(en.availability.postingSince(dayAndMonth('2026-11-17T03:00:00Z')))
+  })
+
+  it('name a bar by its UTC day for a visitor west of UTC too', () => {
+    vi.stubEnv('TZ', 'America/New_York')
+    try {
+      vi.spyOn(Date, 'now').mockReturnValue(NOW)
+      const view = bank()
+      render(<Availability bank={{ ...view, slo: { ...view.slo, days: [{ day: '2026-11-30', count: 2 }] } }} />)
+
+      expect(within(screen.getByTestId('slo-availability')).getByTestId('day-bar')).toHaveAccessibleName(en.availability.badMinutesOn('30 Nov', '2'))
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('fill the budget bar to its share and cap it at the whole bar when the target is missed', () => {

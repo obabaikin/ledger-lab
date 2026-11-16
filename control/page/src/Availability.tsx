@@ -1,6 +1,6 @@
 import type { BankView } from './api/client'
 import { REPOSITORY_URL } from './Diagram'
-import { count, dayAndMonth, hoursMinutes, MS_PER_SECOND, percent } from './format'
+import { count, dayAndMonth, hoursMinutes, MS_PER_SECOND, percent, utcDayAndMonth } from './format'
 import { t } from './texts'
 
 const VALUE_DIGITS = 2
@@ -45,7 +45,7 @@ function DayBars(props: { days: Day[]; windowDays: number; budget: number; label
           const day = isoDay(today - (windowDays - 1 - i) * MS_PER_DAY)
           const value = byDay.get(day)
           if (value === undefined) return null
-          const label = props.label(dayAndMonth(day), count(value))
+          const label = props.label(utcDayAndMonth(day), count(value))
           return (
             <rect key={day} data-testid="day-bar" x={i * (BAR_WIDTH + BAR_GAP)} y={y(value)} width={BAR_WIDTH} height={BARS_HEIGHT - y(value)} aria-label={label}>
               <title>{label}</title>
