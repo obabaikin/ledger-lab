@@ -76,6 +76,16 @@ class RealPrometheusTest extends IntegrationTest {
     private static final Duration BUCKET_MINUTE = Duration.ofSeconds(61);
     private static volatile Instant bucketsServedUntil = Instant.EPOCH;
 
+    /**
+     * A minute's sums, read at one instant as control's collector reads them: queries evaluated at instants a scrape apart
+     * extrapolate their minute differently, and a share of two of them is off by a few percent.
+     */
+    private double atInstant(String query, Instant at) throws InterruptedException {
+        var ranges = Objects.requireNonNull(prometheusClient.queryRange(query, at, at, Duration.ofSeconds(1)));
+        assertThat(ranges).hasSize(1);
+        return Double.parseDouble(ranges.getFirst().values().getFirst().get(1).toString());
+    }
+
     private static void awaitOtherBucketsOutOfTheMinute() throws InterruptedException {
         var quiet = bucketsServedUntil.plus(BUCKET_MINUTE);
         while (Instant.now().isBefore(quiet)) {
@@ -245,10 +255,10 @@ class RealPrometheusTest extends IntegrationTest {
             updatedGateway.awaitScrapes(SCRAPES_TO_SETTLE);
         }
 
-        var transfers = single(Objects.requireNonNull(prometheusClient.query(
-            BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5)))))).number();
-        var within3s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0")))).number();
-        var within5s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("5.0")))).number();
+        var at = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        var transfers = atInstant(BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5))), at);
+        var within3s = atInstant(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0"), at);
+        var within5s = atInstant(BankMetrics.WITHIN_IN_MINUTE.formatted("5.0"), at);
         bucketsServedUntil = Instant.now();
 
         assertThat(transfers).isPositive();
@@ -271,9 +281,9 @@ class RealPrometheusTest extends IntegrationTest {
             steadyGateway.awaitScrapes(SCRAPES_TO_SETTLE);
         }
 
-        var transfers = single(Objects.requireNonNull(prometheusClient.query(
-            BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5)))))).number();
-        var within3s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0")))).number();
+        var at = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        var transfers = atInstant(BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5))), at);
+        var within3s = atInstant(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0"), at);
         bucketsServedUntil = Instant.now();
 
         assertThat(within3s / transfers).isBetween(0.5, 1.0);
