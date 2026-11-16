@@ -52,7 +52,8 @@ public final class Verdicts {
         Books books,
         ClientReconciliationReport client,
         @Nullable PeriodStats stats,
-        List<ChaosEvent> chaos
+        List<ChaosEvent> chaos,
+        PeriodLoad load
     ) {
         var mismatches = new ArrayList<Mismatch>();
         if (entryCount != gateway.accepted()) {
@@ -95,6 +96,7 @@ public final class Verdicts {
             client,
             stats,
             notes,
-            chaos);
+            chaos,
+            load);
     }
 }

@@ -42,6 +42,18 @@ generator:
     wait-share: 0.1
     wait-timeout: 5s
     minutes-retention: 48h
+    # Off: the base is tps all the time. The chart turns it on for the bank around the clock.
+    profile:
+      enabled: false
+      seed: 1
+      night-tps: 200
+      day-min-tps: 300
+      day-max-tps: 800
+      steps: 100, 200
+      step-minutes: 5
+      night-start: "00:00"
+      night-end: "06:00"
+      time-zone: Europe/Berlin
   accounts:
     # The same as the ledger's: the clients pay between the accounts the bank has.
     count: 100000

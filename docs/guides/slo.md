@@ -3,13 +3,15 @@
 The bank promises three things. The page shows the first two with their error budgets; the third is the verdict of
 every period.
 
-| Objective | A minute is good if | Target |
+| Objective | Measured | Target over a rolling 30 days |
 |---|---|---|
-| Availability | at least 99 % of the clients' requests got an answer | 99.9 % of minutes over a rolling 30 days |
-| Time to posting | at most 1 % of its transfers took longer than 2 s from acceptance to result | 99.9 % of minutes over a rolling 30 days |
+| Availability | a minute is good if at least 99 % of the clients' requests got an answer | 99.9 % of minutes |
+| Time to posting | the share of transfers posted within a threshold, from acceptance to result | 95 % within 3 s and 99 % within 5 s |
 | Correctness | — | every period `BALANCED` |
 
-A budget of 99.9 % over 30 days is `floor(43 200 × 0.001)` = 43 bad minutes.
+The availability budget of 99.9 % over 30 days is `floor(43 200 × 0.001)` = 43 bad minutes. The budget of a time to
+posting target is the transfers it allows over the threshold: 5 % of the judged transfers for 3 s, 1 % for 5 s. The
+window starts on the hour 30 days back.
 
 ## Availability
 
@@ -22,15 +24,22 @@ A budget of 99.9 % over 30 days is `floor(43 200 × 0.001)` = 43 bad minutes.
 
 - The metric is the gateway's `gateway.transfer.latency`: from the gateway accepting a transfer to the gateway recording
   its result from the ledger, posted or rejected. Both of the gateway's replicas publish it as a histogram with a bucket
-  at the threshold, so the slow transfers of a minute are counted exactly and add up over the replicas.
-- A minute is bad if more than 1 % of its transfers were slower than 2 s. Exactly 1 % is good, and a transfer of exactly
-  2.0 s is fast: the bucket `le="2.0"` includes its bound.
-- Control reads each minute from Prometheus 30 s after it ends and keeps trying for an hour. A minute without transfers,
-  or one Prometheus did not answer for within the hour, is not measured.
-- Why a share over a threshold, not a p99: a summary's p99 is a moving window that cannot be read for exactly the past
+  at each threshold, 3 s and 5 s, so the transfers within a threshold are counted exactly and add up over the replicas.
+- Over the judged transfers of 30 days: the share within 3 s is `within 3 s / judged`, the target 95 %; the share within
+  5 s is `within 5 s / judged`, the target 99 %. Both share the same judged transfers. A transfer of exactly 3.0 s is
+  within 3 s: the bucket `le="3.0"` includes its bound. Exactly 95.00 % meets the target.
+- Control reads each minute's transfers and the two buckets from Prometheus 30 s after the minute ends and keeps
+  trying for an hour; a minute keeps what it read first. A minute Prometheus did not answer for within the hour is not
+  counted. Without a judged transfer in the window the page says "not measured", not 100 %.
+- The counts start with the version that has the buckets at 3 s and 5 s: until 30 days have passed, the page says since
+  when they are counted.
+- Why shares of transfers, not minutes: a minute-based rule with a 1 % bound counted a minute bad for a few slow
+  transfers among thousands, and its 43-minute budget said nothing about how many transfers waited. A share of
+  transfers weighs every transfer once.
+- Why a share within a threshold, not a p99: a summary's p99 is a moving window that cannot be read for exactly the past
   minute, nor added up over replicas. Three ways of reading it gave 5.5, 5.6 and 12.9 % bad minutes for the same six
   hours ([p99 analysis](../results/2026-11-14-p99-analysis.md)).
-- The threshold is one setting of the chart, `slo.freshnessThreshold`, read by both the gateway and control.
+- The thresholds and targets are one setting of the chart, `slo.posting`, read by both the gateway and control.
 
 ## Correctness
 
@@ -39,10 +48,16 @@ during crashes and loads above the limits too. It has no budget: one period that
 
 ## What does not use the budget
 
-The same rules apply to both budgets.
+Both objectives leave out the same minutes, by the rules below, but take out different things:
 
-- **Announced maintenance.** A bad minute in a window declared at least 3 hours before its start is planned.
-- **Outside the bounds.** A bad minute is outside the bounds if it meets
+- **Availability**: only the bad minutes are taken out. A good minute during an event stays good and counted.
+- **Time to posting**: every transfer of such a minute is taken out, the fast ones too. The page shows how many
+  transfers were left out, planned and outside the bounds.
+
+The minutes left out:
+
+- **Announced maintenance.** A minute in a window declared at least 3 hours before its start is planned.
+- **Outside the bounds.** A minute is outside the bounds if it meets
   - a crash set off from the page, from the crash to 60 s after it, or
   - a load raised above 1300 transfers per second, from its start to 30 s after its end.
 
@@ -60,8 +75,7 @@ The same rules apply to both budgets.
   - Control has no access to Kubernetes. It reads each pod's `process_start_time_seconds` from Prometheus in windows of
     2 s, shorter than a JVM takes to start, and keeps every value once: the value is the start itself, so each start is
     counted once however the scrapes fall.
-- Only bad minutes are taken out. A good minute during an event stays good and counted.
-- A bad minute that is both in a maintenance window and outside the bounds counts as planned.
+- A minute that is both in a maintenance window and outside the bounds counts as planned.
 - Deploys and the bank's own failures are judged.
 
 ## Known limits
@@ -70,10 +84,11 @@ The same rules apply to both budgets.
   again, so its next start, or the bad minutes after the event, are still judged.
 - A crash from the page during a load above the limit makes the load judged: its pods' starts are explained for the
   crash's window, not for the load's. Such minutes are judged: the error is on the strict side.
-- During the first deploy of the gateway that publishes the histogram, an old replica still counts transfers without
-  buckets, and its transfers read as slow. This happens once, for the minutes of that rollout.
+- During a deploy that adds a bucket, an old gateway replica publishes the histogram without it. Control counts a
+  minute's transfers only on the replicas that publish both buckets, so the old replica's transfers are left out of
+  both the judged transfers and those within the thresholds, rather than read as slow.
 - A deploy of the ledger pauses its consumers for about 30 s while Kafka moves their partitions. Until the ledger's
-  group membership changes, each deploy can cost the time to posting one or two bad minutes.
+  group membership changes, each deploy can push the transfers of those seconds over 3 s.
 - One node. In production a crashed pod would sit inside the objectives, with replicas across zones absorbing it. Here
   a crash stops the whole ledger for a while, so the crash button is left out of the budgets, and correctness under it
   is an objective of its own.
@@ -82,6 +97,8 @@ The same rules apply to both budgets.
 
 - The gateway's histogram: `gateway/src/main/java/com/ledgerlab/gateway/service/TransferLatency.java`.
 - Reading the minutes and the pods' starts from Prometheus:
-  `control/src/main/java/com/ledgerlab/control/availability/FreshnessCollector.java`.
-- Judging the minutes, both objectives in one query:
+  `control/src/main/java/com/ledgerlab/control/availability/PostingCollector.java`; the queries, the transfers counted
+  only on replicas with both buckets: `control/src/main/java/com/ledgerlab/control/metrics/BankMetrics.java`.
+- Judging the minutes and their transfers, both objectives in one query:
   `control/src/main/java/com/ledgerlab/control/availability/AvailabilityRepository.java`.
+- The shares and the budgets used: `control/src/main/java/com/ledgerlab/control/availability/Availability.java`.

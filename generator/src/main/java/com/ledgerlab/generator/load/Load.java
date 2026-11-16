@@ -82,6 +82,7 @@ public class Load implements SmartLifecycle {
     private final GatewayClient client;
     private final ClientJournal journal;
     private final ResponseMinutes minutes;
+    private final BaseSchedule schedule;
     private final Clock clock;
     private final double duplicateShare;
     private final List<Duration> duplicateDelays;
@@ -126,11 +127,14 @@ public class Load implements SmartLifecycle {
     }
 
     @Autowired
-    public Load(GeneratorProperties props, GatewayClient client, ClientJournal journal, ResponseMinutes minutes, Clock clock, MeterRegistry registry) {
+    public Load(
+        GeneratorProperties props, GatewayClient client, ClientJournal journal, ResponseMinutes minutes, BaseSchedule schedule, Clock clock,
+        MeterRegistry registry
+    ) {
         // The slowest open request ends by its own timeouts: connecting, then the wait plus the request timeout.
         // No retry starts after a stop, so backoffs only need the margin.
         this(
-            props, client, journal, minutes, clock, registry,
+            props, client, journal, minutes, schedule, clock, registry,
             props.connectTimeout().plus(props.load().waitTimeout()).plus(props.requestTimeout()).plus(STOP_GRACE_MARGIN));
     }
 
@@ -139,6 +143,7 @@ public class Load implements SmartLifecycle {
         GatewayClient client,
         ClientJournal journal,
         ResponseMinutes minutes,
+        BaseSchedule schedule,
         Clock clock,
         MeterRegistry registry,
         Duration stopGrace
@@ -155,6 +160,7 @@ public class Load implements SmartLifecycle {
         this.client = client;
         this.journal = journal;
         this.minutes = minutes;
+        this.schedule = schedule;
         this.clock = clock;
         this.duplicateShare = duplicates.duplicateShare();
         this.duplicateDelays = duplicates.duplicateDelays();
@@ -221,7 +227,7 @@ public class Load implements SmartLifecycle {
             while (running) {
                 Thread.sleep(PACER_TICK);
                 var now = System.nanoTime();
-                var tps = targetTps(now);
+                var tps = targetTps(now, schedule.baseAt(clock.instant()));
                 // After a stall the pacer does not send all it missed at once: at most a second's worth.
                 due = Math.min(due + tps * (now - last) / NANOS_PER_SECOND, tps);
                 last = now;
@@ -285,9 +291,9 @@ public class Load implements SmartLifecycle {
             .orElse(null);
     }
 
-    private int targetTps(long nowNanos) {
+    private int targetTps(long nowNanos, int base) {
         var pulse = highestPulse(nowNanos);
-        return pulse == null ? props.tps() : Math.max(props.tps(), pulse.tps());
+        return pulse == null ? base : Math.max(base, pulse.tps());
     }
 
     /**
@@ -502,11 +508,13 @@ public class Load implements SmartLifecycle {
 
     public LoadStatus status() {
         var now = System.nanoTime();
+        var instant = clock.instant();
+        var base = schedule.baseAt(instant);
         var pulse = highestPulse(now);
         var byReason = new LinkedHashMap<RejectReason, Long>();
         rejectedByReason.forEach((reason, count) -> byReason.put(reason, count.sum()));
         return new LoadStatus(
-            startedAt, props.tps(), targetTps(now),
+            startedAt, base, schedule.nextChangeAfter(instant), targetTps(now, base),
             pulse == null ? null : new LoadStatus.Pulse(pulse.tps(), pulse.until()),
             requested.sum(), acknowledged.sum(), posted.sum(), rejected.sum(), byReason,
             failed.sum(), unknown.sum(), retries.sum(), refused.sum(), duplicatesSent.sum(),

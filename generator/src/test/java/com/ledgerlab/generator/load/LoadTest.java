@@ -15,8 +15,12 @@ import com.ledgerlab.generator.journal.JournalOutcome;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,9 +39,13 @@ class LoadTest {
     }
 
     private Load load(TestData.Settings settings, Duration stopGrace) {
+        return load(settings, stopGrace, Clock.systemUTC());
+    }
+
+    private Load load(TestData.Settings settings, Duration stopGrace, Clock clock) {
         var props = settings.build();
-        var clock = Clock.systemUTC();
-        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props), clock, registry, stopGrace);
+        var schedule = new BaseSchedule(props);
+        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props, schedule), schedule, clock, registry, stopGrace);
         return load;
     }
 
@@ -175,6 +183,60 @@ class LoadTest {
         assertThat(load.status().targetTps()).isEqualTo(300);
         await().atMost(Duration.ofSeconds(2)).until(() -> load.status().targetTps() == 200);
         assertThat(load.status().pulse()).satisfies(pulse -> assertThat(pulse.tps()).isEqualTo(200));
+    }
+
+    @Test
+    @DisplayName("with the profile, a pulse of 900 over a base of 800 sets 900, and once over the load is the base of the step it is in by then")
+    void with_the_profile_a_pulse_over_the_base_sets_the_pace_and_once_over_the_load_is_the_base_of_the_step_it_is_in_by_then() {
+        var settings = TestData.settings("http://localhost:1").baseProfile(TestData.dayProfile(11));
+        var schedule = new BaseSchedule(settings.build());
+        var now = new AtomicReference<>(Instant.parse("2026-11-16T05:00:00Z"));
+        while (schedule.baseAt(now.get()) != 800) {
+            now.set(now.get().plus(Duration.ofMinutes(5)));
+        }
+        var load = load(settings, DEFAULT_GRACE, new MovableClock(now));
+
+        load.pulse(900, Duration.ofMillis(300));
+        assertThat(load.status().baseTps()).isEqualTo(800);
+        assertThat(load.status().targetTps()).isEqualTo(900);
+
+        now.set(now.get().plus(Duration.ofMinutes(5)));
+        var nextBase = schedule.baseAt(now.get());
+        await().atMost(Duration.ofSeconds(2)).until(() -> load.status().pulse() == null);
+        assertThat(load.status().baseTps()).isEqualTo(nextBase);
+        assertThat(load.status().targetTps()).isEqualTo(nextBase);
+        assertThat(load.status().nextChangeAt()).isEqualTo(now.get().plus(Duration.ofMinutes(5)));
+    }
+
+    private static final class MovableClock extends Clock {
+        private final AtomicReference<Instant> now;
+
+        MovableClock(AtomicReference<Instant> now) {
+            this.now = now;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now.get();
+        }
+    }
+
+    @Test
+    void without_the_profile_the_base_is_tps_and_has_no_next_change() {
+        var load = load(TestData.settings("http://localhost:1").tps(100));
+
+        assertThat(load.status().baseTps()).isEqualTo(100);
+        assertThat(load.status().nextChangeAt()).isNull();
     }
 
     @Test

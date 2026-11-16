@@ -10,6 +10,8 @@ TOPICS="transfers transfer-results"
 # As long as the services hold a period's transfers (4 h, ADR 0022): a command read again later is past the ledger's
 # retention and is not booked.
 RETENTION_MS="${KAFKA_RETENTION_MS:-14400000}"
+# Per partition, whichever of the two comes first: the volume holds 8 GiB and cannot grow on an upgrade.
+RETENTION_BYTES="${KAFKA_RETENTION_BYTES:-629145600}"
 # Retention deletes whole segments only; a segment rolls this often.
 SEGMENT_MS="${KAFKA_SEGMENT_MS:-3600000}"
 KAFKA_BIN="${KAFKA_BIN:-/opt/kafka/bin}"
@@ -29,7 +31,7 @@ for topic in $TOPICS; do
   "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP" --create --if-not-exists \
     --topic "$topic" --partitions "$PARTITIONS" --replication-factor "$REPLICAS"
   "$KAFKA_BIN/kafka-configs.sh" --bootstrap-server "$BOOTSTRAP" --alter --entity-type topics --entity-name "$topic" \
-    --add-config "retention.ms=$RETENTION_MS,segment.ms=$SEGMENT_MS"
+    --add-config "retention.ms=$RETENTION_MS,retention.bytes=$RETENTION_BYTES,segment.ms=$SEGMENT_MS"
   actual=$(layout_of "$topic")
   if [ "$actual" != "$PARTITIONS $REPLICAS" ]; then
     echo "topic $topic has partitions/replicas '$actual', expected '$PARTITIONS $REPLICAS'" >&2

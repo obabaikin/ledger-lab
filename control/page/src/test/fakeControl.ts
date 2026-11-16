@@ -27,7 +27,7 @@ export const PERIOD_START = '2026-11-11T09:00:00Z'
 export const session = (changes: Partial<SessionView> = {}): SessionView => ({
   sessionId: SESSION_ID,
   inviteValid: true,
-  loadTpsOptions: [400, 500, 1000, 2000],
+  loadTpsOptions: [900, 1000, 2000],
   defaultLoadTps: 1000,
   loadDurationOptions: [10, 20, 30],
   defaultLoadSeconds: 10,
@@ -58,8 +58,19 @@ export const bank = (changes: Partial<BankView> = {}): BankView => ({
     restarted: true,
   },
   pods: null,
-  slo: { target: 0.999, windowDays: 30, measuredMinutes: 1000, badMinutes: 17, budgetMinutes: 43, plannedMinutes: 12, outsideMinutes: 2, availability: 0.9983, busyShare: 0.004 },
-  freshness: { target: 0.999, thresholdMs: 2000, badMinutes: 5, budgetMinutes: 43, plannedMinutes: 1, outsideMinutes: 3 },
+  slo: { target: 0.999, windowDays: 30, measuredMinutes: 1000, badMinutes: 17, budgetMinutes: 43, plannedMinutes: 12, outsideMinutes: 2, availability: 0.9983, busyShare: 0.004, days: [] },
+  load: { baseTps: 400, nextChangeAt: '2026-11-11T10:35:00Z' },
+  posting: {
+    windowDays: 30,
+    since: null,
+    judged: 1_000_000,
+    planned: 12_000,
+    outside: 3_400,
+    targets: [
+      { thresholdMs: 3000, target: 0.95, within: 999_700, share: 0.9997, budgetUsed: 0.006, days: [] },
+      { thresholdMs: 5000, target: 0.99, within: 999_800, share: 0.9998, budgetUsed: 0.02, days: [] },
+    ],
+  },
   maintenance: null,
   chaos: { available: true, readyInSeconds: 0, recent: [] },
   readAt: '2026-11-11T10:30:00Z',
@@ -115,6 +126,7 @@ export const report = (changes: Partial<PeriodReport> = {}): PeriodReport => ({
   stats: null,
   notes: [],
   chaos: [],
+  load: null,
   ...changes,
 })
 

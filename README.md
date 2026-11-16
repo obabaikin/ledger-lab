@@ -7,7 +7,7 @@
 **Live demo: [ledger-lab.de](https://ledger-lab.de)** — watch the bank; enter your email to get a link, then raise the
 load or crash the ledger yourself.
 
-One bank, 100,000 accounts, clients sending 400 transfers per second day and night. Every hour is closed and
+One bank, 100,000 accounts, clients sending transfers day and night: 200 per second at night, 300 to 800 by day. Every hour is closed and
 reconciled: the books, the bank's events and what the clients were told must agree to the cent, through crashes,
 deploys and loads past the limit. Built to answer one question properly: *how do you prove no money was lost or
 duplicated while the system keeps moving and its consumers crash?* Work in progress: what is done and what comes next
@@ -32,17 +32,18 @@ is in the [Roadmap](#roadmap).
 - The **ledger** applies each transfer as a double-entry posting in PostgreSQL. Delivery is
   at-least-once; processing is idempotent, so crashes and rebalances cannot double-post. The money
   reaches the receiver's balance a moment after the posting, and until then the receiver cannot spend it.
-- A **generator** plays the bank's clients: 400 transfers per second, around the clock, each client keeping a journal
-  of what the bank told it.
+- A **generator** plays the bank's clients around the clock, each client keeping a journal of what the bank told it:
+  200 transfers per second from midnight to 6:00 Berlin time, then a random walk in steps of 100 or 200 every 5 minutes
+  between 300 and 800, back at 200 by midnight.
 - Transfers can be **rejected** for domain reasons: insufficient funds, blocked account,
   daily limit. Rejections are recorded and reconciled too.
 - **Hourly reconciliation.** Each hour is a period. Once it is over and drained, control checks what the clients were
   told, what the gateway accepted, what the ledger posted and what the bank's events say, and inside the ledger the
   balances, the journal and the transfer log. The period is `BALANCED` or `MISMATCH`, with the reason.
-- **Visitors with an invite** raise the load for up to 30 s, up to 2000 transfers per second, and press a **chaos
+- **Visitors with an invite** raise the load for up to 30 s, to 900–2000 transfers per second, and press a **chaos
   button** that crashes every ledger instance, as `kill -9` would. The next period must still balance.
-- **Service levels**: availability and time to posting, each 99.9 % of minutes over 30 days, with
-  their error budgets on the page.
+- **Service levels** over 30 days: availability, 99.9 % of minutes; time to posting, 95 % of transfers within 3 s and
+  99 % within 5 s; each with its error budget on the page.
 
 ## How it fits together
 
@@ -88,14 +89,15 @@ from its own events ([ADR 0015](docs/adr/0015-live-numbers-from-the-banks-events
 
 ## Service levels
 
-| Objective | A minute is good if | Target |
+| Objective | Measured | Target over 30 days |
 |---|---|---|
-| Availability | at least 99 % of the clients' requests got an answer | 99.9 % of minutes over 30 days |
-| Time to posting | at most 1 % of its transfers took longer than 2 s from acceptance to result | 99.9 % of minutes over 30 days |
+| Availability | a minute is good if at least 99 % of the clients' requests got an answer | 99.9 % of minutes |
+| Time to posting | the share of transfers from acceptance to result within 3 s and within 5 s | 95 % within 3 s, 99 % within 5 s |
 | Correctness | — | every period `BALANCED` |
 
 Crashes from the page, loads above 1300 per second and maintenance windows declared 3 hours ahead stay out of the
-budget, unless a service restarts beyond what the event explains. How each is measured: [SLO](docs/guides/slo.md).
+budget, unless a service restarts beyond what the event explains: availability leaves out their bad minutes, the time
+to posting every transfer of their minutes. How each is measured: [SLO](docs/guides/slo.md).
 The second objective came from a measurement: every scheduled task of a service shared one thread, so the outbox
 publisher waited while a cleanup deleted expired idempotency keys, and nothing reached Kafka meanwhile. With the
 publishers on threads of their own the share of time with p99 above 1 s fell from 18 % to none
@@ -110,7 +112,7 @@ of both ends `BALANCED`. Held for 5 minutes by day, the same server already refu
 How it was measured, how the bottlenecks were found and what was tried and rejected:
 [optimizations](docs/results/2026-11-06-optimizations.md). These were measured with the runs of version 1.
 
-On the public demo a visitor raises the load to 400–2000 transactions per second for 10 to 30 s, so they can go past
+On the public demo a visitor raises the load to 900–2000 transactions per second for 10 to 30 s, so they can go past
 the limit and watch the bank fall behind and catch up; one raise at a time for all visitors, with a minute between them.
 
 ## Stack
@@ -245,7 +247,8 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Refuses instead of falling over under overload | `503 busy` with `Retry-After`; 1000 TPS locally without a restart | done |
 | Measured limits on the server | the highest rate with no refusals and bounded latency, with node and database metrics: 200 TPS in October ([results](docs/results/2026-10-23-server-baseline.md)), about 1600 in steps of 30 s with batched writes ([optimizations](docs/results/2026-11-06-optimizations.md)); runs of 5 minutes by day already refuse at 1300 ([comparison](docs/results/2026-11-10-kotlin-vs-java.md)) | done |
 | Access on request | a visitor enters an email and receives an invite link | done |
-| A bank that runs around the clock | a steady load day and night; visitors raise the rate or crash the ledger; closed periods reconciled hourly, service levels and verdicts on the page | done |
+| A bank that runs around the clock | a load day and night; visitors raise the rate or crash the ledger; closed periods reconciled hourly, service levels and verdicts on the page | done |
+| A day of load, time to posting by transfer | 200 TPS at night, a random walk of 300–800 by day; 95 % of transfers posted within 3 s and 99 % within 5 s over 30 days, maintenance and loads past the limit left out | next |
 | Dashboards | Grafana: latency by segment, node, database | planned |
 | Writes in batches, overload shed at the edge | 1000–1600 TPS on the server in steps of 30 s without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | done |
 | The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)), then a key cleanup that held up the outbox publisher on a shared scheduler thread ([p99 analysis](docs/results/2026-11-14-p99-analysis.md)) | done |

@@ -308,7 +308,8 @@ public class PeriodConductor {
             return;
         }
         var entryCount = Objects.requireNonNull(period.entryCount(), "entryCount of a closed period");
-        var report = Verdicts.verdictOf(entryCount, bank, inLedger, check, allBalances, client, stats, chaos.between(start, period.end()));
+        var report = Verdicts.verdictOf(entryCount, bank, inLedger, check, allBalances, client, stats, chaos.between(start, period.end()),
+            windows.loadBetween(start, period.end()));
         if (periods.markReconciled(start, report, Verdicts.numbersOf(bank, inLedger, stats), now) == 1) {
             log.info("Period {}: reconciled, {} {}", start, report.verdict(), report.mismatches());
         }

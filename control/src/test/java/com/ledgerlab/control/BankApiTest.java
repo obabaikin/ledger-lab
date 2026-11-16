@@ -155,6 +155,21 @@ class BankApiTest extends BankIntegrationTest {
     }
 
     @Test
+    @DisplayName("the bank shows the clients' base and its next change from the generator; without an answer from it, no base and still 200")
+    void the_bank_shows_the_clients_base_and_its_next_change_from_the_generator_without_an_answer_from_it_no_base_and_still_200() {
+        generator.answer("GET", GeneratorApi.LOAD_PATH, 200, load());
+        conductor.tick();
+
+        assertThat(bank().get("load")).isEqualTo(mapOf("baseTps", 400, "nextChangeAt", "2026-11-10T08:05:00Z"));
+
+        generator.answer("GET", GeneratorApi.LOAD_PATH, 503);
+        conductor.tick();
+
+        assertThat(get("/api/bank").getStatusCode().value()).isEqualTo(200);
+        assertThat(bank().get("load")).isNull();
+    }
+
+    @Test
     @DisplayName("a part whose service stops answering keeps the last numbers read")
     void a_part_whose_service_stops_answering_keeps_the_last_numbers_read() {
         generator.answer("GET", GeneratorApi.LOAD_PATH, 200, load());
@@ -243,22 +258,29 @@ class BankApiTest extends BankIntegrationTest {
     }
 
     @Test
-    @DisplayName("the bank shows the budget of bad minutes and how much of it is used")
-    void the_bank_shows_the_budget_of_bad_minutes_and_how_much_of_it_is_used() {
+    @DisplayName("the bank shows the budget of bad minutes and how much of it is used, and the share of transfers within 3 s and 5 s")
+    void the_bank_shows_the_budget_of_bad_minutes_and_how_much_of_it_is_used_and_the_share_of_transfers_within_3_s_and_5_s() {
         jdbc.sql(
             """
             INSERT INTO availability_hours (hour, measured_minutes, bad_minutes, planned_minutes, outside_minutes, total, errors, busy,
-                                            fresh_measured, fresh_bad, fresh_planned, fresh_outside)
-            VALUES (date_trunc('hour', now() - interval '2 days', 'UTC'), 60, 13, 5, 3, 1000000, 0, 20000, 58, 7, 2, 4)
+                                            posted_judged, posted_within_typical, posted_within_tail, posted_planned, posted_outside)
+            VALUES (date_trunc('hour', now() - interval '2 days', 'UTC'), 60, 13, 5, 3, 1000000, 0, 20000, 1000, 960, 995, 200, 300)
             """).update();
 
         var bank = bank();
 
+        var day = jdbc.sql("SELECT to_char(date_trunc('day', now() - interval '2 days', 'UTC') AT TIME ZONE 'UTC', 'YYYY-MM-DD')")
+            .query(String.class).single();
         assertThat(bank.get("slo")).isEqualTo(mapOf(
             "target", 0.999, "windowDays", 30, "measuredMinutes", 60, "badMinutes", 13, "budgetMinutes", 43, "plannedMinutes", 5,
-            "outsideMinutes", 3, "availability", 39.0 / 52, "busyShare", 0.02));
-        assertThat(bank.get("freshness")).isEqualTo(mapOf(
-            "target", 0.999, "thresholdMs", 2000, "badMinutes", 7, "budgetMinutes", 43, "plannedMinutes", 2, "outsideMinutes", 4));
+            "outsideMinutes", 3, "availability", 39.0 / 52, "busyShare", 0.02, "days", List.of(mapOf("day", day, "count", 13))));
+        var posting = (Map<?, ?>) bank.get("posting");
+        assertThat(posting.get("since")).isNotNull();
+        assertThat(Arrays.asList(posting.get("windowDays"), posting.get("judged"), posting.get("planned"), posting.get("outside")))
+            .isEqualTo(List.of(30, 1000, 200, 300));
+        assertThat(posting.get("targets")).isEqualTo(List.of(
+            mapOf("thresholdMs", 3000, "target", 0.95, "within", 960, "share", 0.96, "budgetUsed", 0.8, "days", List.of(mapOf("day", day, "count", 40))),
+            mapOf("thresholdMs", 5000, "target", 0.99, "within", 995, "share", 0.995, "budgetUsed", 0.5, "days", List.of(mapOf("day", day, "count", 5)))));
     }
 
     @Test

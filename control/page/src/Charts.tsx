@@ -23,8 +23,8 @@ const LOG_FLOOR_MS = 5
 const LOG_CEILING_MS = 60_000
 const LOG_TICKS_MS = [10, 100, 1000, 10_000]
 /** Where the latency lines ought to stay: guides only, not objectives. */
-const P50_GUIDE_MS = 150
-const P99_GUIDE_MS = 500
+const P50_GUIDE_MS = 1000
+const P99_GUIDE_MS = 5000
 
 /** A point without a value breaks the line: the gap is drawn as a gap, not as 0. */
 export function segments(points: Point[]): [number, number][][] {

@@ -18,14 +18,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Tells the kept minutes how fast their transfers were, from the gateway's histogram in Prometheus, and keeps when the
- * services' pods started. The minutes come from a range query at a step of a minute: its value at an instant is the
- * minute before it.
+ * Tells the kept minutes how many transfers were posted within each threshold, from the gateway's histogram in
+ * Prometheus, and keeps when the services' pods started. The minutes come from a range query at a step of a minute: its
+ * value at an instant is the minute before it.
  */
 @Component
-public class FreshnessCollector {
+public class PostingCollector {
 
-    private static final Logger log = LoggerFactory.getLogger(FreshnessCollector.class);
+    private static final Logger log = LoggerFactory.getLogger(PostingCollector.class);
     private static final Duration MINUTE = Duration.ofMinutes(1);
     /**
      * Shorter than a JVM takes to start and be scraped, so no window holds two new starts of one pod and each is read;
@@ -38,16 +38,20 @@ public class FreshnessCollector {
 
     private final AvailabilityRepository minutes;
     private final PrometheusClient prometheus;
-    private final ControlProperties.Freshness props;
-    private final String fastQuery;
+    private final ControlProperties.Posting props;
+    private final String transfersQuery;
+    private final String typicalQuery;
+    private final String tailQuery;
     private volatile boolean lastAnswered = true;
     private volatile @Nullable Instant startsReadUpTo;
 
-    public FreshnessCollector(AvailabilityRepository minutes, PrometheusClient prometheus, ControlProperties props) {
+    public PostingCollector(AvailabilityRepository minutes, PrometheusClient prometheus, ControlProperties props) {
         this.minutes = minutes;
         this.prometheus = prometheus;
-        this.props = props.freshness();
-        this.fastQuery = BankMetrics.FAST_IN_MINUTE.formatted(BankMetrics.bucketBound(this.props.threshold()));
+        this.props = props.posting();
+        this.transfersQuery = BankMetrics.transfersInMinute(this.props.targets().stream().map(ControlProperties.Target::threshold).toList());
+        this.typicalQuery = BankMetrics.WITHIN_IN_MINUTE.formatted(BankMetrics.bucketBound(this.props.typical().threshold()));
+        this.tailQuery = BankMetrics.WITHIN_IN_MINUTE.formatted(BankMetrics.bucketBound(this.props.tail().threshold()));
     }
 
     public int collect(Instant now) throws InterruptedException {
@@ -55,7 +59,7 @@ public class FreshnessCollector {
         var told = readMinutes(now);
         var answered = startsRead && told != null;
         if (answered != lastAnswered) {
-            log.warn("Freshness of the minutes read from Prometheus: {}; minutes up to {} old are read once it answers again", answered, props.catchUp());
+            log.warn("Posted transfers of the minutes read from Prometheus: {}; minutes up to {} old are read once it answers again", answered, props.catchUp());
         }
         lastAnswered = answered;
         return told == null ? 0 : told;
@@ -94,26 +98,31 @@ public class FreshnessCollector {
     /** The number of minutes told, or null if Prometheus did not answer. */
     private @Nullable Integer readMinutes(Instant now) throws InterruptedException {
         var last = now.minus(props.lag()).truncatedTo(ChronoUnit.MINUTES).minus(MINUTE);
-        var first = minutes.firstWithoutFreshness(now.minus(props.catchUp()), last);
+        var first = minutes.firstWithoutPosted(now.minus(props.catchUp()), last);
         if (first == null) {
             return 0;
         }
         var start = first.plus(MINUTE);
         var end = last.plus(MINUTE);
-        var transfers = prometheus.queryRange(BankMetrics.TRANSFERS_IN_MINUTE, start, end, MINUTE);
-        var fast = transfers == null ? null : prometheus.queryRange(fastQuery, start, end, MINUTE);
-        if (transfers == null || fast == null) {
+        var transfers = prometheus.queryRange(transfersQuery, start, end, MINUTE);
+        var typical = transfers == null ? null : prometheus.queryRange(typicalQuery, start, end, MINUTE);
+        var tail = typical == null ? null : prometheus.queryRange(tailQuery, start, end, MINUTE);
+        if (transfers == null || typical == null || tail == null) {
             return null;
         }
-        var fastByMinute = byMinute(fast);
-        var told = new ArrayList<AvailabilityRepository.FreshMinute>();
+        var typicalByMinute = byMinute(typical);
+        var tailByMinute = byMinute(tail);
+        var told = new ArrayList<AvailabilityRepository.PostedMinute>();
         for (var entry : byMinute(transfers).entrySet()) {
-            var fastCount = fastByMinute.get(entry.getKey());
-            if (fastCount == null) {
+            var typicalCount = typicalByMinute.get(entry.getKey());
+            var tailCount = tailByMinute.get(entry.getKey());
+            if (typicalCount == null || tailCount == null) {
                 continue;
             }
             var count = Math.round(entry.getValue());
-            told.add(new AvailabilityRepository.FreshMinute(entry.getKey(), count, Math.max(0, count - Math.round(fastCount))));
+            // Increases are extrapolated per series: a bucket may come out a little above the count it is part of.
+            told.add(new AvailabilityRepository.PostedMinute(
+                entry.getKey(), count, Math.min(count, Math.round(typicalCount)), Math.min(count, Math.round(tailCount))));
         }
         return minutes.fill(told);
     }

@@ -81,8 +81,9 @@ public class BankService {
                     clients.startedAt(), clients.baseTps(), clients.targetTps(), clients.pulse(), clients.requested(), clients.acknowledged(),
                     clients.failed() + clients.unknown(), clients.refused(), clients.retries(), clients.inFlight(), clients.total(), clients.restarted()),
             snapshot.pods(),
+            snapshot.clientsAnswered() && clients != null ? new BankView.BaseLoad(clients.baseTps(), clients.nextChangeAt()) : null,
             objectives.slo(),
-            objectives.freshness(),
+            objectives.posting(),
             windows.nextWindow(now),
             new BankView.Chaos(
                 props.chaos().enabled(), chaos.readyInSeconds(), chaosEvents.since(now.minus(props.bank().recentChaos()))),

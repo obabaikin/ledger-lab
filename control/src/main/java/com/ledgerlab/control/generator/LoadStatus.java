@@ -7,6 +7,7 @@ import org.jspecify.annotations.Nullable;
 public record LoadStatus(
     @Nullable Instant startedAt,
     int baseTps,
+    @Nullable Instant nextChangeAt,
     int targetTps,
     @Nullable Pulse pulse,
     long requested,

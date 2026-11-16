@@ -17,4 +17,7 @@ export const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', 
 
 export const dayAndMonth = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 
+/** A UTC day as the API names it (2026-11-30), not moved into the visitor's time zone. */
+export const utcDayAndMonth = (day: string) => new Date(day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+
 export const percent = (share: number, digits: number) => `${(share * 100).toFixed(digits)} %`

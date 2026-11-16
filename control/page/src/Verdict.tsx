@@ -85,6 +85,9 @@ export function Verdict({ report }: { report: PeriodReport }) {
   if (report.stats) facts.push(['€', `${t.bank.moved} ${euros(report.stats.postedAmountCents)}`])
   if (report.ledger.poolPostings > 0) facts.push(['↔', t.report.poolPostings(count(report.ledger.poolPostings))])
   for (const c of report.chaos) facts.push(['⚡', t.report.crashedAt(clock(c.at), c.instances.length)])
+  const load = report.load
+  if (load?.minBaseTps != null && load.maxBaseTps != null) facts.push(['≈', t.report.base(count(load.minBaseTps), count(load.maxBaseTps))])
+  if (load?.maxPulseTps != null) facts.push(['↑', t.report.pulse(count(load.maxPulseTps))])
   return (
     <section className="card verdict" data-testid="verdict">
       <div className={`mark ${head.tone}`}>{head.mark}</div>

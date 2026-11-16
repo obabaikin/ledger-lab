@@ -125,7 +125,7 @@ describe('the charts', () => {
     expect(within(flow).getByTestId('line-ACCEPTED_PER_SECOND')).toBeInTheDocument()
   })
 
-  it('draw the latency on a log scale from 10 ms to 10 s, with dashed guides at 150 and 500 ms, and break a line at 0', () => {
+  it('draw the latency on a log scale from 10 ms to 10 s, with dashed guides at 1000 and 5000 ms, and break a line at 0', () => {
     render(<Charts view={allSeries()} chaos={[]} range="2h" onRange={() => undefined} />)
 
     const latency = within(screen.getByRole('img', { name: en.charts.latency }))
@@ -133,8 +133,8 @@ describe('the charts', () => {
       expect(latency.getByText(tick)).toBeInTheDocument()
     }
     expect(latency.getAllByTestId('latency-guide').map((g) => g.textContent)).toEqual([
-      en.charts.guides.BANK_LATENCY_P50_MS(150),
-      en.charts.guides.BANK_LATENCY_P99_MS(500),
+      en.charts.guides.BANK_LATENCY_P50_MS(1000),
+      en.charts.guides.BANK_LATENCY_P99_MS(5000),
     ])
     expect(latency.queryByTestId('line-BANK_LATENCY_P50_MS')).toBeNull()
     expect(latency.getByTestId('line-BANK_LATENCY_P99_MS')).toBeInTheDocument()

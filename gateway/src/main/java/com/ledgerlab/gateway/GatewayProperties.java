@@ -1,6 +1,7 @@
 package com.ledgerlab.gateway;
 
 import java.time.Duration;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.Name;
 
@@ -22,8 +23,11 @@ public record GatewayProperties(
     Periods periods,
     Latency latency
 ) {
-    /** The time from acceptance to result is counted in buckets with one bound at {@link #sloThreshold}. */
-    public record Latency(Duration sloThreshold) {
+    /** The time from acceptance to result is counted in buckets with a bound at each of {@link #sloThresholds}. */
+    public record Latency(List<Duration> sloThresholds) {
+        public Latency {
+            sloThresholds = List.copyOf(sloThresholds);
+        }
     }
 
     /**

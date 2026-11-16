@@ -43,7 +43,7 @@ public class TransferService {
         this.clock = clock;
         this.accepted = Counter.builder("gateway.transfers").tag("outcome", "accepted").register(registry);
         this.repeated = Counter.builder("gateway.transfers").tag("outcome", "repeated").register(registry);
-        this.latency = TransferLatency.timer(registry, props.latency().sloThreshold());
+        this.latency = TransferLatency.timer(registry, props.latency().sloThresholds());
     }
 
     /**

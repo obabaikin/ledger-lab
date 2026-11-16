@@ -1,9 +1,12 @@
 package com.ledgerlab.control.availability;
 
 import com.ledgerlab.control.generator.MinuteResponses;
+import com.ledgerlab.control.periods.PeriodLoad;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -15,11 +18,10 @@ public class AvailabilityRepository {
 
     /**
      * A minute is bad if fewer than :goodPercent of 100 requests got an answer, and planned if it lies in a window that
-     * was not cancelled and was declared at least :noticeSeconds before its start. It is fresh-bad if more than
-     * :badSharePercent of 100 of its transfers were slow; one without transfers or not read from monitoring is not
-     * measured for freshness. It is outside if it meets a crash or a pulse above :guaranteedTps, each with its aftermath,
-     * during which no service restarted in place beyond what the event explains: a crash explains one start of each pod
-     * it crashed, a pulse none. A start counts up to :restartMarginSeconds after the event's end, and only where the pod
+     * was not cancelled and was declared at least :noticeSeconds before its start. Its transfers count for the time to
+     * posting once monitoring told them; a planned or outside minute takes all of them out, the fast ones too. It is
+     * outside if it meets a crash or a pulse above :guaranteedTps, each with its aftermath, during which no service
+     * restarted in place beyond what the event explains: a crash explains one start of each pod it crashed, a pulse none. A start counts up to :restartMarginSeconds after the event's end, and only where the pod
      * started before: a pod's first start is a new pod, not a restart. A minute meets an event if it starts before the
      * event's end and ends after its start. The events' windows are joined to the minutes once: a subquery per minute,
      * repeated in every count that reads it, cost the roll-up half a second of JIT compilation.
@@ -47,8 +49,7 @@ public class AvailabilityRepository {
         )
         SELECT m.minute, m.total, m.errors, m.busy,
                (m.total - m.errors) * 100 < m.total * :goodPercent AS bad,
-               coalesce(m.transfers > 0, false) AS fresh_measured,
-               coalesce(m.transfers > 0 AND m.slow * 100 > m.transfers * :badSharePercent, false) AS fresh_bad,
+               m.transfers, m.within_typical, m.within_tail,
                EXISTS (
                    SELECT 1 FROM maintenance_windows w
                    WHERE w.cancelled_at IS NULL AND w.starts_at <= m.minute AND m.minute < w.ends_at
@@ -56,10 +57,17 @@ public class AvailabilityRepository {
                o.minute IS NOT NULL AS outside
         FROM availability_minutes m LEFT JOIN outside_minutes o ON o.minute = m.minute""";
 
+    /** A minute's posted transfers by how they count: judged, and of them within each threshold; planned; outside. */
+    private static final String POSTED_SUMS = """
+        coalesce(sum(c.transfers) FILTER (WHERE NOT c.planned AND NOT c.outside), 0) AS posted_judged,
+        coalesce(sum(c.within_typical) FILTER (WHERE NOT c.planned AND NOT c.outside), 0) AS posted_within_typical,
+        coalesce(sum(c.within_tail) FILTER (WHERE NOT c.planned AND NOT c.outside), 0) AS posted_within_tail,
+        coalesce(sum(c.transfers) FILTER (WHERE c.planned), 0) AS posted_planned,
+        coalesce(sum(c.transfers) FILTER (WHERE NOT c.planned AND c.outside), 0) AS posted_outside""";
+
     public record Rules(
         int goodPercent,
         Duration notice,
-        int badSharePercent,
         int guaranteedTps,
         Duration chaosAftermath,
         Duration loadAftermath,
@@ -69,7 +77,9 @@ public class AvailabilityRepository {
 
     /**
      * Bad minutes split three ways: {@code bad} use up the budget, {@code planned} lie in a maintenance window and
-     * {@code outside} outside the bounds; a planned minute that is also outside counts as planned.
+     * {@code outside} outside the bounds; a planned minute that is also outside counts as planned. Posted transfers split
+     * the same way by their minute, the judged ones further by how many were within each threshold.
+     * {@code postingSince} is the first hour with posted transfers counted, null before it.
      */
     public record Counts(
         long measuredMinutes,
@@ -78,14 +88,28 @@ public class AvailabilityRepository {
         long outsideMinutes,
         long total,
         long busy,
-        long freshMeasured,
-        long freshBad,
-        long freshPlanned,
-        long freshOutside
+        long postedJudged,
+        long postedWithinTypical,
+        long postedWithinTail,
+        long postedPlanned,
+        long postedOutside,
+        @Nullable Instant postingSince
     ) {
     }
 
-    public record FreshMinute(Instant minute, long transfers, long slow) {
+    /** One UTC day: its measured and judged-bad minutes, and its posted transfers as {@link Counts} splits them. */
+    public record DayCounts(
+        LocalDate day,
+        long measuredMinutes,
+        long badMinutes,
+        long postedJudged,
+        long postedWithinTypical,
+        long postedWithinTail,
+        long postedLeftOut
+    ) {
+    }
+
+    public record PostedMinute(Instant minute, long transfers, long withinTypical, long withinTail) {
     }
 
     public record ServiceStart(String instance, Instant startedAt) {
@@ -109,8 +133,12 @@ public class AvailabilityRepository {
                 continue;
             }
             inserted += jdbc.sql(
-                "INSERT INTO availability_minutes (minute, total, errors, busy) VALUES (:minute, :total, :errors, :busy) ON CONFLICT (minute) DO NOTHING")
+                """
+                INSERT INTO availability_minutes (minute, total, errors, busy, base_tps) VALUES (:minute, :total, :errors, :busy, :baseTps)
+                ON CONFLICT (minute) DO NOTHING
+                """)
                 .param("minute", Timestamp.from(minute.minute()))
+                .param("baseTps", minute.baseTps())
                 .param("total", minute.total())
                 .param("errors", minute.errors())
                 .param("busy", minute.busy())
@@ -127,25 +155,23 @@ public class AvailabilityRepository {
         return withRules(jdbc.sql(
             """
             INSERT INTO availability_hours (hour, measured_minutes, bad_minutes, planned_minutes, outside_minutes, total, errors, busy,
-                                            fresh_measured, fresh_bad, fresh_planned, fresh_outside)
+                                            posted_judged, posted_within_typical, posted_within_tail, posted_planned, posted_outside)
             SELECT date_trunc('hour', c.minute, 'UTC'), count(*),
                    count(*) FILTER (WHERE c.bad AND NOT c.planned AND NOT c.outside),
                    count(*) FILTER (WHERE c.bad AND c.planned),
                    count(*) FILTER (WHERE c.bad AND NOT c.planned AND c.outside),
                    sum(c.total), sum(c.errors), sum(c.busy),
-                   count(*) FILTER (WHERE c.fresh_measured),
-                   count(*) FILTER (WHERE c.fresh_bad AND NOT c.planned AND NOT c.outside),
-                   count(*) FILTER (WHERE c.fresh_bad AND c.planned),
-                   count(*) FILTER (WHERE c.fresh_bad AND NOT c.planned AND c.outside)
+                   %s
             FROM (%s) c
             WHERE c.minute >= date_trunc('hour', CAST(:keptFrom AS timestamptz), 'UTC') + interval '1 hour'
               AND c.minute < date_trunc('hour', CAST(:now AS timestamptz), 'UTC')
             GROUP BY 1
             ON CONFLICT (hour) DO UPDATE SET measured_minutes = EXCLUDED.measured_minutes, bad_minutes = EXCLUDED.bad_minutes,
                 planned_minutes = EXCLUDED.planned_minutes, outside_minutes = EXCLUDED.outside_minutes, total = EXCLUDED.total,
-                errors = EXCLUDED.errors, busy = EXCLUDED.busy, fresh_measured = EXCLUDED.fresh_measured, fresh_bad = EXCLUDED.fresh_bad,
-                fresh_planned = EXCLUDED.fresh_planned, fresh_outside = EXCLUDED.fresh_outside
-            """.formatted(CLASSIFIED_MINUTES)), rules)
+                errors = EXCLUDED.errors, busy = EXCLUDED.busy, posted_judged = EXCLUDED.posted_judged,
+                posted_within_typical = EXCLUDED.posted_within_typical, posted_within_tail = EXCLUDED.posted_within_tail,
+                posted_planned = EXCLUDED.posted_planned, posted_outside = EXCLUDED.posted_outside
+            """.formatted(POSTED_SUMS, CLASSIFIED_MINUTES)), rules)
             .param("keptFrom", Timestamp.from(now.minus(minutesRetention)))
             .param("now", Timestamp.from(now))
             .update();
@@ -161,10 +187,8 @@ public class AvailabilityRepository {
                        count(*) FILTER (WHERE c.bad AND c.planned) AS planned,
                        count(*) FILTER (WHERE c.bad AND NOT c.planned AND c.outside) AS outside,
                        coalesce(sum(c.total), 0) AS total, coalesce(sum(c.busy), 0) AS busy,
-                       count(*) FILTER (WHERE c.fresh_measured) AS fresh_measured,
-                       count(*) FILTER (WHERE c.fresh_bad AND NOT c.planned AND NOT c.outside) AS fresh_bad,
-                       count(*) FILTER (WHERE c.fresh_bad AND c.planned) AS fresh_planned,
-                       count(*) FILTER (WHERE c.fresh_bad AND NOT c.planned AND c.outside) AS fresh_outside
+                       %s,
+                       date_trunc('hour', min(c.minute) FILTER (WHERE c.transfers > 0), 'UTC') AS posting_since
                 FROM (%s) c
                 WHERE c.minute >= (SELECT coalesce(max(hour) + interval '1 hour', CAST('-infinity' AS timestamptz)) FROM availability_hours)
                   AND c.minute >= date_trunc('hour', CAST(:from AS timestamptz), 'UTC')
@@ -172,36 +196,85 @@ public class AvailabilityRepository {
                 SELECT coalesce(sum(measured_minutes), 0) AS measured, coalesce(sum(bad_minutes), 0) AS bad,
                        coalesce(sum(planned_minutes), 0) AS planned, coalesce(sum(outside_minutes), 0) AS outside,
                        coalesce(sum(total), 0) AS total, coalesce(sum(busy), 0) AS busy,
-                       coalesce(sum(fresh_measured), 0) AS fresh_measured, coalesce(sum(fresh_bad), 0) AS fresh_bad,
-                       coalesce(sum(fresh_planned), 0) AS fresh_planned, coalesce(sum(fresh_outside), 0) AS fresh_outside
+                       coalesce(sum(posted_judged), 0) AS posted_judged, coalesce(sum(posted_within_typical), 0) AS posted_within_typical,
+                       coalesce(sum(posted_within_tail), 0) AS posted_within_tail, coalesce(sum(posted_planned), 0) AS posted_planned,
+                       coalesce(sum(posted_outside), 0) AS posted_outside,
+                       min(hour) FILTER (WHERE posted_judged + posted_planned + posted_outside > 0) AS posting_since
                 FROM availability_hours WHERE hour >= date_trunc('hour', CAST(:from AS timestamptz), 'UTC')
             )
             SELECT recent.measured + older.measured AS measured, recent.bad + older.bad AS bad, recent.planned + older.planned AS planned,
                    recent.outside + older.outside AS outside, recent.total + older.total AS total, recent.busy + older.busy AS busy,
-                   recent.fresh_measured + older.fresh_measured AS fresh_measured, recent.fresh_bad + older.fresh_bad AS fresh_bad,
-                   recent.fresh_planned + older.fresh_planned AS fresh_planned, recent.fresh_outside + older.fresh_outside AS fresh_outside
+                   recent.posted_judged + older.posted_judged AS posted_judged,
+                   recent.posted_within_typical + older.posted_within_typical AS posted_within_typical,
+                   recent.posted_within_tail + older.posted_within_tail AS posted_within_tail,
+                   recent.posted_planned + older.posted_planned AS posted_planned, recent.posted_outside + older.posted_outside AS posted_outside,
+                   least(older.posting_since, recent.posting_since) AS posting_since
             FROM recent, older
-            """.formatted(CLASSIFIED_MINUTES)), rules)
+            """.formatted(POSTED_SUMS, CLASSIFIED_MINUTES)), rules)
             .param("from", Timestamp.from(from))
             .query((rs, rowNum) -> new Counts(
                 rs.getLong("measured"), rs.getLong("bad"), rs.getLong("planned"), rs.getLong("outside"), rs.getLong("total"), rs.getLong("busy"),
-                rs.getLong("fresh_measured"), rs.getLong("fresh_bad"), rs.getLong("fresh_planned"), rs.getLong("fresh_outside")))
+                rs.getLong("posted_judged"), rs.getLong("posted_within_typical"), rs.getLong("posted_within_tail"),
+                rs.getLong("posted_planned"), rs.getLong("posted_outside"), instantOrNull(rs.getTimestamp("posting_since"))))
             .single();
+    }
+
+    /**
+     * As {@link #countsSince}, by UTC day: the hours added up so far and the minutes after the last of them. Days without
+     * a measured minute are left out.
+     */
+    public List<DayCounts> byDaySince(Instant from, Rules rules) {
+        return withRules(jdbc.sql(
+            """
+            WITH recent AS (
+                SELECT date_trunc('day', c.minute, 'UTC') AS day, count(*) AS measured,
+                       count(*) FILTER (WHERE c.bad AND NOT c.planned AND NOT c.outside) AS bad,
+                       %s
+                FROM (%s) c
+                WHERE c.minute >= (SELECT coalesce(max(hour) + interval '1 hour', CAST('-infinity' AS timestamptz)) FROM availability_hours)
+                  AND c.minute >= CAST(:from AS timestamptz)
+                GROUP BY 1
+            ), older AS (
+                SELECT date_trunc('day', hour, 'UTC') AS day, sum(measured_minutes) AS measured, sum(bad_minutes) AS bad,
+                       sum(posted_judged) AS posted_judged, sum(posted_within_typical) AS posted_within_typical,
+                       sum(posted_within_tail) AS posted_within_tail, sum(posted_planned) AS posted_planned,
+                       sum(posted_outside) AS posted_outside
+                FROM availability_hours WHERE hour >= CAST(:from AS timestamptz)
+                GROUP BY 1
+            ), days AS (
+                SELECT day, measured, bad, posted_judged, posted_within_typical, posted_within_tail, posted_planned, posted_outside FROM recent
+                UNION ALL
+                SELECT day, measured, bad, posted_judged, posted_within_typical, posted_within_tail, posted_planned, posted_outside FROM older
+            )
+            SELECT day, sum(measured) AS measured, sum(bad) AS bad, sum(posted_judged) AS posted_judged,
+                   sum(posted_within_typical) AS posted_within_typical, sum(posted_within_tail) AS posted_within_tail,
+                   sum(posted_planned) + sum(posted_outside) AS posted_left_out
+            FROM days GROUP BY day HAVING sum(measured) > 0 ORDER BY day
+            """.formatted(POSTED_SUMS, CLASSIFIED_MINUTES)), rules)
+            .param("from", Timestamp.from(from))
+            .query((rs, rowNum) -> new DayCounts(
+                rs.getTimestamp("day").toInstant().atOffset(ZoneOffset.UTC).toLocalDate(), rs.getLong("measured"), rs.getLong("bad"),
+                rs.getLong("posted_judged"), rs.getLong("posted_within_typical"), rs.getLong("posted_within_tail"),
+                rs.getLong("posted_left_out")))
+            .list();
     }
 
     private static JdbcClient.StatementSpec withRules(JdbcClient.StatementSpec statement, Rules rules) {
         return statement
             .param("goodPercent", rules.goodPercent())
             .param("noticeSeconds", rules.notice().toSeconds())
-            .param("badSharePercent", rules.badSharePercent())
             .param("guaranteedTps", rules.guaranteedTps())
             .param("chaosAftermathSeconds", rules.chaosAftermath().toSeconds())
             .param("loadAftermathSeconds", rules.loadAftermath().toSeconds())
             .param("restartMarginSeconds", rules.restartMargin().toSeconds());
     }
 
+    private static @Nullable Instant instantOrNull(@Nullable Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant();
+    }
+
     /** The first minute from {@code from} to {@code to}, both included, that monitoring has not told about yet. */
-    public @Nullable Instant firstWithoutFreshness(Instant from, Instant to) {
+    public @Nullable Instant firstWithoutPosted(Instant from, Instant to) {
         return jdbc.sql("SELECT min(minute) FROM availability_minutes WHERE transfers IS NULL AND minute >= :from AND minute <= :to")
             .param("from", Timestamp.from(from))
             .param("to", Timestamp.from(to))
@@ -212,14 +285,18 @@ public class AvailabilityRepository {
     }
 
     /** A minute monitoring has told about keeps what it told: another instance of control may have read it already. */
-    public int fill(List<FreshMinute> minutes) {
+    public int fill(List<PostedMinute> minutes) {
         var filled = 0;
         for (var minute : minutes) {
             filled += jdbc.sql(
-                "UPDATE availability_minutes SET transfers = :transfers, slow = :slow WHERE minute = :minute AND transfers IS NULL")
+                """
+                UPDATE availability_minutes SET transfers = :transfers, within_typical = :withinTypical, within_tail = :withinTail
+                WHERE minute = :minute AND transfers IS NULL
+                """)
                 .param("minute", Timestamp.from(minute.minute()))
                 .param("transfers", minute.transfers())
-                .param("slow", minute.slow())
+                .param("withinTypical", minute.withinTypical())
+                .param("withinTail", minute.withinTail())
                 .update();
         }
         return filled;
@@ -253,6 +330,21 @@ public class AvailabilityRepository {
         return jdbc.sql("DELETE FROM availability_minutes WHERE minute < date_trunc('hour', CAST(:before AS timestamptz), 'UTC')")
             .param("before", Timestamp.from(before))
             .update();
+    }
+
+    /** A pulse meets the period if it starts before the period's end and ends after its start. */
+    public PeriodLoad loadBetween(Instant from, Instant to) {
+        return jdbc.sql(
+            """
+            SELECT (SELECT min(base_tps) FROM availability_minutes WHERE minute >= :from AND minute < :to) AS min_base,
+                   (SELECT max(base_tps) FROM availability_minutes WHERE minute >= :from AND minute < :to) AS max_base,
+                   (SELECT max(tps) FROM load_pulses WHERE at < :to AND until > :from) AS max_pulse
+            """)
+            .param("from", Timestamp.from(from))
+            .param("to", Timestamp.from(to))
+            .query((rs, rowNum) -> new PeriodLoad(
+                rs.getObject("min_base", Integer.class), rs.getObject("max_base", Integer.class), rs.getObject("max_pulse", Integer.class)))
+            .single();
     }
 
     public boolean inWindow(Instant now) {

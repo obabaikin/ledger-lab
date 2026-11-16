@@ -13,7 +13,7 @@ public record ControlProperties(
     Periods periods,
     Bank bank,
     Availability availability,
-    Freshness freshness,
+    Posting posting,
     Outside outside,
     Maintenance maintenance,
     Series series,
@@ -77,11 +77,30 @@ public record ControlProperties(
     }
 
     /**
-     * A minute is bad if more than {@link #badSharePercent} of its transfers took longer than {@link #threshold} from
-     * acceptance to result. A minute is read from monitoring once it ended {@link #lag} ago, and no later than
-     * {@link #catchUp} after; one not read by then stays without data.
+     * The time from acceptance to result: of the transfers judged in the window, {@link Target#target} should take at most
+     * {@link Target#threshold}, once for {@link #typical} and once for the {@link #tail}. A minute's transfers are read from
+     * monitoring once it ended {@link #lag} ago, and no later than {@link #catchUp} after; one not read by then stays
+     * without data.
      */
-    public record Freshness(Duration threshold, int badSharePercent, Duration lag, Duration catchUp, BigDecimal sloTarget) {
+    public record Posting(Target typical, Target tail, Duration lag, Duration catchUp) {
+        public Posting {
+            if (typical.threshold().compareTo(tail.threshold()) >= 0) {
+                throw new IllegalArgumentException(
+                    "posting.typical.threshold " + typical.threshold() + " must be below posting.tail.threshold " + tail.threshold());
+            }
+        }
+
+        public List<Target> targets() {
+            return List.of(typical, tail);
+        }
+    }
+
+    public record Target(Duration threshold, BigDecimal target) {
+        public Target {
+            if (!threshold.isPositive() || target.signum() <= 0 || target.compareTo(BigDecimal.ONE) >= 0) {
+                throw new IllegalArgumentException("a posting target needs a positive threshold and a share below 1, got " + threshold + ", " + target);
+            }
+        }
     }
 
     /**

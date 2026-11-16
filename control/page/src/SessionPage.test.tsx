@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { clock, count, dayAndMonth, hoursMinutes } from './format'
 import { bank, fakeControl, period, PERIOD_START, report, series, SERIES, session, SESSION_ID, type Answer } from './test/fakeControl'
 import { renderAt } from './test/render'
@@ -118,25 +118,42 @@ describe('the open page', () => {
     expect(screen.getByTestId('last-crash')).toHaveTextContent(en.bank.lastCrash(clock(crashedAt), 2))
   })
 
-  it('shows the error budget used, in the words of the page texts', async () => {
+  it('shows the three service levels as cards with their value, target and budget used, the transfers left out, and the rule folded with its link', async () => {
     control()
     renderAt('/')
 
-    expect(await screen.findByTestId('budget')).toHaveTextContent(en.availability.budget(17, 43))
-    expect(screen.getByRole('meter', { name: en.availability.budget(17, 43) })).toHaveAttribute('aria-valuenow', '17')
-    expect(screen.getByTestId('budget-split')).toHaveTextContent(en.availability.split(17, 12, 2))
-  })
-
-  it('shows a second budget for the time to posting, with its threshold, and links to how both are measured', async () => {
-    control()
-    renderAt('/')
-
-    expect(await screen.findByTestId('freshness-budget')).toHaveTextContent(en.availability.budget(5, 43))
-    expect(screen.getByText(en.availability.freshnessTitle(2))).toBeInTheDocument()
-    expect(screen.getByRole('meter', { name: en.availability.budget(5, 43) })).toHaveAttribute('aria-valuenow', '5')
-    expect(screen.getByTestId('freshness-budget-split')).toHaveTextContent(en.availability.split(5, 1, 3))
+    expect(await screen.findByTestId('slo-availability-value')).toHaveTextContent('99.83 %')
+    expect(screen.getByTestId('slo-availability')).toHaveTextContent(en.availability.ofMinutes('99.9 %'))
+    expect(screen.getByTestId('slo-availability-used')).toHaveTextContent(en.availability.usedMinutes(17, 43))
+    expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.postingTitle(3))
+    expect(screen.getByTestId('slo-posting-0-value')).toHaveTextContent('99.97 %')
+    expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.ofTransfers('95 %'))
+    expect(screen.getByTestId('slo-posting-1-used')).toHaveTextContent('2 %')
+    expect(screen.getByTestId('posting-split')).toHaveTextContent(en.availability.postingSplit('12,000', '3,400'))
+    expect(screen.queryByTestId('posting-since')).toBeNull()
+    expect(screen.getByText(en.availability.ruleSummary).closest('details')).not.toHaveAttribute('open')
     expect(screen.getByRole('link', { name: en.availability.howMeasured })).toHaveAttribute(
       'href', 'https://github.com/obabaikin/ledger-lab/blob/main/docs/guides/slo.md')
+    expect(screen.queryByText(/Error budget:/)).toBeNull()
+  })
+
+  it('shows the base load and in how many minutes it changes, the base alone while it is constant, and nothing without an answer from the clients', async () => {
+    const now = Date.parse('2026-11-11T10:30:30Z')
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    control({ 'GET /api/bank': { status: 200, body: bank({ load: { baseTps: 600, nextChangeAt: '2026-11-11T10:35:00Z' } }) } })
+    renderAt('/')
+    expect(await screen.findByTestId('base-load')).toHaveTextContent(en.bank.baseChangesIn('600', 5))
+    cleanup()
+
+    control({ 'GET /api/bank': { status: 200, body: bank({ load: { baseTps: 400, nextChangeAt: null } }) } })
+    renderAt('/')
+    expect(await screen.findByTestId('base-load')).toHaveTextContent(en.bank.base('400'))
+    cleanup()
+
+    control({ 'GET /api/bank': { status: 200, body: bank({ load: null }) } })
+    renderAt('/')
+    await screen.findByTestId('clients-speed')
+    expect(screen.queryByTestId('base-load')).toBeNull()
   })
 
   it('shows the planned update in the visitor\'s time, and says when none is planned', async () => {
@@ -229,7 +246,7 @@ describe('session page', () => {
     expect(screen.getByRole('combobox', { name: en.controls.tpsLabel })).toHaveValue('1000')
     expect(screen.getByRole('combobox', { name: en.controls.secondsLabel })).toHaveValue('10')
     expect(within(screen.getByRole('combobox', { name: en.controls.tpsLabel })).getAllByRole('option').map((o) => o.textContent)).toEqual(
-      ['400', '500', '1,000', '2,000'].map(en.controls.tpsOption),
+      ['900', '1,000', '2,000'].map(en.controls.tpsOption),
     )
     expect(await crash()).toBeEnabled()
   })

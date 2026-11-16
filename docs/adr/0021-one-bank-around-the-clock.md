@@ -13,11 +13,13 @@ moving — need a bank that never stops.
 
 ## Decision
 
-**One bank, one set of accounts, a steady load.** The ledger opens 100,000 client accounts with €10,000 each and a
-pool of €100 million at startup, once; the last 100 accounts are blocked, so rejections happen as in a real bank. The
-generator plays the clients and sends 400 transfers per second day and night. A visitor with an invite can raise the
-load for 10 to 30 s, up to 2000 per second, one raise at a time for all visitors with at least a minute between them,
-and can crash every ledger instance at most every 90 s.
+**One bank, one set of accounts, a load that follows the day.** The ledger opens 100,000 client accounts with
+€10,000 each and a pool of €100 million at startup, once; the last 100 accounts are blocked, so rejections happen as in
+a real bank. The generator plays the clients day and night: 200 transfers per second from midnight to 6:00 Berlin time,
+then a random walk in steps of 100 or 200 every 5 minutes between 300 and 800, back at 200 by midnight. The walk is a
+function of the time, so a restarted generator goes on with the same curve. A visitor with an invite can raise the
+load for 10 to 30 s, to 900–2000 per second, above the day's highest base, one raise at a time for all visitors with at
+least a minute between them, and can crash every ledger instance at most every 90 s.
 
 **Hourly periods instead of runs.** A transfer belongs to the period in which the gateway accepted it, and every
 service files it there by that time, carried in the message; a period is an hour. A minute after its end control closes it at the gateway, which fixes the period's entries: a later change to
@@ -41,9 +43,10 @@ that are dropped whole; Kafka keeps the same 4 hours. Period reports and hourly 
 account is brought back to its opening balance, and the busiest accounts' surplus is swept to the pool every hour,
 so the load never runs out of money.
 
-**Service levels instead of a run's verdict.** Availability and time to posting are measured per minute, each with
-a 99.9 % objective over 30 days and an error budget on the page; crashes from the page, load above the promised rate
-and declared maintenance windows are left out, with the rules in [the SLO guide](../guides/slo.md).
+**Service levels instead of a run's verdict.** Availability is measured per minute, with a 99.9 % objective over 30
+days; the time to posting by transfer, 95 % within 3 s and 99 % within 5 s over 30 days, which replaced a first
+per-minute rule. Each has an error budget on the page; crashes from the page, load above the promised rate and
+declared maintenance windows are left out, with the rules in [the SLO guide](../guides/slo.md).
 
 ## Consequences
 

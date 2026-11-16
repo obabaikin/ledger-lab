@@ -270,6 +270,9 @@ class ServiceContractsTest {
         if (type == boolean.class) {
             return false;
         }
+        if (type == Integer.class) {
+            return 0;
+        }
         if (type == long.class) {
             return 0L;
         }

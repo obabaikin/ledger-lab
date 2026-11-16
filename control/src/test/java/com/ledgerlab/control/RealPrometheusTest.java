@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 import com.ledgerlab.control.availability.Availability;
-import com.ledgerlab.control.availability.FreshnessCollector;
+import com.ledgerlab.control.availability.PostingCollector;
 import com.ledgerlab.control.metrics.BankMetrics;
 import com.ledgerlab.control.metrics.PrometheusClient;
 
@@ -69,6 +69,23 @@ class RealPrometheusTest extends IntegrationTest {
     static final FakeExporter killedExporter = new FakeExporter(List.of(KILLED_LEDGER));
     static final FakeExporter gatewayExporter = new FakeExporter(List.of(GATEWAY));
     static final FakeExporter secondGateway = new FakeExporter(List.of(GATEWAY));
+    /** Served only by the test of the buckets, so no other test's counters move in its minute. */
+    static final FakeExporter updatedGateway = new FakeExporter(List.of(GATEWAY));
+    static final FakeExporter oldGateway = new FakeExporter(List.of(GATEWAY));
+    /** The tests of the minute's buckets each sum every gateway instance over a minute, so they wait for each other's to pass. */
+    private static final Duration BUCKET_MINUTE = Duration.ofSeconds(61);
+    private static volatile Instant bucketsServedUntil = Instant.EPOCH;
+
+    private static void awaitOtherBucketsOutOfTheMinute() throws InterruptedException {
+        var quiet = bucketsServedUntil.plus(BUCKET_MINUTE);
+        while (Instant.now().isBefore(quiet)) {
+            Thread.sleep(POLL);
+        }
+    }
+
+    /** Served only by the test of an instance that stops within the minute. */
+    static final FakeExporter steadyGateway = new FakeExporter(List.of(GATEWAY));
+    static final FakeExporter stoppingGateway = new FakeExporter(List.of(GATEWAY));
 
     private record Target(String job, List<Integer> ports) {
     }
@@ -77,11 +94,14 @@ class RealPrometheusTest extends IntegrationTest {
         static final GenericContainer<?> CONTAINER = started();
 
         private static GenericContainer<?> started() {
-            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port, gatewayExporter.port, secondGateway.port);
+            Testcontainers.exposeHostPorts(
+                exporter.port, killedExporter.port, gatewayExporter.port, secondGateway.port, updatedGateway.port, oldGateway.port,
+                steadyGateway.port, stoppingGateway.port);
             var targets = new ArrayList<Target>();
             JOBS.forEach(it -> targets.add(new Target(it, List.of(exporter.port))));
             targets.add(new Target(KILLED_LEDGER, List.of(killedExporter.port)));
-            targets.add(new Target(GATEWAY, List.of(gatewayExporter.port, secondGateway.port)));
+            targets.add(new Target(GATEWAY, List.of(
+                gatewayExporter.port, secondGateway.port, updatedGateway.port, oldGateway.port, steadyGateway.port, stoppingGateway.port)));
             var jobs = targets.stream()
                 .map(target ->
                     "  - job_name: " + target.job() + "\n"
@@ -127,7 +147,7 @@ class RealPrometheusTest extends IntegrationTest {
     }
 
     @Autowired PrometheusClient prometheusClient;
-    @Autowired FreshnessCollector collector;
+    @Autowired PostingCollector collector;
     @Autowired Availability availability;
     @Autowired DatabaseClock clock;
 
@@ -196,7 +216,7 @@ class RealPrometheusTest extends IntegrationTest {
         throws Exception {
         for (var round = 1; round <= 4; round++) {
             var metrics = "gateway_transfers_total{outcome=\"accepted\"} " + round * 110 + "\ngateway_transfers_total{outcome=\"refused\"} 7\n"
-                + histogram(round * 100, round * 100, round * 110);
+                + histogram(round * 100, round * 100, round * 110, round * 110);
             gatewayExporter.serve(GATEWAY, metrics);
             secondGateway.serve(GATEWAY, metrics);
             gatewayExporter.awaitScrapes(SCRAPES_TO_SETTLE);
@@ -209,25 +229,78 @@ class RealPrometheusTest extends IntegrationTest {
         }
 
         assertThat(valuesOf("BANK_LATENCY_P50_MS").getLast()).isCloseTo(55.0, within(0.001));
-        assertThat(valuesOf("BANK_LATENCY_P99_MS").getLast()).isCloseTo(2000.0, within(0.001));
+        assertThat(valuesOf("BANK_LATENCY_P99_MS").getLast()).isCloseTo(4780.0, within(0.001));
         assertThat(valuesOf("BUSY_PER_SECOND")).allMatch(it -> it == 0.0);
-        var transfers = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.TRANSFERS_IN_MINUTE))).number();
-        var fast = single(Objects.requireNonNull(prometheusClient.query(
-            BankMetrics.FAST_IN_MINUTE.formatted(BankMetrics.bucketBound(Duration.ofSeconds(2)))))).number();
-        assertThat(transfers).isPositive();
-        assertThat(fast / transfers).isCloseTo(100.0 / 110, within(0.001));
     }
 
-    /** As the gateway's timer publishes it, with a bucket at 2 s: {@code fast} up to 0.1 s, {@code withinThreshold} up to 2 s. */
-    private static String histogram(long fast, long withinThreshold, long count) {
+    @Test
+    @DisplayName("a gateway instance without the buckets at 3 s and 5 s, as before an update, is counted neither in the transfers nor within the thresholds")
+    void a_gateway_instance_without_the_buckets_at_3_s_and_5_s_is_counted_neither_in_the_transfers_nor_within_the_thresholds() throws Exception {
+        awaitOtherBucketsOutOfTheMinute();
+        // Far above what the charts' test served, so what it still adds in the minute does not show.
+        var scale = 1_000_000L;
+        for (var round = 1; round <= 4; round++) {
+            updatedGateway.serve(GATEWAY, histogram(round * scale * 90 / 100, round * scale * 96 / 100, round * scale * 99 / 100, round * scale));
+            oldGateway.serve(GATEWAY, histogramBefore3s(round * scale * 10, round * scale * 10));
+            updatedGateway.awaitScrapes(SCRAPES_TO_SETTLE);
+        }
+
+        var transfers = single(Objects.requireNonNull(prometheusClient.query(
+            BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5)))))).number();
+        var within3s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0")))).number();
+        var within5s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("5.0")))).number();
+        bucketsServedUntil = Instant.now();
+
+        assertThat(transfers).isPositive();
+        assertThat(within3s / transfers).isCloseTo(0.96, within(0.001));
+        assertThat(within5s / transfers).isCloseTo(0.99, within(0.001));
+    }
+
+    @Test
+    @DisplayName("a gateway instance that stops within the minute counts in the transfers as in those within the thresholds, never more within than in all")
+    void a_gateway_instance_that_stops_within_the_minute_counts_in_the_transfers_as_in_those_within_the_thresholds() throws Exception {
+        awaitOtherBucketsOutOfTheMinute();
+        var scale = 1_000_000L;
+        for (var round = 1; round <= 4; round++) {
+            steadyGateway.serve(GATEWAY, histogram(round * scale / 2, round * scale / 2, round * scale / 2, round * scale));
+            if (round < 4) {
+                stoppingGateway.serve(GATEWAY, histogram(round * scale, round * scale, round * scale, round * scale));
+            } else {
+                stoppingGateway.serve(GATEWAY, "");
+            }
+            steadyGateway.awaitScrapes(SCRAPES_TO_SETTLE);
+        }
+
+        var transfers = single(Objects.requireNonNull(prometheusClient.query(
+            BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5)))))).number();
+        var within3s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0")))).number();
+        bucketsServedUntil = Instant.now();
+
+        assertThat(within3s / transfers).isBetween(0.5, 1.0);
+    }
+
+    /** As the gateway's timer publishes it, with buckets at 3 s and 5 s. */
+    private static String histogram(long within100ms, long within3s, long within5s, long count) {
         return """
             # TYPE gateway_transfer_latency_seconds histogram
             gateway_transfer_latency_seconds_bucket{le="0.1"} %d
+            gateway_transfer_latency_seconds_bucket{le="3.0"} %d
+            gateway_transfer_latency_seconds_bucket{le="5.0"} %d
+            gateway_transfer_latency_seconds_bucket{le="+Inf"} %d
+            gateway_transfer_latency_seconds_count %d
+            gateway_transfer_latency_seconds_sum %d
+            """.formatted(within100ms, within3s, within5s, count, count, count);
+    }
+
+    /** As a gateway published it before the buckets at 3 s and 5 s, with one at 2 s. */
+    private static String histogramBefore3s(long within2s, long count) {
+        return """
+            # TYPE gateway_transfer_latency_seconds histogram
             gateway_transfer_latency_seconds_bucket{le="2.0"} %d
             gateway_transfer_latency_seconds_bucket{le="+Inf"} %d
             gateway_transfer_latency_seconds_count %d
             gateway_transfer_latency_seconds_sum %d
-            """.formatted(fast, withinThreshold, count, count, count);
+            """.formatted(within2s, count, count, count);
     }
 
     @Test
@@ -243,7 +316,7 @@ class RealPrometheusTest extends IntegrationTest {
             .param("at", Timestamp.from(crashedAt))
             .param("crashed", LEDGER)
             .update();
-        jdbc.sql("INSERT INTO availability_minutes (minute, total, errors, busy, transfers, slow) VALUES (:minute, 100, 50, 0, 100, 50)")
+        jdbc.sql("INSERT INTO availability_minutes (minute, total, errors, busy, transfers, within_typical, within_tail) VALUES (:minute, 100, 50, 0, 100, 50, 50)")
             .param("minute", Timestamp.from(crashedAt.truncatedTo(ChronoUnit.MINUTES)))
             .update();
 
