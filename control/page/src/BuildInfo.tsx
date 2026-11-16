@@ -7,7 +7,7 @@ export function BuildInfo() {
   const site = useSite()
   return (
     <footer className="build">
-      by{' '}
+      {t.footer.by}{' '}
       <a href={AUTHOR_URL} target="_blank" rel="noopener">
         {AUTHOR_NAME}
       </a>{' '}

@@ -1,7 +1,7 @@
 import { Fragment } from 'react'
 import { Link } from 'react-router'
 import { BuildInfo } from './BuildInfo'
-import { Hero } from './Hero'
+import { TopBar } from './Hero'
 import { t } from './texts'
 import { useSite } from './useSite'
 import type { SiteView } from './api/client'
@@ -34,7 +34,7 @@ export function Privacy() {
   ]
   return (
     <main>
-      <Hero />
+      <TopBar />
       <section className="card legal">
         <h2>{t.privacy.title}</h2>
         {sections.map(([heading, text]) => (
@@ -64,7 +64,7 @@ export function Impressum() {
   const site = useSite()
   return (
     <main>
-      <Hero />
+      <TopBar />
       <section className="card legal">
         <h2>{t.impressum.title}</h2>
         <p>{t.impressum.responsible}</p>

@@ -1,6 +1,6 @@
 import type { PeriodReport } from './api/client'
 import { REPOSITORY_URL } from './Diagram'
-import { clock, count, euros } from './format'
+import { clock, count, euros, NO_DATA, rate } from './format'
 import { t } from './texts'
 
 const TESTS_URL = `${REPOSITORY_URL}/tree/main/control/src/test`
@@ -86,8 +86,10 @@ export function Verdict({ report }: { report: PeriodReport }) {
   if (report.ledger.poolPostings > 0) facts.push(['↔', t.report.poolPostings(count(report.ledger.poolPostings))])
   for (const c of report.chaos) facts.push(['⚡', t.report.crashedAt(clock(c.at), c.instances.length)])
   const load = report.load
-  if (load?.minBaseTps != null && load.maxBaseTps != null) facts.push(['≈', t.report.base(count(load.minBaseTps), count(load.maxBaseTps))])
-  if (load?.maxPulseTps != null) facts.push(['↑', t.report.pulse(count(load.maxPulseTps))])
+  if (load && (load.minBaseTps != null || load.maxPulseTps != null)) {
+    const range = load.minBaseTps != null && load.maxBaseTps != null ? t.report.loadRange(rate(load.minBaseTps), rate(load.maxBaseTps)) : NO_DATA
+    facts.push(['≈', load.maxPulseTps == null ? t.report.load(range) : `${t.report.load(range)} · ${t.report.loadPulse(rate(load.maxPulseTps))}`])
+  }
   return (
     <section className="card verdict" data-testid="verdict">
       <div className={`mark ${head.tone}`}>{head.mark}</div>

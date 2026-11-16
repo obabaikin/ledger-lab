@@ -78,20 +78,28 @@ describe('report of a period', () => {
     expect(screen.getByText(en.report.crashedAt(clock('2026-11-11T09:12:00Z'), 2))).toBeInTheDocument()
   })
 
-  it('shows the range of the base load in the period and the highest pulse that met it', () => {
-    render(<Verdict report={report({ load: { minBaseTps: 300, maxBaseTps: 800, maxPulseTps: 1400 } })} />)
+  it('shows the load of the period in one line: the range of the base and the highest pulse that met it', () => {
+    render(<Verdict report={report({ load: { minBaseTps: 300, maxBaseTps: 600, maxPulseTps: 1400 } })} />)
 
-    expect(screen.getByText(en.report.base('300', '800'))).toBeInTheDocument()
-    expect(screen.getByText(en.report.pulse('1,400'))).toBeInTheDocument()
+    expect(screen.getByText(`${en.report.load(en.report.loadRange('300', '600'))} · ${en.report.loadPulse('1400')}`)).toHaveTextContent('Load 300–600/s · pulse 1400/s')
+  })
+
+  it('shows only the range of the base without a pulse, and one number when the base did not change', () => {
+    const { unmount } = render(<Verdict report={report({ load: { minBaseTps: 300, maxBaseTps: 600, maxPulseTps: null } })} />)
+    expect(screen.getByText(en.report.load(en.report.loadRange('300', '600')))).toBeInTheDocument()
+    expect(screen.queryByText(/pulse/)).toBeNull()
+    unmount()
+
+    render(<Verdict report={report({ load: { minBaseTps: 400, maxBaseTps: 400, maxPulseTps: null } })} />)
+    expect(screen.getByText('Load 400/s')).toBeInTheDocument()
   })
 
   it('shows no load for a report made before control kept it, or a period without a base told and without a pulse', () => {
     const { unmount } = render(<Verdict report={report({ load: null })} />)
-    expect(screen.queryByText(/Base/)).toBeNull()
+    expect(screen.queryByText(/^Load/)).toBeNull()
     unmount()
 
     render(<Verdict report={report({ load: { minBaseTps: null, maxBaseTps: null, maxPulseTps: null } })} />)
-    expect(screen.queryByText(/Base/)).toBeNull()
-    expect(screen.queryByText(/pulse/)).toBeNull()
+    expect(screen.queryByText(/^Load/)).toBeNull()
   })
 })

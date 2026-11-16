@@ -114,7 +114,7 @@ export function Controls(props: { sessionId: string; session: SessionView; onCha
 
 
   return (
-    <section className="card">
+    <div className="controlsBox">
       <div className="controls">
         <select aria-label={t.controls.tpsLabel} value={tps} onChange={(e) => setTps(Number(e.target.value))}>
           {session.loadTpsOptions.map((option) => (
@@ -146,6 +146,6 @@ export function Controls(props: { sessionId: string; session: SessionView; onCha
           {message}
         </p>
       )}
-    </section>
+    </div>
   )
 }

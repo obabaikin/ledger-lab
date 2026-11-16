@@ -42,8 +42,9 @@ is in the [Roadmap](#roadmap).
   balances, the journal and the transfer log. The period is `BALANCED` or `MISMATCH`, with the reason.
 - **Visitors with an invite** raise the load for up to 30 s, to 900–2000 transfers per second, and press a **chaos
   button** that crashes every ledger instance, as `kill -9` would. The next period must still balance.
-- **Service levels** over 30 days: availability, 99.9 % of minutes; time to posting, 95 % of transfers within 3 s and
-  99 % within 5 s; each with its error budget on the page.
+- **Service levels**: two SLIs — availability and time to posting — with SLOs and error budgets over 30 days, and
+  correctness: every period `BALANCED`. Availability 99.9 % of minutes; time to posting 95 % of transfers within 3 s
+  and 99 % within 5 s.
 
 ## How it fits together
 
@@ -89,15 +90,15 @@ from its own events ([ADR 0015](docs/adr/0015-live-numbers-from-the-banks-events
 
 ## Service levels
 
-| Objective | Measured | Target over 30 days |
+| Objective | SLI | SLO over 30 days |
 |---|---|---|
 | Availability | a minute is good if at least 99 % of the clients' requests got an answer | 99.9 % of minutes |
 | Time to posting | the share of transfers from acceptance to result within 3 s and within 5 s | 95 % within 3 s, 99 % within 5 s |
-| Correctness | — | every period `BALANCED` |
+| Correctness | share of periods that reconcile `BALANCED` | 100 %, no budget |
 
 Crashes from the page, loads above 1300 per second and maintenance windows declared 3 hours ahead stay out of the
 budget, unless a service restarts beyond what the event explains: availability leaves out their bad minutes, the time
-to posting every transfer of their minutes. How each is measured: [SLO](docs/guides/slo.md).
+to posting every transfer of their minutes. How each is measured: [SLIs and SLOs](docs/guides/slo.md).
 The second objective came from a measurement: every scheduled task of a service shared one thread, so the outbox
 publisher waited while a cleanup deleted expired idempotency keys, and nothing reached Kafka meanwhile. With the
 publishers on threads of their own the share of time with p99 above 1 s fell from 18 % to none

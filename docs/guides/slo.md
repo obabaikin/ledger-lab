@@ -1,19 +1,25 @@
 # Service level objectives
 
-The bank promises three things. The page shows the first two with their error budgets; the third is the verdict of
-every period.
+An SLI is a measured share of good events; an SLO is its objective over a rolling 30 days; the error budget is 1 − SLO,
+the share the SLO leaves for failures.
 
-| Objective | Measured | Target over a rolling 30 days |
+The bank promises three things. The page shows the SLIs of the first two with their SLOs and error budgets; the third is
+the verdict of every period.
+
+| Objective | SLI (what is measured) | SLO (over a rolling 30 days) |
 |---|---|---|
-| Availability | a minute is good if at least 99 % of the clients' requests got an answer | 99.9 % of minutes |
-| Time to posting | the share of transfers posted within a threshold, from acceptance to result | 95 % within 3 s and 99 % within 5 s |
-| Correctness | — | every period `BALANCED` |
+| Availability | share of minutes that are good: at least 99 % of the clients' requests got an answer | 99.9 % |
+| Posted within 3 s | share of transfers from acceptance to result within 3 s | 95 % |
+| Posted within 5 s | share of transfers from acceptance to result within 5 s | 99 % |
+| Correctness | share of periods that reconcile `BALANCED` | 100 % |
 
 The availability budget of 99.9 % over 30 days is `floor(43 200 × 0.001)` = 43 bad minutes. The budget of a time to
-posting target is the transfers it allows over the threshold: 5 % of the judged transfers for 3 s, 1 % for 5 s. The
+posting SLO is the transfers it allows over the threshold: 5 % of the judged transfers for 3 s, 1 % for 5 s. The
 window starts on the hour 30 days back.
 
 ## Availability
+
+SLI: share of measured minutes that are good. SLO: 99.9 %.
 
 - The generator plays the bank's clients and counts their requests and answers by minute; control keeps the minutes.
 - An answer is `2xx`, `4xx`, or `503 busy`, which tells the client to retry later. A server error, a `503` from an
@@ -22,12 +28,14 @@ window starts on the hour 30 days back.
 
 ## Time to posting
 
+SLI: share of judged transfers posted within 3 s, and within 5 s. SLO: 95 % within 3 s, 99 % within 5 s.
+
 - The metric is the gateway's `gateway.transfer.latency`: from the gateway accepting a transfer to the gateway recording
   its result from the ledger, posted or rejected. Both of the gateway's replicas publish it as a histogram with a bucket
   at each threshold, 3 s and 5 s, so the transfers within a threshold are counted exactly and add up over the replicas.
-- Over the judged transfers of 30 days: the share within 3 s is `within 3 s / judged`, the target 95 %; the share within
-  5 s is `within 5 s / judged`, the target 99 %. Both share the same judged transfers. A transfer of exactly 3.0 s is
-  within 3 s: the bucket `le="3.0"` includes its bound. Exactly 95.00 % meets the target.
+- Over the judged transfers of 30 days: the share within 3 s is `within 3 s / judged`, the SLO 95 %; the share within
+  5 s is `within 5 s / judged`, the SLO 99 %. Both share the same judged transfers. A transfer of exactly 3.0 s is
+  within 3 s: the bucket `le="3.0"` includes its bound. Exactly 95.00 % meets the SLO.
 - Control reads each minute's transfers and the two buckets from Prometheus 30 s after the minute ends and keeps
   trying for an hour; a minute keeps what it read first. A minute Prometheus did not answer for within the hour is not
   counted. Without a judged transfer in the window the page says "not measured", not 100 %.
@@ -39,9 +47,11 @@ window starts on the hour 30 days back.
 - Why a share within a threshold, not a p99: a summary's p99 is a moving window that cannot be read for exactly the past
   minute, nor added up over replicas. Three ways of reading it gave 5.5, 5.6 and 12.9 % bad minutes for the same six
   hours ([p99 analysis](../results/2026-11-14-p99-analysis.md)).
-- The thresholds and targets are one setting of the chart, `slo.posting`, read by both the gateway and control.
+- The thresholds and SLOs are one setting of the chart, `slo.posting`, read by both the gateway and control.
 
 ## Correctness
+
+SLI: share of periods that reconcile `BALANCED`. SLO: 100 %, no budget — one period that does not reconcile breaks it.
 
 Every period's verdict is `BALANCED`: the ledger's books, the bank's events and the clients' journal agree. This holds
 during crashes and loads above the limits too. It has no budget: one period that does not reconcile breaks it.

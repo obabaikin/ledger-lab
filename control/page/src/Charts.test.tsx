@@ -9,9 +9,9 @@ import { en } from './texts/en'
 
 const SHORT_SERIES = 'GET /api/bank/series?range=5m'
 /** The svg's width on screen equals its viewBox's, so a client x is a place in the drawing. */
-const DRAWN = { left: 0, top: 0, width: 420, height: 170, right: 420, bottom: 170, x: 0, y: 0, toJSON: () => ({}) }
+const DRAWN = { left: 0, top: 0, width: 340, height: 170, right: 340, bottom: 170, x: 0, y: 0, toJSON: () => ({}) }
 /** The middle of the plotted width: between the left axis (44) and the right margin (8). */
-const MIDDLE_X = 44 + (420 - 44 - 8) / 2
+const MIDDLE_X = 44 + (340 - 44 - 8) / 2
 
 const allSeries = (): SeriesView =>
   series({
@@ -81,13 +81,13 @@ describe('the charts', () => {
 
     const at = hoursMinutes(new Date(Date.parse(view.from) + view.stepSeconds * 1000).toISOString())
     const readouts = screen.getAllByTestId('chart-readout').map((r) => r.textContent)
-    expect(readouts).toContain(`${at} · ${en.charts.series.ACCEPTED_PER_SECOND} 410 · ${en.charts.series.POSTED_PER_SECOND} 409`)
-    expect(readouts).toContain(`${at} · ${en.charts.series.BANK_LATENCY_P50_MS} 0 ms · ${en.charts.series.BANK_LATENCY_P99_MS} 1.5 s`)
+    expect(readouts).toContain(`${at} · ${en.charts.short.ACCEPTED_PER_SECOND} 410 · ${en.charts.short.POSTED_PER_SECOND} 409`)
+    expect(readouts).toContain(`${at} · ${en.charts.short.BANK_LATENCY_P50_MS} 0 ms · ${en.charts.short.BANK_LATENCY_P99_MS} 1.5 s`)
     expect(screen.getAllByTestId('chart-cursor')).toHaveLength(3)
 
     fireEvent.mouseMove(screen.getByRole('img', { name: en.charts.flow }), { clientX: 420 })
     expect(screen.getAllByTestId('chart-readout').map((r) => r.textContent)).toContain(
-      `${hoursMinutes(new Date(Date.parse(view.from) + 2 * view.stepSeconds * 1000).toISOString())} · ${en.charts.series.ACCEPTED_PER_SECOND} — · ${en.charts.series.POSTED_PER_SECOND} —`,
+      `${hoursMinutes(new Date(Date.parse(view.from) + 2 * view.stepSeconds * 1000).toISOString())} · ${en.charts.short.ACCEPTED_PER_SECOND} — · ${en.charts.short.POSTED_PER_SECOND} —`,
     )
   })
 
@@ -96,7 +96,7 @@ describe('the charts', () => {
     const view = allSeries()
     render(<Charts view={view} chaos={[]} range="2h" onRange={() => undefined} />)
     const chart = screen.getByRole('img', { name: en.charts.flow })
-    const newest = `${hoursMinutes(new Date(Date.parse(view.from) + view.stepSeconds * 1000).toISOString())} · ${en.charts.series.ACCEPTED_PER_SECOND} 410 · ${en.charts.series.POSTED_PER_SECOND} 409`
+    const newest = `${hoursMinutes(new Date(Date.parse(view.from) + view.stepSeconds * 1000).toISOString())} · ${en.charts.short.ACCEPTED_PER_SECOND} 410 · ${en.charts.short.POSTED_PER_SECOND} 409`
 
     expect(screen.getAllByTestId('chart-readout').map((r) => r.textContent)).toContain(newest)
     expect(screen.queryByTestId('chart-cursor')).not.toBeInTheDocument()
@@ -138,6 +138,15 @@ describe('the charts', () => {
     ])
     expect(latency.queryByTestId('line-BANK_LATENCY_P50_MS')).toBeNull()
     expect(latency.getByTestId('line-BANK_LATENCY_P99_MS')).toBeInTheDocument()
+  })
+
+  it('are drawn at one height with the lowest mark on the axis in all three, 10 ms on the latency as 0 on the others', () => {
+    render(<Charts view={allSeries()} chaos={[]} range="2h" onRange={() => undefined} />)
+
+    const charts = screen.getAllByRole('img')
+    expect(new Set(charts.map((svg) => svg.getAttribute('viewBox')))).toHaveProperty('size', 1)
+    const lowest = (svg: Element) => Math.max(...[...svg.querySelectorAll('g > text.axis')].map((label) => Number(label.getAttribute('y'))))
+    expect(new Set(charts.map(lowest))).toHaveProperty('size', 1)
   })
 
   it('space 10 ms, 100 ms and 1 s evenly, and give 0 no place', () => {

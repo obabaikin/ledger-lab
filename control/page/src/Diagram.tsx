@@ -36,12 +36,7 @@ const POD_COLOR: Record<PodState, string> = {
   unknown: 'var(--muted)',
 }
 
-const POD_LEGEND: Record<PodState, string> = {
-  consuming: 'consuming',
-  starting: 'starting',
-  down: 'no answer to Prometheus',
-  unknown: 'no data',
-}
+const POD_LEGEND: Record<PodState, string> = t.bank.scheme.pods
 
 export function podState(pod: PodView): PodState {
   if (!pod.up) return 'down'
@@ -50,12 +45,12 @@ export function podState(pod: PodView): PodState {
 }
 
 export function podStates(pods: PodView[] | null): { name: string; state: PodState }[] {
-  return pods === null ? [{ name: 'no data', state: 'unknown' }] : pods.map((p) => ({ name: p.instance, state: podState(p) }))
+  return pods === null ? [{ name: t.bank.scheme.pods.unknown, state: 'unknown' }] : pods.map((p) => ({ name: p.instance, state: podState(p) }))
 }
 
 export function PodLegend() {
   return (
-    <div className="legend podLegend" aria-label="Instances">
+    <div className="legend podLegend" aria-label={t.bank.scheme.instances}>
       {(Object.keys(POD_LEGEND) as PodState[]).map((state) => (
         <span key={state}>
           <i className="dot" style={{ background: POD_COLOR[state] }} />
@@ -67,10 +62,10 @@ export function PodLegend() {
 }
 
 const NODES = {
-  clients: { title: 'Clients', sub: 'simulated customers', code: 'generator', job: null },
-  gateway: { title: 'Gateway', sub: 'HTTP API · outbox', code: 'gateway', job: 'gateway' },
-  kafka: { title: 'Kafka', sub: 'waiting to be booked', code: 'common', job: null },
-  ledger: { title: 'Ledger', sub: 'double-entry books', code: 'ledger-service', job: 'ledger' },
+  clients: { code: 'generator', job: null },
+  gateway: { code: 'gateway', job: 'gateway' },
+  kafka: { code: 'common', job: null },
+  ledger: { code: 'ledger-service', job: 'ledger' },
 } as const
 
 type Box = readonly [x: number, y: number, w: number, h: number]
@@ -199,50 +194,51 @@ export function Diagram(props: {
           : ''
   const lines: Record<string, [string, string]> = bare ? {} : {
     clients: [t.bank.clientsSent(shown(sent)), numbers.gaveUp === null ? '' : t.bank.clientsGaveUp(count(numbers.gaveUp))],
-    gateway: [`${shown(accepted)} accepted`, numbers.refused === null ? '' : `${count(numbers.refused)} refused (503)`],
-    ledger: [`${shown(posted)} booked`, ledgerPods ? `${consuming} of ${ledgerPods.length} consuming` : ''],
+    gateway: [t.bank.scheme.accepted(shown(accepted)), numbers.refused === null ? '' : t.bank.scheme.refused(count(numbers.refused))],
+    ledger: [t.bank.scheme.booked(shown(posted)), ledgerPods ? t.bank.scheme.consuming(consuming ?? 0, ledgerPods.length) : ''],
   }
   const layout = useNarrow() ? UPRIGHT : ACROSS
   const { labels, arrows } = layout
   const [binX, binY, binW, binH] = layout.bin
   return (
-    <svg id="diagram" className={layout.name} viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label="Transfers flowing through the bank">
+    <svg id="diagram" className={layout.name} viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={t.bank.scheme.label}>
       <rect x={layout.bank[0]} y={layout.bank[1]} width={layout.bank[2]} height={layout.bank[3]} rx={14} className="bank" />
       <text className="zone" x={layout.bankZone.x} y={layout.bankZone.y} textAnchor={layout.bankZone.anchor}>
-        THE BANK
+        {t.bank.scheme.bank}
       </text>
       <text className="zone" x={layout.outsideZone.x} y={layout.outsideZone.y} textAnchor={layout.outsideZone.anchor}>
-        OUTSIDE
+        {t.bank.scheme.outside}
       </text>
       {layout.wires.map(([d, back]) => (
         <path key={d} className={back ? 'wire back' : 'wire'} d={d} />
       ))}
       <text className="label" x={labels.api.x} y={labels.api.y} textAnchor={labels.api.anchor}>
-        public API
+        {t.bank.scheme.publicApi}
       </text>
       <text className="label" x={labels.transfers.x} y={labels.transfers.y} textAnchor={labels.transfers.anchor} style={{ fill: 'var(--flow)' }}>
-        transfers {arrows.forward}
+        {t.bank.scheme.transfers} {arrows.forward}
       </text>
       <text className="label" x={labels.results.x} y={labels.results.y} textAnchor={labels.results.anchor} style={{ fill: 'var(--ok)' }}>
-        {arrows.back} results
+        {arrows.back} {t.bank.scheme.results}
       </text>
       <text className="label" x={labels.final.x} y={labels.final.y} textAnchor={labels.final.anchor}>
-        accepted · final
+        {t.bank.scheme.acceptedFinal}
       </text>
       {(Object.keys(NODES) as (keyof typeof NODES)[]).map((key) => {
         const node = NODES[key]
+        const { title, sub } = t.bank.scheme.nodes[key]
         const [x, y, w, h] = layout.boxes[key]
         const cx = x + w / 2
         const [num, note] = lines[key] ?? ['', '']
         return (
           <a key={key} className={`node ${key === 'ledger' ? ledgerClass : ''}`} href={CODE_URL + node.code} target="_blank" rel="noopener">
-            <title>{`${node.title}: open the code on GitHub`}</title>
+            <title>{t.bank.scheme.openCode(title)}</title>
             <rect className="box" x={x} y={y} width={w} height={h} rx={10} />
             <text className="title" x={cx} y={y + 22} textAnchor="middle">
-              {node.title} ↗
+              {title} ↗
             </text>
             <text className="sub" x={cx} y={y + 37} textAnchor="middle">
-              {node.sub}
+              {sub}
             </text>
             {key === 'kafka' ? (
               <>
@@ -250,7 +246,7 @@ export function Diagram(props: {
                   {bare ? '' : shown(waiting)}
                 </text>
                 <text className="sub" x={cx} y={y + 84} textAnchor="middle">
-                  in flight
+                  {t.bank.scheme.inFlight}
                 </text>
               </>
             ) : (
@@ -272,7 +268,7 @@ export function Diagram(props: {
       {rates && <FlowDots wires={layout.wires.map(([d]) => d)} rates={rates} />}
       <rect x={binX} y={binY} width={binW} height={binH} rx={8} className="bin" />
       <text x={binX + binW / 2} y={binY + 17} textAnchor="middle" className="binLabel">
-        rejected by the rules
+        {t.bank.scheme.rejectedByRules}
       </text>
       <text x={binX + binW / 2} y={binY + 33} textAnchor="middle" className="num binNum">
         {bare ? '' : shown(rejected)}

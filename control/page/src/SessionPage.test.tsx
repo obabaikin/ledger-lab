@@ -31,11 +31,11 @@ describe('the open page', () => {
     renderAt('/')
 
     expect(await screen.findByTestId('bank-status')).toHaveTextContent('The bank runs 24/7: since')
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Ledger Lab')
+    expect(screen.getByText(en.hero.brand)).toBeInTheDocument()
     expect(screen.getByTestId('gateway-number')).toHaveTextContent('1,000 accepted')
     expect(screen.queryByRole('button', { name: new RegExp(en.controls.raise) })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Crash the ledger/ })).not.toBeInTheDocument()
-    expect(follows(screen.getByRole('heading', { level: 2, name: en.inviteForm.heading }), screen.getByTestId('bank-status'))).toBe(true)
+    expect(follows(screen.getByRole('button', { name: en.landing.tryIt }), screen.getByTestId('bank-status'))).toBe(true)
     expect(screen.getByRole('link', { name: 'Oleksii Babaikin' })).toHaveAttribute('href', expect.stringContaining('linkedin.com/in/'))
     expect(screen.getAllByRole('link', { name: en.footer.privacy })[0]).toHaveAttribute('href', '/privacy')
     expect(screen.getByRole('link', { name: en.footer.impressum })).toHaveAttribute('href', '/impressum')
@@ -54,16 +54,17 @@ describe('the open page', () => {
     expect(opened).toHaveFocus()
     expect(screen.getByLabelText(en.inviteForm.emailLabel)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: en.landing.tryIt })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('heading', { level: 2, name: en.inviteForm.heading })).toHaveLength(1)
+    expect(within(opened).queryByRole('heading')).toBeNull()
     expect(follows(opened, screen.getByTestId('bank-status'))).toBe(true)
   })
 
-  it('shows how fast the clients send now, large, at the top', async () => {
+  it('says in the heading at the top how fast the clients send now', async () => {
     control()
     renderAt('/')
 
-    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(`${en.bank.speed('400')} ${en.bank.speedNow}`)
-    expect(follows(screen.getByTestId('clients-speed'), screen.getByTestId('bank-status'))).toBe(true)
+    await screen.findByTestId('hero-rate')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(`${en.hero.before} 400 ${en.hero.unit} ${en.hero.after}`)
+    expect(follows(screen.getByRole('heading', { level: 1 }), screen.getByTestId('bank-status'))).toBe(true)
   })
 
   it('says the bank has not started before control placed its first period', async () => {
@@ -79,7 +80,8 @@ describe('the open page', () => {
 
     expect(await screen.findByTestId('books')).toHaveTextContent(`${en.bank.totalInAccounts} €1,000,000,000.00 ${en.bank.unchanged}`)
     expect(screen.getByText('100,000')).toBeInTheDocument()
-    expect(screen.getByTestId('rejections')).toHaveTextContent(`${en.bank.rejected('5')}: insufficient funds 4, blocked account 1`)
+    const reason = en.bank.rejectReason
+    expect(screen.getByTestId('rejections')).toHaveTextContent(`${en.bank.rejected('5')}: ${reason.INSUFFICIENT_FUNDS} 4, ${reason.BLOCKED_ACCOUNT} 1`)
     await waitFor(() => expect(screen.getByTestId('moved')).toHaveTextContent('€990.00'))
   })
 
@@ -114,7 +116,9 @@ describe('the open page', () => {
     })
     renderAt('/')
 
-    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(`${en.bank.speed('1,500')} ${en.bank.speedUntil(clock(until), '400')}`)
+    expect(await screen.findByTestId('hero-rate')).toHaveTextContent(`1500 ${en.hero.unit}`)
+    expect(screen.getByTestId('hero-rate')).toHaveClass('warn')
+    expect(screen.getByTestId('hero-sub')).toHaveTextContent(`${en.hero.pulse('1500', clock(until), '400')} ${en.hero.reconciled}`)
     expect(screen.getByTestId('last-crash')).toHaveTextContent(en.bank.lastCrash(clock(crashedAt), 2))
   })
 
@@ -123,37 +127,39 @@ describe('the open page', () => {
     renderAt('/')
 
     expect(await screen.findByTestId('slo-availability-value')).toHaveTextContent('99.83 %')
-    expect(screen.getByTestId('slo-availability')).toHaveTextContent(en.availability.ofMinutes('99.9 %'))
+    expect(screen.getByTestId('slo-availability')).toHaveTextContent(en.availability.ofMinutes('99.9 %', en.availability.windowDays(30)))
     expect(screen.getByTestId('slo-availability-used')).toHaveTextContent(en.availability.usedMinutes(17, 43))
     expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.postingTitle(3))
     expect(screen.getByTestId('slo-posting-0-value')).toHaveTextContent('99.97 %')
-    expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.ofTransfers('95 %'))
+    expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.ofTransfers('95 %', en.availability.windowDays(30)))
     expect(screen.getByTestId('slo-posting-1-used')).toHaveTextContent('2 %')
     expect(screen.getByTestId('posting-split')).toHaveTextContent(en.availability.postingSplit('12,000', '3,400'))
-    expect(screen.queryByTestId('posting-since')).toBeNull()
     expect(screen.getByText(en.availability.ruleSummary).closest('details')).not.toHaveAttribute('open')
     expect(screen.getByRole('link', { name: en.availability.howMeasured })).toHaveAttribute(
       'href', 'https://github.com/obabaikin/ledger-lab/blob/main/docs/guides/slo.md')
     expect(screen.queryByText(/Error budget:/)).toBeNull()
   })
 
-  it('shows the base load and in how many minutes it changes, the base alone while it is constant, and nothing without an answer from the clients', async () => {
+  it('says under the heading the base load and in how many minutes it changes, the base alone while it is constant, and only the reconciliation without an answer from the clients', async () => {
     const now = Date.parse('2026-11-11T10:30:30Z')
     vi.spyOn(Date, 'now').mockReturnValue(now)
     control({ 'GET /api/bank': { status: 200, body: bank({ load: { baseTps: 600, nextChangeAt: '2026-11-11T10:35:00Z' } }) } })
     renderAt('/')
-    expect(await screen.findByTestId('base-load')).toHaveTextContent(en.bank.baseChangesIn('600', 5))
+    await screen.findByTestId('hero-rate')
+    expect(screen.getByTestId('hero-sub')).toHaveTextContent(`${en.hero.baseChangesIn('600', 5)} ${en.hero.reconciled}`)
     cleanup()
 
     control({ 'GET /api/bank': { status: 200, body: bank({ load: { baseTps: 400, nextChangeAt: null } }) } })
     renderAt('/')
-    expect(await screen.findByTestId('base-load')).toHaveTextContent(en.bank.base('400'))
+    await screen.findByTestId('hero-rate')
+    expect(screen.getByTestId('hero-sub')).toHaveTextContent(`${en.hero.base('400')} ${en.hero.reconciled}`)
+    expect(screen.getByTestId('hero-sub')).not.toHaveTextContent(/next change/)
     cleanup()
 
     control({ 'GET /api/bank': { status: 200, body: bank({ load: null }) } })
     renderAt('/')
-    await screen.findByTestId('clients-speed')
-    expect(screen.queryByTestId('base-load')).toBeNull()
+    await screen.findByTestId('hero-rate')
+    expect(screen.getByTestId('hero-sub').textContent).toBe(en.hero.reconciled)
   })
 
   it('shows the planned update in the visitor\'s time, and says when none is planned', async () => {
@@ -232,8 +238,8 @@ describe('the open page', () => {
     renderAt('/')
 
     const legend = await screen.findByLabelText('Instances')
-    expect(legend).toHaveTextContent('consuming')
-    expect(legend).toHaveTextContent('no answer to Prometheus')
+    expect(legend).toHaveTextContent(en.bank.scheme.pods.consuming)
+    expect(legend).toHaveTextContent(en.bank.scheme.pods.down)
   })
 })
 
@@ -354,7 +360,7 @@ describe('session page', () => {
     control()
     renderAt(`/s/${SESSION_ID}`)
 
-    expect(await screen.findByTestId('clients-speed')).toHaveTextContent(en.bank.speed('400'))
+    expect(await screen.findByTestId('hero-rate')).toHaveTextContent(`400 ${en.hero.unit}`)
     expect(screen.queryByRole('button', { name: en.landing.tryIt })).not.toBeInTheDocument()
   })
 

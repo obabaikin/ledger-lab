@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react'
 import { api, type BankView, type PeriodDetails, type PeriodView } from './api/client'
 import { count, dayAndMonth, hoursMinutes } from './format'
+import type { Section } from './sections'
 import { t } from './texts'
 import { Verdict } from './Verdict'
+
+const PERIODS: Section = 'periods'
 
 type Read = { start: string; details: PeriodDetails | null; failed: boolean }
 
 function outcome(p: PeriodView): string {
   if (p.verdict !== null) return t.periods.verdict[p.verdict]
   return t.periods.state[p.state]
+}
+
+const FINISHED: PeriodView['state'][] = ['RECONCILED', 'FAILED']
+
+/** A period still being reconciled is passed over: it has not failed, it is not done yet. */
+export function lastFinished(periods: PeriodView[] | null): { balanced: boolean; outcome: string } | null {
+  const last = periods?.find((p) => FINISHED.includes(p.state))
+  return last === undefined ? null : { balanced: last.verdict === 'BALANCED', outcome: outcome(last) }
 }
 
 function Failed({ period }: { period: PeriodView }) {
@@ -42,17 +53,27 @@ export function Periods({ bank, periods, lost }: { bank: BankView; periods: Peri
   const shown = read !== null && read.start === selected ? read : null
 
   return (
-    <section className="card periods" aria-label={t.periods.heading}>
-      <h3>{t.periods.heading}</h3>
-      {lost && <p className="hint">{t.periods.unavailable}</p>}
-      <p className="hint" data-testid="current-period">
-        {periods !== null && periods.length === 0
-          ? t.periods.firstCloses(hoursMinutes(currentPeriod.closesAt))
-          : t.periods.current(hoursMinutes(currentPeriod.start), hoursMinutes(currentPeriod.end), hoursMinutes(currentPeriod.closesAt))}
+    <section className="card periods" id={PERIODS} aria-label={t.periods.heading}>
+      <h2>{t.periods.heading}</h2>
+      <p className="question">
+        {t.periods.question}{' '}
+        <span data-testid="current-period">
+          {periods !== null && periods.length === 0
+            ? t.periods.firstCloses(hoursMinutes(currentPeriod.closesAt))
+            : t.periods.current(hoursMinutes(currentPeriod.start), hoursMinutes(currentPeriod.end), hoursMinutes(currentPeriod.closesAt))}
+        </span>
       </p>
+      {lost && <p className="hint">{t.periods.unavailable}</p>}
       {periods !== null && periods.length > 0 && (
         <div className="table-wrap">
           <table>
+            <thead>
+              <tr>
+                <th>{t.periods.columns.period}</th>
+                <th>{t.periods.columns.transfers}</th>
+                <th>{t.periods.columns.verdict}</th>
+              </tr>
+            </thead>
             <tbody>
               {periods.map((p) => (
                 <tr

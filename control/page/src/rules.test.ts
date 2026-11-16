@@ -8,6 +8,7 @@ import { nextReadyAt, waitShown } from './readyCountdown'
 import { bankCounters, inFlight, shownAccepted } from './shownCounts'
 import { between } from './smooth'
 import { bank, series } from './test/fakeControl'
+import { en } from './texts/en'
 
 describe('live counts', () => {
   it('take in flight from one snapshot and never below 0', () => {
@@ -150,7 +151,7 @@ describe('instances', () => {
   })
 
   it('show no data without an answer from Prometheus', () => {
-    expect(podStates(null)).toEqual([{ name: 'no data', state: 'unknown' }])
+    expect(podStates(null)).toEqual([{ name: en.bank.scheme.pods.unknown, state: 'unknown' }])
   })
 })
 
