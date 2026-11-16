@@ -8,6 +8,7 @@ import com.ledgerlab.control.availability.AvailabilityRepository;
 import com.ledgerlab.control.availability.Posting;
 import com.ledgerlab.control.availability.Slo;
 import com.ledgerlab.control.generator.GeneratorApi;
+import com.ledgerlab.control.periods.PeriodLoad;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -620,6 +621,26 @@ class AvailabilityTest extends IntegrationTest {
         assertThat(before.posting().judged()).isEqualTo(2 * TRANSFERS);
         assertThat(before.posting().since()).isEqualTo(lastHour);
         assertThat(before.slo().outsideMinutes()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a period's load is the lowest and highest base of its minutes and the highest pulse that met it, none of the hours beside it")
+    void a_periods_load_is_the_lowest_and_highest_base_of_its_minutes_and_the_highest_pulse_that_met_it_none_of_the_hours_beside_it()
+        throws Exception {
+        var hour = clock.now().truncatedTo(ChronoUnit.HOURS).minus(Duration.ofHours(2));
+        var next = hour.plus(Duration.ofHours(1));
+        generatorHandsOver(List.of(
+            mapOf("minute", hour.minusSeconds(60), "baseTps", 200, "total", REQUESTS, "errors", 0, "busy", 0),
+            mapOf("minute", hour, "baseTps", 300, "total", REQUESTS, "errors", 0, "busy", 0),
+            mapOf("minute", hour.plusSeconds(1800), "baseTps", 800, "total", REQUESTS, "errors", 0, "busy", 0),
+            mapOf("minute", next, "baseTps", 900, "total", REQUESTS, "errors", 0, "busy", 0)));
+        availability.collect();
+        pulse(hour.minusSeconds(10), 1400, 20);
+        pulse(hour.plusSeconds(600), 1000, 30);
+        pulse(next, 2000, 10);
+
+        assertThat(repository.loadBetween(hour, next)).isEqualTo(new PeriodLoad(300, 800, 1400));
+        assertThat(repository.loadBetween(next.plus(Duration.ofHours(1)), next.plus(Duration.ofHours(2)))).isEqualTo(new PeriodLoad(null, null, null));
     }
 
     @Test
