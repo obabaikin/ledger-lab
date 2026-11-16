@@ -40,12 +40,13 @@ public final class BankMetrics {
 
     /**
      * The gateway's transfers whose result came in the minute before the instant asked about, counted only on the
-     * instances with a bucket at each of the bounds: one without them, as before an update, would count all its transfers
-     * as slower than the bounds.
+     * instances with a bucket at each of the bounds in that minute: one without them, as before an update, would count all
+     * its transfers as slower than the bounds. The buckets are taken over the same minute as {@link #WITHIN_IN_MINUTE}
+     * sums them, so an instance that stopped during the minute is in both or in neither.
      */
     public static String transfersInMinute(List<Duration> bounds) {
         var query = new StringBuilder(LATENCY_COUNT_IN_MINUTE);
-        bounds.forEach(bound -> query.append(" and on(instance) gateway_transfer_latency_seconds_bucket{le=\"%s\"}".formatted(bucketBound(bound))));
+        bounds.forEach(bound -> query.append(" and on(instance) increase(gateway_transfer_latency_seconds_bucket{le=\"%s\"}[1m])".formatted(bucketBound(bound))));
         return "sum(" + query + ")";
     }
 

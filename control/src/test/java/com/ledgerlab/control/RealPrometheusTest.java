@@ -69,6 +69,23 @@ class RealPrometheusTest extends IntegrationTest {
     static final FakeExporter killedExporter = new FakeExporter(List.of(KILLED_LEDGER));
     static final FakeExporter gatewayExporter = new FakeExporter(List.of(GATEWAY));
     static final FakeExporter secondGateway = new FakeExporter(List.of(GATEWAY));
+    /** Served only by the test of the buckets, so no other test's counters move in its minute. */
+    static final FakeExporter updatedGateway = new FakeExporter(List.of(GATEWAY));
+    static final FakeExporter oldGateway = new FakeExporter(List.of(GATEWAY));
+    /** The tests of the minute's buckets each sum every gateway instance over a minute, so they wait for each other's to pass. */
+    private static final Duration BUCKET_MINUTE = Duration.ofSeconds(61);
+    private static volatile Instant bucketsServedUntil = Instant.EPOCH;
+
+    private static void awaitOtherBucketsOutOfTheMinute() throws InterruptedException {
+        var quiet = bucketsServedUntil.plus(BUCKET_MINUTE);
+        while (Instant.now().isBefore(quiet)) {
+            Thread.sleep(POLL);
+        }
+    }
+
+    /** Served only by the test of an instance that stops within the minute. */
+    static final FakeExporter steadyGateway = new FakeExporter(List.of(GATEWAY));
+    static final FakeExporter stoppingGateway = new FakeExporter(List.of(GATEWAY));
 
     private record Target(String job, List<Integer> ports) {
     }
@@ -77,11 +94,14 @@ class RealPrometheusTest extends IntegrationTest {
         static final GenericContainer<?> CONTAINER = started();
 
         private static GenericContainer<?> started() {
-            Testcontainers.exposeHostPorts(exporter.port, killedExporter.port, gatewayExporter.port, secondGateway.port);
+            Testcontainers.exposeHostPorts(
+                exporter.port, killedExporter.port, gatewayExporter.port, secondGateway.port, updatedGateway.port, oldGateway.port,
+                steadyGateway.port, stoppingGateway.port);
             var targets = new ArrayList<Target>();
             JOBS.forEach(it -> targets.add(new Target(it, List.of(exporter.port))));
             targets.add(new Target(KILLED_LEDGER, List.of(killedExporter.port)));
-            targets.add(new Target(GATEWAY, List.of(gatewayExporter.port, secondGateway.port)));
+            targets.add(new Target(GATEWAY, List.of(
+                gatewayExporter.port, secondGateway.port, updatedGateway.port, oldGateway.port, steadyGateway.port, stoppingGateway.port)));
             var jobs = targets.stream()
                 .map(target ->
                     "  - job_name: " + target.job() + "\n"
@@ -216,22 +236,47 @@ class RealPrometheusTest extends IntegrationTest {
     @Test
     @DisplayName("a gateway instance without the buckets at 3 s and 5 s, as before an update, is counted neither in the transfers nor within the thresholds")
     void a_gateway_instance_without_the_buckets_at_3_s_and_5_s_is_counted_neither_in_the_transfers_nor_within_the_thresholds() throws Exception {
-        // Above what the other tests served, so no counter of theirs seems to restart.
-        var above = 100_000L;
+        awaitOtherBucketsOutOfTheMinute();
+        // Far above what the charts' test served, so what it still adds in the minute does not show.
+        var scale = 1_000_000L;
         for (var round = 1; round <= 4; round++) {
-            gatewayExporter.serve(GATEWAY, histogram(above + round * 90, above + round * 96, above + round * 99, above + round * 100));
-            secondGateway.serve(GATEWAY, histogramBefore3s(above + round * 1000, above + round * 1000));
-            gatewayExporter.awaitScrapes(SCRAPES_TO_SETTLE);
+            updatedGateway.serve(GATEWAY, histogram(round * scale * 90 / 100, round * scale * 96 / 100, round * scale * 99 / 100, round * scale));
+            oldGateway.serve(GATEWAY, histogramBefore3s(round * scale * 10, round * scale * 10));
+            updatedGateway.awaitScrapes(SCRAPES_TO_SETTLE);
         }
 
         var transfers = single(Objects.requireNonNull(prometheusClient.query(
             BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5)))))).number();
         var within3s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0")))).number();
         var within5s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("5.0")))).number();
+        bucketsServedUntil = Instant.now();
 
         assertThat(transfers).isPositive();
         assertThat(within3s / transfers).isCloseTo(0.96, within(0.001));
         assertThat(within5s / transfers).isCloseTo(0.99, within(0.001));
+    }
+
+    @Test
+    @DisplayName("a gateway instance that stops within the minute counts in the transfers as in those within the thresholds, never more within than in all")
+    void a_gateway_instance_that_stops_within_the_minute_counts_in_the_transfers_as_in_those_within_the_thresholds() throws Exception {
+        awaitOtherBucketsOutOfTheMinute();
+        var scale = 1_000_000L;
+        for (var round = 1; round <= 4; round++) {
+            steadyGateway.serve(GATEWAY, histogram(round * scale / 2, round * scale / 2, round * scale / 2, round * scale));
+            if (round < 4) {
+                stoppingGateway.serve(GATEWAY, histogram(round * scale, round * scale, round * scale, round * scale));
+            } else {
+                stoppingGateway.serve(GATEWAY, "");
+            }
+            steadyGateway.awaitScrapes(SCRAPES_TO_SETTLE);
+        }
+
+        var transfers = single(Objects.requireNonNull(prometheusClient.query(
+            BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5)))))).number();
+        var within3s = single(Objects.requireNonNull(prometheusClient.query(BankMetrics.WITHIN_IN_MINUTE.formatted("3.0")))).number();
+        bucketsServedUntil = Instant.now();
+
+        assertThat(within3s / transfers).isBetween(0.5, 1.0);
     }
 
     /** As the gateway's timer publishes it, with buckets at 3 s and 5 s. */

@@ -24,8 +24,8 @@ class BankMetricsTest {
     void the_transfers_of_a_minute_are_counted_only_on_the_instances_with_a_bucket_at_each_bound() {
         assertThat(BankMetrics.transfersInMinute(List.of(Duration.ofSeconds(3), Duration.ofSeconds(5)))).isEqualTo(
             "sum(increase(gateway_transfer_latency_seconds_count[1m])"
-                + " and on(instance) gateway_transfer_latency_seconds_bucket{le=\"3.0\"}"
-                + " and on(instance) gateway_transfer_latency_seconds_bucket{le=\"5.0\"})");
+                + " and on(instance) increase(gateway_transfer_latency_seconds_bucket{le=\"3.0\"}[1m])"
+                + " and on(instance) increase(gateway_transfer_latency_seconds_bucket{le=\"5.0\"}[1m]))");
     }
 
     @Test
