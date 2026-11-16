@@ -13,11 +13,13 @@ moving — need a bank that never stops.
 
 ## Decision
 
-**One bank, one set of accounts, a steady load.** The ledger opens 100,000 client accounts with €10,000 each and a
-pool of €100 million at startup, once; the last 100 accounts are blocked, so rejections happen as in a real bank. The
-generator plays the clients and sends 400 transfers per second day and night. A visitor with an invite can raise the
-load for 10 to 30 s, up to 2000 per second, one raise at a time for all visitors with at least a minute between them,
-and can crash every ledger instance at most every 90 s.
+**One bank, one set of accounts, a load that follows the day.** The ledger opens 100,000 client accounts with
+€10,000 each and a pool of €100 million at startup, once; the last 100 accounts are blocked, so rejections happen as in
+a real bank. The generator plays the clients day and night: 200 transfers per second from midnight to 6:00 Berlin time,
+then a random walk in steps of 100 or 200 every 5 minutes between 300 and 800, back at 200 by midnight. The walk is a
+function of the time, so a restarted generator goes on with the same curve. A visitor with an invite can raise the
+load for 10 to 30 s, to 900–2000 per second, above the day's highest base, one raise at a time for all visitors with at
+least a minute between them, and can crash every ledger instance at most every 90 s.
 
 **Hourly periods instead of runs.** A transfer belongs to the period in which the gateway accepted it, and every
 service files it there by that time, carried in the message; a period is an hour. A minute after its end control closes it at the gateway, which fixes the period's entries: a later change to
