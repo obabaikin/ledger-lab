@@ -33,7 +33,12 @@ public record Posting(
         @Schema(description = "within / judged; null before the first judged transfer.", nullable = true)
         @Nullable Double share,
         @Schema(description = "Judged transfers over the threshold, as a share of those the target allows; above 1 the target is missed. Null before the first judged transfer.", nullable = true)
-        @Nullable Double budgetUsed
+        @Nullable Double budgetUsed,
+        @Schema(description = "Judged transfers over the threshold by UTC day, the last 30 days at most, oldest first; a day without a counted transfer is left out.")
+        List<DayCount> days
     ) {
+        public Target {
+            days = List.copyOf(days);
+        }
     }
 }

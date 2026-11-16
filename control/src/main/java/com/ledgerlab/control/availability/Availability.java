@@ -67,13 +67,14 @@ public class Availability {
     }
 
     public Slo slo(Instant now) {
-        return slo(counts(now));
+        return slo(counts(now), days(now));
     }
 
-    /** Both objectives from one read of the minutes, so that they cover the same ones. */
+    /** Both objectives from the same reads of the minutes, so that they cover the same ones. */
     public Objectives objectives(Instant now) {
         var counts = counts(now);
-        return new Objectives(slo(counts), posting(counts, now));
+        var days = days(now);
+        return new Objectives(slo(counts, days), posting(counts, days, now));
     }
 
     public record Objectives(Slo slo, Posting posting) {
@@ -87,7 +88,13 @@ public class Availability {
         return now.minus(props.sloWindow()).truncatedTo(ChronoUnit.HOURS);
     }
 
-    private Slo slo(AvailabilityRepository.Counts counts) {
+    /** As many whole UTC days as the window has, today the last of them; they all lie within the window. */
+    private List<AvailabilityRepository.DayCounts> days(Instant now) {
+        var firstDay = now.truncatedTo(ChronoUnit.DAYS).minus(props.sloWindow().minusDays(1));
+        return minutes.byDaySince(firstDay, rules);
+    }
+
+    private Slo slo(AvailabilityRepository.Counts counts, List<AvailabilityRepository.DayCounts> days) {
         var judged = counts.measuredMinutes() - counts.plannedMinutes() - counts.outsideMinutes();
         return new Slo(
             props.sloTarget(),
@@ -98,10 +105,12 @@ public class Availability {
             counts.plannedMinutes(),
             counts.outsideMinutes(),
             judged == 0 ? null : (double) (judged - counts.badMinutes()) / judged,
-            counts.total() == 0 ? null : (double) counts.busy() / counts.total());
+            counts.total() == 0 ? null : (double) counts.busy() / counts.total(),
+            days.stream().map(day -> new DayCount(day.day(), day.badMinutes())).toList());
     }
 
-    private Posting posting(AvailabilityRepository.Counts counts, Instant now) {
+    private Posting posting(AvailabilityRepository.Counts counts, List<AvailabilityRepository.DayCounts> days, Instant now) {
+        var counted = days.stream().filter(day -> day.postedJudged() + day.postedLeftOut() > 0).toList();
         var since = counts.postingSince();
         var judged = counts.postedJudged();
         return new Posting(
@@ -111,13 +120,15 @@ public class Availability {
             counts.postedPlanned(),
             counts.postedOutside(),
             List.of(
-                target(postingProps.typical(), judged, counts.postedWithinTypical()),
-                target(postingProps.tail(), judged, counts.postedWithinTail())));
+                target(postingProps.typical(), judged, counts.postedWithinTypical(),
+                    counted.stream().map(day -> new DayCount(day.day(), day.postedJudged() - day.postedWithinTypical())).toList()),
+                target(postingProps.tail(), judged, counts.postedWithinTail(),
+                    counted.stream().map(day -> new DayCount(day.day(), day.postedJudged() - day.postedWithinTail())).toList())));
     }
 
-    private static Posting.Target target(ControlProperties.Target target, long judged, long within) {
+    private static Posting.Target target(ControlProperties.Target target, long judged, long within, List<DayCount> days) {
         if (judged == 0) {
-            return new Posting.Target(target.threshold().toMillis(), target.target(), within, null, null);
+            return new Posting.Target(target.threshold().toMillis(), target.target(), within, null, null, days);
         }
         var allowed = BigDecimal.valueOf(judged).multiply(BigDecimal.ONE.subtract(target.target()));
         return new Posting.Target(
@@ -125,7 +136,8 @@ public class Availability {
             target.target(),
             within,
             BigDecimal.valueOf(within).divide(BigDecimal.valueOf(judged), MathContext.DECIMAL64).doubleValue(),
-            BigDecimal.valueOf(judged - within).divide(allowed, MathContext.DECIMAL64).doubleValue());
+            BigDecimal.valueOf(judged - within).divide(allowed, MathContext.DECIMAL64).doubleValue(),
+            days);
     }
 
     private long budget(BigDecimal target) {

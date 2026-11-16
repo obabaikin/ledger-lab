@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ledgerlab.control.availability.Availability;
 import com.ledgerlab.control.availability.AvailabilityRepository;
+import com.ledgerlab.control.availability.DayCount;
 import com.ledgerlab.control.availability.Posting;
 import com.ledgerlab.control.availability.Slo;
 import com.ledgerlab.control.generator.GeneratorApi;
@@ -13,6 +14,8 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -641,6 +644,76 @@ class AvailabilityTest extends IntegrationTest {
 
         assertThat(repository.loadBetween(hour, next)).isEqualTo(new PeriodLoad(300, 800, 1400));
         assertThat(repository.loadBetween(next.plus(Duration.ofHours(1)), next.plus(Duration.ofHours(2)))).isEqualTo(new PeriodLoad(null, null, null));
+    }
+
+    private static LocalDate dayOf(Instant instant) {
+        return instant.atOffset(ZoneOffset.UTC).toLocalDate();
+    }
+
+    @Test
+    @DisplayName("the days are UTC days: a bad minute at 23:59 and one at 00:00 fall on two days")
+    void the_days_are_utc_days_a_bad_minute_at_23_59_and_one_at_00_00_fall_on_two_days() {
+        var midnight = clock.now().truncatedTo(ChronoUnit.DAYS).minus(Duration.ofDays(1));
+        postedMinute(midnight.minusSeconds(60), REQUESTS / 2, 100L, 90L, 99L);
+        postedMinute(midnight, REQUESTS / 2, 100L, 80L, 98L);
+
+        var objectives = objectives();
+
+        assertThat(objectives.slo().days()).containsExactly(
+            new DayCount(dayOf(midnight.minusSeconds(60)), 1), new DayCount(dayOf(midnight), 1));
+        assertThat(typical(objectives.posting()).days()).containsExactly(
+            new DayCount(dayOf(midnight.minusSeconds(60)), 10), new DayCount(dayOf(midnight), 20));
+        assertThat(tail(objectives.posting()).days()).containsExactly(
+            new DayCount(dayOf(midnight.minusSeconds(60)), 1), new DayCount(dayOf(midnight), 2));
+    }
+
+    @Test
+    @DisplayName("a day counts only what was judged: a bad minute in a window declared in time and the transfers of a pulse of 1400 are not in it")
+    void a_day_counts_only_what_was_judged_a_planned_bad_minute_and_the_transfers_of_a_pulse_of_1400_are_not_in_it() {
+        var day = clock.now().truncatedTo(ChronoUnit.DAYS).minus(Duration.ofDays(2)).plus(Duration.ofHours(10));
+        badForBoth(day);
+        window(day, day.plusSeconds(60), day.minus(NOTICE));
+        pulse(day.plusSeconds(600), 1400, 30);
+        postedMinute(day.plusSeconds(600), 0, 1000L, 500L, 600L);
+        badForBoth(day.plusSeconds(1200));
+
+        var objectives = objectives();
+
+        assertThat(objectives.slo().days()).containsExactly(new DayCount(dayOf(day), 1));
+        assertThat(typical(objectives.posting()).days()).containsExactly(new DayCount(dayOf(day), TRANSFERS / 2));
+        assertThat(tail(objectives.posting()).days()).containsExactly(new DayCount(dayOf(day), TRANSFERS / 4));
+    }
+
+    @Test
+    @DisplayName("at most 30 days are shown, today the last; the time to posting shows none before it was first counted")
+    void at_most_30_days_are_shown_today_the_last_the_time_to_posting_shows_none_before_it_was_first_counted() {
+        var now = clock.now();
+        var today = now.truncatedTo(ChronoUnit.DAYS);
+        hour(today.minus(Duration.ofDays(30)).plus(Duration.ofHours(12)), 60, 3);
+        hour(today.minus(Duration.ofDays(29)).plus(Duration.ofHours(12)), 60, 2);
+        hour(today.minus(Duration.ofDays(20)), 60, 1);
+        postedHour(today.minus(Duration.ofDays(10)), 1000, 990);
+
+        var objectives = availability.objectives(now);
+
+        assertThat(objectives.slo().days()).extracting(DayCount::day).containsExactly(
+            dayOf(today.minus(Duration.ofDays(29))), dayOf(today.minus(Duration.ofDays(20))), dayOf(today.minus(Duration.ofDays(10))));
+        assertThat(objectives.slo().days()).extracting(DayCount::count).containsExactly(2L, 1L, 0L);
+        assertThat(typical(objectives.posting()).days()).containsExactly(new DayCount(dayOf(today.minus(Duration.ofDays(10))), 10));
+    }
+
+    @Test
+    @DisplayName("a bad minute of an hour not added up yet already shows in its day, beside the hours added up before it")
+    void a_bad_minute_of_an_hour_not_added_up_yet_already_shows_in_its_day_beside_the_hours_added_up_before_it() {
+        var hour = clock.now().truncatedTo(ChronoUnit.HOURS).minus(Duration.ofHours(3));
+        hour(hour.minus(Duration.ofHours(1)), 60, 2);
+        badMinute(hour.plusSeconds(300));
+
+        var days = availability.objectives(hour.plusSeconds(600)).slo().days();
+
+        var counted = days.stream().mapToLong(DayCount::count).sum();
+        assertThat(counted).isEqualTo(3);
+        assertThat(days.getLast().day()).isEqualTo(dayOf(hour));
     }
 
     @Test

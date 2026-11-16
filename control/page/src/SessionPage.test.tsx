@@ -118,64 +118,23 @@ describe('the open page', () => {
     expect(screen.getByTestId('last-crash')).toHaveTextContent(en.bank.lastCrash(clock(crashedAt), 2))
   })
 
-  it('shows the error budget used, in the words of the page texts', async () => {
+  it('shows the three service levels as cards with their value, target and budget used, the transfers left out, and the rule folded with its link', async () => {
     control()
     renderAt('/')
 
-    expect(await screen.findByTestId('budget')).toHaveTextContent(en.availability.budget(17, 43))
-    expect(screen.getByRole('meter', { name: en.availability.budget(17, 43) })).toHaveAttribute('aria-valuenow', '17')
-    expect(screen.getByTestId('budget-split')).toHaveTextContent(en.availability.split(17, 12, 2))
-  })
-
-  it('shows the time to posting as a row per threshold with its share, target and budget used, the transfers left out, and links to how it is measured', async () => {
-    control()
-    renderAt('/')
-
-    expect(await screen.findByTestId('posting-0')).toHaveTextContent(en.availability.postingValue(3, '99.97 %', '95 %'))
-    expect(screen.getByTestId('posting-0-budget')).toHaveTextContent(en.availability.postingBudget('1 %'))
-    expect(screen.getByTestId('posting-1')).toHaveTextContent(en.availability.postingValue(5, '99.98 %', '99 %'))
-    expect(screen.getByRole('meter', { name: en.availability.postingBudget('2 %') })).toHaveAttribute('aria-valuenow', '0.02')
+    expect(await screen.findByTestId('slo-availability-value')).toHaveTextContent('99.83 %')
+    expect(screen.getByTestId('slo-availability')).toHaveTextContent(en.availability.ofMinutes('99.9 %'))
+    expect(screen.getByTestId('slo-availability-used')).toHaveTextContent(en.availability.usedMinutes(17, 43))
+    expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.postingTitle(3))
+    expect(screen.getByTestId('slo-posting-0-value')).toHaveTextContent('99.97 %')
+    expect(screen.getByTestId('slo-posting-0')).toHaveTextContent(en.availability.ofTransfers('95 %'))
+    expect(screen.getByTestId('slo-posting-1-used')).toHaveTextContent('2 %')
     expect(screen.getByTestId('posting-split')).toHaveTextContent(en.availability.postingSplit('12,000', '3,400'))
-    expect(screen.getByTestId('posting-window')).toHaveTextContent(en.availability.postingWindow(30))
-    expect(screen.getByText(en.availability.postingTitle)).toBeInTheDocument()
+    expect(screen.queryByTestId('posting-since')).toBeNull()
+    expect(screen.getByText(en.availability.ruleSummary).closest('details')).not.toHaveAttribute('open')
     expect(screen.getByRole('link', { name: en.availability.howMeasured })).toHaveAttribute(
       'href', 'https://github.com/obabaikin/ledger-lab/blob/main/docs/guides/slo.md')
-  })
-
-  it('says the time to posting is not measured before the first judged transfer, not 100 %, and since when it is counted', async () => {
-    const since = '2026-11-17T03:00:00Z'
-    const posting = bank().posting
-    control({
-      'GET /api/bank': {
-        status: 200,
-        body: bank({
-          posting: {
-            ...posting,
-            since,
-            judged: 0,
-            targets: posting.targets.map((target) => ({ ...target, within: 0, share: null, budgetUsed: null })),
-          },
-        }),
-      },
-    })
-    renderAt('/')
-
-    expect(await screen.findByTestId('posting-0')).toHaveTextContent(en.availability.postingNotMeasured(3, '95 %'))
-    expect(screen.getByTestId('posting-1')).toHaveTextContent(en.availability.postingNotMeasured(5, '99 %'))
-    expect(screen.queryByTestId('posting-0-budget')).toBeNull()
-    expect(screen.getByTestId('posting-window')).toHaveTextContent(en.availability.postingSince(dayAndMonth(since)))
-  })
-
-  it('shows the target missed when more transfers were slow than it allows', async () => {
-    const posting = bank().posting
-    const [typical, tail] = posting.targets
-    control({
-      'GET /api/bank': { status: 200, body: bank({ posting: { ...posting, targets: [{ ...typical!, share: 0.94, budgetUsed: 1.2 }, tail!] } }) },
-    })
-    renderAt('/')
-
-    expect(await screen.findByTestId('posting-0-budget')).toHaveTextContent(en.availability.postingBudget('120 %'))
-    expect(screen.getByRole('meter', { name: en.availability.postingBudget('120 %') })).toHaveAttribute('aria-valuenow', '1')
+    expect(screen.queryByText(/Error budget:/)).toBeNull()
   })
 
   it('shows the base load and in how many minutes it changes, the base alone while it is constant, and nothing without an answer from the clients', async () => {

@@ -5,6 +5,8 @@ import com.ledgerlab.control.periods.PeriodLoad;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -92,6 +94,18 @@ public class AvailabilityRepository {
         long postedPlanned,
         long postedOutside,
         @Nullable Instant postingSince
+    ) {
+    }
+
+    /** One UTC day: its measured and judged-bad minutes, and its posted transfers as {@link Counts} splits them. */
+    public record DayCounts(
+        LocalDate day,
+        long measuredMinutes,
+        long badMinutes,
+        long postedJudged,
+        long postedWithinTypical,
+        long postedWithinTail,
+        long postedLeftOut
     ) {
     }
 
@@ -203,6 +217,46 @@ public class AvailabilityRepository {
                 rs.getLong("posted_judged"), rs.getLong("posted_within_typical"), rs.getLong("posted_within_tail"),
                 rs.getLong("posted_planned"), rs.getLong("posted_outside"), instantOrNull(rs.getTimestamp("posting_since"))))
             .single();
+    }
+
+    /**
+     * As {@link #countsSince}, by UTC day: the hours added up so far and the minutes after the last of them. Days without
+     * a measured minute are left out.
+     */
+    public List<DayCounts> byDaySince(Instant from, Rules rules) {
+        return withRules(jdbc.sql(
+            """
+            WITH recent AS (
+                SELECT date_trunc('day', c.minute, 'UTC') AS day, count(*) AS measured,
+                       count(*) FILTER (WHERE c.bad AND NOT c.planned AND NOT c.outside) AS bad,
+                       %s
+                FROM (%s) c
+                WHERE c.minute >= (SELECT coalesce(max(hour) + interval '1 hour', CAST('-infinity' AS timestamptz)) FROM availability_hours)
+                  AND c.minute >= CAST(:from AS timestamptz)
+                GROUP BY 1
+            ), older AS (
+                SELECT date_trunc('day', hour, 'UTC') AS day, sum(measured_minutes) AS measured, sum(bad_minutes) AS bad,
+                       sum(posted_judged) AS posted_judged, sum(posted_within_typical) AS posted_within_typical,
+                       sum(posted_within_tail) AS posted_within_tail, sum(posted_planned) AS posted_planned,
+                       sum(posted_outside) AS posted_outside
+                FROM availability_hours WHERE hour >= CAST(:from AS timestamptz)
+                GROUP BY 1
+            ), days AS (
+                SELECT day, measured, bad, posted_judged, posted_within_typical, posted_within_tail, posted_planned, posted_outside FROM recent
+                UNION ALL
+                SELECT day, measured, bad, posted_judged, posted_within_typical, posted_within_tail, posted_planned, posted_outside FROM older
+            )
+            SELECT day, sum(measured) AS measured, sum(bad) AS bad, sum(posted_judged) AS posted_judged,
+                   sum(posted_within_typical) AS posted_within_typical, sum(posted_within_tail) AS posted_within_tail,
+                   sum(posted_planned) + sum(posted_outside) AS posted_left_out
+            FROM days GROUP BY day HAVING sum(measured) > 0 ORDER BY day
+            """.formatted(POSTED_SUMS, CLASSIFIED_MINUTES)), rules)
+            .param("from", Timestamp.from(from))
+            .query((rs, rowNum) -> new DayCounts(
+                rs.getTimestamp("day").toInstant().atOffset(ZoneOffset.UTC).toLocalDate(), rs.getLong("measured"), rs.getLong("bad"),
+                rs.getLong("posted_judged"), rs.getLong("posted_within_typical"), rs.getLong("posted_within_tail"),
+                rs.getLong("posted_left_out")))
+            .list();
     }
 
     private static JdbcClient.StatementSpec withRules(JdbcClient.StatementSpec statement, Rules rules) {

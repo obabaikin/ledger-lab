@@ -58,7 +58,7 @@ export const bank = (changes: Partial<BankView> = {}): BankView => ({
     restarted: true,
   },
   pods: null,
-  slo: { target: 0.999, windowDays: 30, measuredMinutes: 1000, badMinutes: 17, budgetMinutes: 43, plannedMinutes: 12, outsideMinutes: 2, availability: 0.9983, busyShare: 0.004 },
+  slo: { target: 0.999, windowDays: 30, measuredMinutes: 1000, badMinutes: 17, budgetMinutes: 43, plannedMinutes: 12, outsideMinutes: 2, availability: 0.9983, busyShare: 0.004, days: [] },
   load: { baseTps: 400, nextChangeAt: '2026-11-11T10:35:00Z' },
   posting: {
     windowDays: 30,
@@ -67,8 +67,8 @@ export const bank = (changes: Partial<BankView> = {}): BankView => ({
     planned: 12_000,
     outside: 3_400,
     targets: [
-      { thresholdMs: 3000, target: 0.95, within: 999_700, share: 0.9997, budgetUsed: 0.006 },
-      { thresholdMs: 5000, target: 0.99, within: 999_800, share: 0.9998, budgetUsed: 0.02 },
+      { thresholdMs: 3000, target: 0.95, within: 999_700, share: 0.9997, budgetUsed: 0.006, days: [] },
+      { thresholdMs: 5000, target: 0.99, within: 999_800, share: 0.9998, budgetUsed: 0.02, days: [] },
     ],
   },
   maintenance: null,

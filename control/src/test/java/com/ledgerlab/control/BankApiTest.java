@@ -269,16 +269,18 @@ class BankApiTest extends BankIntegrationTest {
 
         var bank = bank();
 
+        var day = jdbc.sql("SELECT to_char(date_trunc('day', now() - interval '2 days', 'UTC') AT TIME ZONE 'UTC', 'YYYY-MM-DD')")
+            .query(String.class).single();
         assertThat(bank.get("slo")).isEqualTo(mapOf(
             "target", 0.999, "windowDays", 30, "measuredMinutes", 60, "badMinutes", 13, "budgetMinutes", 43, "plannedMinutes", 5,
-            "outsideMinutes", 3, "availability", 39.0 / 52, "busyShare", 0.02));
+            "outsideMinutes", 3, "availability", 39.0 / 52, "busyShare", 0.02, "days", List.of(mapOf("day", day, "count", 13))));
         var posting = (Map<?, ?>) bank.get("posting");
         assertThat(posting.get("since")).isNotNull();
         assertThat(Arrays.asList(posting.get("windowDays"), posting.get("judged"), posting.get("planned"), posting.get("outside")))
             .isEqualTo(List.of(30, 1000, 200, 300));
         assertThat(posting.get("targets")).isEqualTo(List.of(
-            mapOf("thresholdMs", 3000, "target", 0.95, "within", 960, "share", 0.96, "budgetUsed", 0.8),
-            mapOf("thresholdMs", 5000, "target", 0.99, "within", 995, "share", 0.995, "budgetUsed", 0.5)));
+            mapOf("thresholdMs", 3000, "target", 0.95, "within", 960, "share", 0.96, "budgetUsed", 0.8, "days", List.of(mapOf("day", day, "count", 40))),
+            mapOf("thresholdMs", 5000, "target", 0.99, "within", 995, "share", 0.995, "budgetUsed", 0.5, "days", List.of(mapOf("day", day, "count", 5)))));
     }
 
     @Test

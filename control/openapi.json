@@ -392,6 +392,22 @@
         "required" : [ "closesAt", "end", "start" ],
         "type" : "object"
       },
+      "DayCount" : {
+        "description" : "What used the budget in one UTC day.",
+        "properties" : {
+          "count" : {
+            "description" : "Bad minutes, or transfers over the threshold, that were judged; the planned and outside left out.",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "day" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        },
+        "required" : [ "count", "day" ],
+        "type" : "object"
+      },
       "GatewayCounts" : {
         "description" : "The period's transfers as the gateway counts them.",
         "properties" : {
@@ -1108,6 +1124,13 @@
             "format" : "double",
             "type" : [ "number", "null" ]
           },
+          "days" : {
+            "description" : "Judged bad minutes by UTC day, the last 30 days at most, oldest first; a day without a measured minute is left out.",
+            "items" : {
+              "$ref" : "#/components/schemas/DayCount"
+            },
+            "type" : "array"
+          },
           "measuredMinutes" : {
             "description" : "Minutes with requests in the window; a minute without any is not measured.",
             "format" : "int64",
@@ -1132,7 +1155,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "availability", "badMinutes", "budgetMinutes", "busyShare", "measuredMinutes", "outsideMinutes", "plannedMinutes", "target", "windowDays" ],
+        "required" : [ "availability", "badMinutes", "budgetMinutes", "busyShare", "days", "measuredMinutes", "outsideMinutes", "plannedMinutes", "target", "windowDays" ],
         "type" : "object"
       },
       "StatementTotals" : {
@@ -1167,6 +1190,13 @@
             "format" : "double",
             "type" : [ "number", "null" ]
           },
+          "days" : {
+            "description" : "Judged transfers over the threshold by UTC day, the last 30 days at most, oldest first; a day without a counted transfer is left out.",
+            "items" : {
+              "$ref" : "#/components/schemas/DayCount"
+            },
+            "type" : "array"
+          },
           "share" : {
             "description" : "within / judged; null before the first judged transfer.",
             "format" : "double",
@@ -1186,7 +1216,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "budgetUsed", "share", "target", "thresholdMs", "within" ],
+        "required" : [ "budgetUsed", "days", "share", "target", "thresholdMs", "within" ],
         "type" : "object"
       },
       "TransferIds" : {
