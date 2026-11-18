@@ -93,7 +93,7 @@ postgres:
   memory: 912Mi
   # The indexes of the transfers are written in random order, so they must stay cached.
   sharedBuffers: 384MB
-  # The services' pools take 90 (gateway 40, ledger 2 x 10, control 10, reporting 10, generator 6, the exporter and the
+  # The services' pools take 80 (gateway 30, ledger 2 x 10, control 10, reporting 10, generator 6, the exporter and the
   # operator); while the gateway is replaced, its old and new pod hold their pools at once.
   maxConnections: 150
   # Which statements take the time (pg_stat_statements, read by the exporter), and any statement slower than this in
@@ -151,8 +151,8 @@ services:
     # Two: a third added no throughput, the ledger waits on row locks in Postgres, not on its own CPU (about
     # 120m per pod at 1300 TPS, measured on the server), and its memory is needed while the gateway is replaced.
     replicas: 2
-    # A batch of 100 transfers per consumer, three consumers per pod.
-    memory: 750Mi
+    # A batch of 100 transfers per consumer, three consumers per pod. Its peak on the server was 392Mi.
+    memory: 700Mi
   gateway:
     module: gateway
     port: 8081
@@ -165,7 +165,9 @@ services:
     terminationGraceSeconds: 40
     # The Service stops sending to the old pod before it stops taking requests.
     preStopSeconds: 5
-    memory: 1568Mi
+    # 50Mi more for the larger in-flight limit, taken from the two ledger pods: the server has no room for more while the
+    # gateway is replaced.
+    memory: 1618Mi
     # The template sets the heap to the memory less this, fixed from the start. Outside the heap the JVM itself took
     # about 290 MiB at any load (Native Memory Tracking: G1 72, metaspace 81, JIT code up to 69, symbols 30, classes
     # 25, threads 7), and glibc's malloc took more under load and kept it (measured on the server). A heap of a share
@@ -181,9 +183,9 @@ services:
       # glibc keeps an arena per busy thread and gives little back: up to 135 MiB outside the heap with its default,
       # 71 with two (measured on the server).
       MALLOC_ARENA_MAX: "2"
-      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "40"
-      # 200 waiting for the batch writers met 503 busy at 300 TPS on the server; 1000 took 2000 TPS without them.
-      GATEWAY_ADMISSION_MAXCONCURRENT: "1000"
+      # The pool's peak on the server was 28: the two batch writers, the result consumers, the outbox and the reads of
+      # waiting clients.
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "30"
   generator:
     module: generator
     port: 8082

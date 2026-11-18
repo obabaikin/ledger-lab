@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
 
 import com.ledgerlab.gateway.api.GatewayErrors;
+import com.ledgerlab.gateway.service.RefusalReason;
 import com.ledgerlab.gateway.service.TransferService;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -36,7 +37,7 @@ class AdmissionTest extends IntegrationTest {
             held.await();
             return call.callRealMethod();
         }).when(service).acceptAll(anyList());
-        var refusedBefore = registry.counter("gateway.transfers", "outcome", "refused").count();
+        var refusedBefore = registry.counter("gateway.transfers", "outcome", "refused", RefusalReason.TAG, RefusalReason.ADMISSION.tagValue()).count();
         var refusedId = UUID.randomUUID();
 
         try (var pool = Executors.newSingleThreadExecutor()) {
@@ -48,7 +49,7 @@ class AdmissionTest extends IntegrationTest {
             assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
             assertThat(refused.getBody().get("error")).isEqualTo(GatewayErrors.BUSY);
             assertThat(refused.getHeaders().getFirst("Retry-After")).isEqualTo("1");
-            assertThat(registry.counter("gateway.transfers", "outcome", "refused").count()).isEqualTo(refusedBefore + 1);
+            assertThat(registry.counter("gateway.transfers", "outcome", "refused", RefusalReason.TAG, RefusalReason.ADMISSION.tagValue()).count()).isEqualTo(refusedBefore + 1);
             assertThat(status(refusedId).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 
             held.countDown();

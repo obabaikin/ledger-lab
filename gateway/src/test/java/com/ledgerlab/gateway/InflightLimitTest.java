@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.ledgerlab.gateway.api.GatewayErrors;
+import com.ledgerlab.gateway.service.RefusalReason;
 import com.ledgerlab.gateway.service.ResultWaiters;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -24,7 +25,7 @@ class InflightLimitTest extends IntegrationTest {
     @Test
     @DisplayName("requests over the in-flight limit get 503 busy with Retry-After, waiting ones included")
     void requests_over_the_in_flight_limit_get_503_busy_with_Retry_After_waiting_ones_included() throws Exception {
-        var refusedBefore = registry.counter("gateway.transfers", "outcome", "refused").count();
+        var refusedBefore = registry.counter("gateway.transfers", "outcome", "refused", RefusalReason.TAG, RefusalReason.INFLIGHT.tagValue()).count();
         var refusedId = UUID.randomUUID();
 
         try (var pool = Executors.newSingleThreadExecutor()) {
@@ -37,7 +38,7 @@ class InflightLimitTest extends IntegrationTest {
             assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
             assertThat(refused.getBody().get("error")).isEqualTo(GatewayErrors.BUSY);
             assertThat(refused.getHeaders().getFirst("Retry-After")).isEqualTo("1");
-            assertThat(registry.counter("gateway.transfers", "outcome", "refused").count()).isEqualTo(refusedBefore + 1);
+            assertThat(registry.counter("gateway.transfers", "outcome", "refused", RefusalReason.TAG, RefusalReason.INFLIGHT.tagValue()).count()).isEqualTo(refusedBefore + 1);
             assertThat(status(refusedId).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
             assertThat(waiting.get().getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         }

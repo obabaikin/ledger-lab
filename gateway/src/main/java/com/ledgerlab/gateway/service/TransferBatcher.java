@@ -5,6 +5,7 @@ import com.ledgerlab.gateway.domain.Transfer;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.lang.reflect.UndeclaredThrowableException;
@@ -32,8 +33,11 @@ import org.springframework.stereotype.Component;
 public class TransferBatcher {
 
     public static final String WRITER_THREAD = "accept-writer-";
+    public static final String COMMIT_METRIC = "gateway.accept.commit";
     private static final Duration STOP_WAIT = Duration.ofSeconds(5);
     private static final double[] BATCH_PERCENTILES = {0.5, 0.99};
+    private static final Duration SHORTEST_COMMIT = Duration.ofMillis(1);
+    private static final Duration LONGEST_COMMIT = Duration.ofSeconds(60);
 
     private static final Logger log = LoggerFactory.getLogger(TransferBatcher.class);
 
@@ -42,6 +46,7 @@ public class TransferBatcher {
     private final int maxBatch;
     private final Duration answerTimeout;
     private final DistributionSummary batchSizes;
+    private final Timer commits;
     private final Counter refusedAsStopping;
     private final List<Thread> writers;
 
@@ -64,6 +69,12 @@ public class TransferBatcher {
         this.batchSizes = DistributionSummary.builder("gateway.accept.batch.size")
             .description("submissions committed in one transaction")
             .publishPercentiles(BATCH_PERCENTILES)
+            .register(registry);
+        this.commits = Timer.builder(COMMIT_METRIC)
+            .description("time of one write to the database, from its start to the commit or the failure; a batch whose data was refused adds one per row written again")
+            .publishPercentileHistogram()
+            .minimumExpectedValue(SHORTEST_COMMIT)
+            .maximumExpectedValue(LONGEST_COMMIT)
             .register(registry);
         this.refusedAsStopping = Counter.builder("gateway.transfers").tag("outcome", "stopping").register(registry);
         this.writers = IntStream.range(0, props.accept().writers())
@@ -151,7 +162,7 @@ public class TransferBatcher {
     private void write(List<Pending> batch) {
         List<AcceptOutcome> outcomes;
         try {
-            outcomes = writeBatch.apply(batch.stream().map(Pending::request).toList());
+            outcomes = timedWrite(batch);
         } catch (DataIntegrityViolationException e) {
             if (batch.size() == 1) {
                 batch.getFirst().result().completeExceptionally(e);
@@ -167,6 +178,15 @@ public class TransferBatcher {
                 case AcceptOutcome.Accepted(var transfer) -> result.complete(transfer);
                 case AcceptOutcome.Refused(var cause) -> result.completeExceptionally(cause);
             }
+        }
+    }
+
+    private List<AcceptOutcome> timedWrite(List<Pending> batch) {
+        var started = Timer.start();
+        try {
+            return writeBatch.apply(batch.stream().map(Pending::request).toList());
+        } finally {
+            started.stop(commits);
         }
     }
 }

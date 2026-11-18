@@ -19,18 +19,27 @@ public class TransferAdmission {
     private final Semaphore inFlight;
     private final Semaphore permits;
     private final long waitNanos;
-    private final Counter refused;
+    private final Counter refusedInFlight;
+    private final Counter refusedAdmission;
 
     public TransferAdmission(GatewayProperties props, MeterRegistry registry) {
         this.inFlight = new Semaphore(props.inflight().maxConcurrent());
         this.permits = new Semaphore(props.admission().maxConcurrent());
         this.waitNanos = props.admission().waitLimit().toNanos();
-        this.refused = Counter.builder("gateway.transfers").tag("outcome", "refused").register(registry);
+        this.refusedInFlight = refusedCounter(registry, RefusalReason.INFLIGHT);
+        this.refusedAdmission = refusedCounter(registry, RefusalReason.ADMISSION);
+    }
+
+    private static Counter refusedCounter(MeterRegistry registry, RefusalReason reason) {
+        return Counter.builder("gateway.transfers")
+            .tag("outcome", "refused")
+            .tag(RefusalReason.TAG, reason.tagValue())
+            .register(registry);
     }
 
     public <T> T enter(InterruptibleSupplier<T> block) throws InterruptedException {
         if (!inFlight.tryAcquire()) {
-            refused.increment();
+            refusedInFlight.increment();
             throw new GatewayBusyException();
         }
         try {
@@ -42,7 +51,7 @@ public class TransferAdmission {
 
     public <T> T admit(InterruptibleSupplier<T> block) throws InterruptedException {
         if (!permits.tryAcquire(waitNanos, TimeUnit.NANOSECONDS)) {
-            refused.increment();
+            refusedAdmission.increment();
             throw new GatewayBusyException();
         }
         try {

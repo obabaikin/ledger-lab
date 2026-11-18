@@ -36,7 +36,7 @@ server:
   shutdown: graceful
   tomcat:
     # Above the in-flight limit, so a submission over it gets 503 busy instead of waiting for a connection.
-    max-connections: 3000
+    max-connections: 3500
 
 gateway:
   transfers-topic: transfers
@@ -56,12 +56,14 @@ gateway:
   retry-after: 1s
   close-lock-timeout: 5s
   inflight:
-    # An open submission holds about 120 KB of heap (heap dump on the server); 1500 is about 180 MB of the gateway's heap.
-    max-concurrent: 1500
+    # In a stall of the database 1500 open submissions took the live heap from about 180 to 650 MB on the server, about
+    # 0.3 MB each; 2000 leaves room in the heap the chart gives the gateway.
+    max-concurrent: 2000
   admission:
-    # About three times what 300 TPS keeps in flight (0.1 s each); measured against the server in a trial.
-    max-concurrent: 100
-    wait: 200ms
+    # Rides out about two seconds of a stalled commit at 700 TPS; the in-flight limit holds these and the ones waiting.
+    max-concurrent: 1500
+    # Two seconds still met 503 busy at the hour's stalls on the server, and those waiting held places in flight.
+    wait: 1s
   accept:
     batch-size: 200
     # More writers keep the database busy while one commits; as many as connections would undo the batching.

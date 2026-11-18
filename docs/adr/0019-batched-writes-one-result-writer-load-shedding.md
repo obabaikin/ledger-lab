@@ -43,9 +43,9 @@ because one by one would only multiply the failure. A writer survives any error 
 request waits at most `gateway.accept.answer-timeout` (5 s) for its answer; past that it is a 5xx,
 unknown to the client.
 
-**Overload is shed at the edge.** At most `gateway.inflight.max-concurrent` (1500) submissions are
+**Overload is shed at the edge.** At most `gateway.inflight.max-concurrent` (2000) submissions are
 open at once, a wait for the result included; one more is answered `503 busy` with `Retry-After` at
-once, before anything is written. Tomcat takes more connections than that (3000), so the refusal
+once, before anything is written. Tomcat takes more connections than that (3500), so the refusal
 comes from the gateway rather than from a connection that waits. The admission bound on inserts
 (ADR 0006) stays inside it.
 
@@ -57,4 +57,5 @@ comes from the gateway rather than from a connection that waits. The admission b
 - The client contract does not change: the same answers, now from a shared transaction. A request's
   answer waits for its batch's commit, at most `answer-timeout`.
 - A woken request costs up to five reads instead of a write.
-- The open-submission limit sizes the gateway's heap: 1500 open submissions take about 180 MB.
+- The open-submission limit sizes the gateway's heap: in a stall of the database on the server, 1500 open
+  submissions took the live heap from about 180 to 650 MB, about 0.3 MB each.

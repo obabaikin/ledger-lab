@@ -23,6 +23,9 @@ import org.springframework.http.HttpStatusCode;
 
 class BatchAcceptTest extends IntegrationTest {
 
+    /** As many as the admission limit was when the test was written; more only slow a small test database down. */
+    private static final int MAX_CLIENTS = 100;
+
     private static final int ROUNDS = 10;
     private static final int KEYS = 200;
 
@@ -111,7 +114,7 @@ class BatchAcceptTest extends IntegrationTest {
 
         // No more clients than admission permits: a slow machine must not turn this into a test of 503 busy.
         var statuses = new ArrayList<HttpStatusCode>();
-        try (var pool = Executors.newFixedThreadPool(props.admission().maxConcurrent())) {
+        try (var pool = Executors.newFixedThreadPool(Math.min(props.admission().maxConcurrent(), MAX_CLIENTS))) {
             var submitting = new ArrayList<Future<HttpStatusCode>>();
             var twice = new ArrayList<>(ids);
             twice.addAll(ids);
