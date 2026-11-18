@@ -43,9 +43,9 @@ because one by one would only multiply the failure. A writer survives any error 
 request waits at most `gateway.accept.answer-timeout` (5 s) for its answer; past that it is a 5xx,
 unknown to the client.
 
-**Overload is shed at the edge.** At most `gateway.inflight.max-concurrent` (1500) submissions are
+**Overload is shed at the edge.** At most `gateway.inflight.max-concurrent` (2000) submissions are
 open at once, a wait for the result included; one more is answered `503 busy` with `Retry-After` at
-once, before anything is written. Tomcat takes more connections than that (3000), so the refusal
+once, before anything is written. Tomcat takes more connections than that (3500), so the refusal
 comes from the gateway rather than from a connection that waits. The admission bound on inserts
 (ADR 0006) stays inside it.
 

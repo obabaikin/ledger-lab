@@ -141,6 +141,25 @@ class TransferBatcherTest {
     }
 
     @Test
+    @DisplayName("every batch write is timed, a failed one included")
+    void every_batch_write_is_timed_a_failed_one_included() throws Exception {
+        answering(requests -> {
+            if (requests.size() > 1) {
+                throw new CannotCreateTransactionException("no connection");
+            }
+            return allAccepted(requests);
+        });
+        batcher();
+
+        var gathered = submitBehindFirst(3);
+        for (var future : gathered) {
+            assertThatThrownBy(() -> future.get(5, TimeUnit.SECONDS)).hasCauseInstanceOf(CannotCreateTransactionException.class);
+        }
+
+        assertThat(registry.timer(TransferBatcher.COMMIT_METRIC).count()).isEqualTo(2);
+    }
+
+    @Test
     void a_writer_outlives_an_error_of_its_batch_and_answers_the_next_one() throws Exception {
         answering(requests -> {
             if (requests.size() > 1) {

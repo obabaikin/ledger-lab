@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ledgerlab.gateway.service.GatewayBusyException;
+import com.ledgerlab.gateway.service.RefusalReason;
 import com.ledgerlab.gateway.service.TransferAdmission;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
@@ -39,22 +40,33 @@ class TransferAdmissionTest {
     }
 
     @Test
-    void with_every_permit_held_the_next_submission_is_refused_as_busy() throws InterruptedException {
-        var admission = new TransferAdmission(PROPS, new SimpleMeterRegistry());
+    void with_every_permit_held_the_next_submission_is_refused_as_busy_and_counted_as_refused_by_admission() throws InterruptedException {
+        var registry = new SimpleMeterRegistry();
+        var admission = new TransferAdmission(PROPS, registry);
 
         admission.admit(() -> assertThatThrownBy(() -> admission.admit(() -> "second")).isInstanceOf(GatewayBusyException.class));
+
+        assertThat(refused(registry, RefusalReason.ADMISSION)).isEqualTo(1);
+        assertThat(refused(registry, RefusalReason.INFLIGHT)).isZero();
     }
 
     @Test
     @DisplayName("an open submission over the in-flight limit is refused at once, and a finished one gives its place back")
     void an_open_submission_over_the_in_flight_limit_is_refused_at_once_and_a_finished_one_gives_its_place_back() throws InterruptedException {
-        var admission = new TransferAdmission(PROPS, new SimpleMeterRegistry());
+        var registry = new SimpleMeterRegistry();
+        var admission = new TransferAdmission(PROPS, registry);
 
         admission.enter(() -> assertThatThrownBy(() -> admission.enter(() -> "second")).isInstanceOf(GatewayBusyException.class));
+        assertThat(refused(registry, RefusalReason.INFLIGHT)).isEqualTo(1);
+        assertThat(refused(registry, RefusalReason.ADMISSION)).isZero();
         assertThatThrownBy(() -> admission.enter(() -> {
             throw new IllegalStateException("ledger down");
         })).isInstanceOf(IllegalStateException.class);
 
         assertThat(admission.enter(() -> "taken")).isEqualTo("taken");
+    }
+
+    private static double refused(SimpleMeterRegistry registry, RefusalReason reason) {
+        return registry.counter("gateway.transfers", "outcome", "refused", RefusalReason.TAG, reason.tagValue()).count();
     }
 }
