@@ -57,4 +57,5 @@ comes from the gateway rather than from a connection that waits. The admission b
 - The client contract does not change: the same answers, now from a shared transaction. A request's
   answer waits for its batch's commit, at most `answer-timeout`.
 - A woken request costs up to five reads instead of a write.
-- The open-submission limit sizes the gateway's heap: 1500 open submissions take about 180 MB.
+- The open-submission limit sizes the gateway's heap: in a stall of the database on the server, 1500 open
+  submissions took the live heap from about 180 to 650 MB, about 0.3 MB each.

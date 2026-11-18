@@ -71,7 +71,7 @@ public class TransferBatcher {
             .publishPercentiles(BATCH_PERCENTILES)
             .register(registry);
         this.commits = Timer.builder(COMMIT_METRIC)
-            .description("time to write one batch, from its start to the commit or the failure")
+            .description("time of one write to the database, from its start to the commit or the failure; a batch whose data was refused adds one per row written again")
             .publishPercentileHistogram()
             .minimumExpectedValue(SHORTEST_COMMIT)
             .maximumExpectedValue(LONGEST_COMMIT)
