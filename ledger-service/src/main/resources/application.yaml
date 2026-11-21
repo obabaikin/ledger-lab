@@ -17,9 +17,16 @@ spring:
     consumer:
       group-id: ledger
       auto-offset-reset: earliest
+      # A batch holds the locks of all its senders until it commits.
+      max-poll-records: 100
       properties:
-        # A batch holds the locks of all its senders until it commits.
-        max.poll.records: 100
+        # An instance that stops leaves the group and hands over only its own partitions; the others keep reading.
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+        # A crashed instance's partitions move after this; well above the ledger's longest GC pause (0.7 s).
+        session.timeout.ms: 10000
+        # Members learn of a rebalance from a heartbeat, and a cooperative one takes two rounds: at 3 s a new instance
+        # took about 5 s to read.
+        heartbeat.interval.ms: 1000
     producer:
       acks: all
     listener:
@@ -38,8 +45,12 @@ ledger:
     send-timeout: 30s
   consumer:
     retry-backoff: 500ms
-    # Set per instance in Kubernetes (the StatefulSet pod name); unset, the consumer joins the group dynamically.
-    instance-id: ${LEDGER_INSTANCE_ID:}
+    # Batches posted and rolled back before the consumer joins the group, so the partitions it takes over meet a compiled path.
+    warm-up:
+      rounds: 300
+      max-duration: 20s
+    # Without partitions by then the instance reports ready anyway: reconciliation needs no Kafka (ADR 0012).
+    assignment-wait: 2m
   accounts:
     # The generator is told the same count; the last ones are blocked.
     count: 100000

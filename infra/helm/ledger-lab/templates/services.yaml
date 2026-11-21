@@ -114,11 +114,8 @@ spec:
             {{- if mod $root.Values.kafka.partitions $service.replicas }}
             {{- fail "kafka.partitions must divide evenly among the ledger's replicas" }}
             {{- end }}
-            # Consumers beyond one per partition get none, and the assignor gives them to the first instances by name.
+            # Consumers beyond one per partition would get none.
             - {name: SPRING_KAFKA_LISTENER_CONCURRENCY, value: {{ div $root.Values.kafka.partitions $service.replicas | quote }}}
-            - name: LEDGER_INSTANCE_ID
-              valueFrom:
-                fieldRef: {fieldPath: metadata.name}
             - {name: LEDGER_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
             - {name: LEDGER_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
             # The hot accounts' surplus goes to the pool once a period.

@@ -46,7 +46,8 @@ public class TransferConsumer {
     }
 
     // The id lets the readiness check find this container; without idIsGroup = false it would also replace the group id.
-    @KafkaListener(id = LISTENER_ID, idIsGroup = false, topics = "${ledger.topic.name}", batch = "true")
+    // Started by ConsumerWarmUp, so a new instance joins the group warm.
+    @KafkaListener(id = LISTENER_ID, idIsGroup = false, topics = "${ledger.topic.name}", batch = "true", autoStartup = "false")
     public void onTransfers(List<String> payloads) {
         var commands = new ArrayList<TransferCommand>(payloads.size());
         for (var payload : payloads) {

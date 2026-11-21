@@ -12,6 +12,8 @@ ledger:
     send-timeout: 30s
   consumer:
     retry-backoff: 200ms
+    warm-up:
+      rounds: 20
   accounts:
     count: 10
     opening-balance-cents: 100000
