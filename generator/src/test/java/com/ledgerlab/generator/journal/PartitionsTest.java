@@ -86,7 +86,7 @@ class PartitionsTest extends IntegrationTest {
             p.maxInFlight(), p.load(), p.accounts(), p.journal(),
             new GeneratorProperties.Periods(Duration.ofMinutes(1), q.retention(), q.partitionsAhead(), q.maintenanceInterval(), q.lockTimeout(),
                 q.unpartitionedDeleteBatch()),
-            p.reconciliation(), p.totals(), p.profile());
+            p.reconciliation(), p.totals(), p.lease(), p.profile());
         var restarted = new Partitions(partitionRepository, shorter, Clock.fixed(now, ZoneOffset.UTC), tx, new SimpleMeterRegistry());
 
         assertThatThrownBy(restarted::afterPropertiesSet)

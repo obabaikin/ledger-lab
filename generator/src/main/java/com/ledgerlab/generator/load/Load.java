@@ -62,6 +62,7 @@ public class Load implements SmartLifecycle {
     public static final String KIND_TAG = "kind";
     public static final String SKIPPED_METRIC = "generator.load.skipped";
     public static final String NOT_JOURNALED_METRIC = "generator.load.not-journaled";
+    public static final int PHASE = JournalWriter.PHASE + 1;
 
     private static final Duration PACER_TICK = Duration.ofMillis(1);
     /** A send that ended without an answer, possibly after the request went out: it cannot count as failed. */
@@ -83,6 +84,7 @@ public class Load implements SmartLifecycle {
     private final ClientJournal journal;
     private final ResponseMinutes minutes;
     private final BaseSchedule schedule;
+    private final SendPermission permission;
     private final Clock clock;
     private final double duplicateShare;
     private final List<Duration> duplicateDelays;
@@ -128,13 +130,13 @@ public class Load implements SmartLifecycle {
 
     @Autowired
     public Load(
-        GeneratorProperties props, GatewayClient client, ClientJournal journal, ResponseMinutes minutes, BaseSchedule schedule, Clock clock,
-        MeterRegistry registry
+        GeneratorProperties props, GatewayClient client, ClientJournal journal, ResponseMinutes minutes, BaseSchedule schedule,
+        SendPermission permission, Clock clock, MeterRegistry registry
     ) {
         // The slowest open request ends by its own timeouts: connecting, then the wait plus the request timeout.
         // No retry starts after a stop, so backoffs only need the margin.
         this(
-            props, client, journal, minutes, schedule, clock, registry,
+            props, client, journal, minutes, schedule, permission, clock, registry,
             props.connectTimeout().plus(props.load().waitTimeout()).plus(props.requestTimeout()).plus(STOP_GRACE_MARGIN));
     }
 
@@ -144,6 +146,7 @@ public class Load implements SmartLifecycle {
         ClientJournal journal,
         ResponseMinutes minutes,
         BaseSchedule schedule,
+        SendPermission permission,
         Clock clock,
         MeterRegistry registry,
         Duration stopGrace
@@ -161,6 +164,7 @@ public class Load implements SmartLifecycle {
         this.journal = journal;
         this.minutes = minutes;
         this.schedule = schedule;
+        this.permission = permission;
         this.clock = clock;
         this.duplicateShare = duplicates.duplicateShare();
         this.duplicateDelays = duplicates.duplicateDelays();
@@ -227,6 +231,12 @@ public class Load implements SmartLifecycle {
             while (running) {
                 Thread.sleep(PACER_TICK);
                 var now = System.nanoTime();
+                if (!permission.granted()) {
+                    // Another instance sends; when this one takes over, it starts at the pace, with nothing owed.
+                    due = 0.0;
+                    last = now;
+                    continue;
+                }
                 var tps = targetTps(now, schedule.baseAt(clock.instant()));
                 // After a stall the pacer does not send all it missed at once: at most a second's worth.
                 due = Math.min(due + tps * (now - last) / NANOS_PER_SECOND, tps);
@@ -341,12 +351,12 @@ public class Load implements SmartLifecycle {
 
     @Override
     public int getPhase() {
-        return JournalWriter.PHASE + 1;
+        return PHASE;
     }
 
     private void submitOne() {
-        // A submission launched just before a stop may start after it; it must not send.
-        if (!running) {
+        // A submission launched just before a stop, or before the lease went to another instance, must not send.
+        if (!running || !permission.granted()) {
             return;
         }
         var transfer = profile.next();

@@ -20,6 +20,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -43,9 +44,13 @@ class LoadTest {
     }
 
     private Load load(TestData.Settings settings, Duration stopGrace, Clock clock) {
+        return load(settings, stopGrace, clock, SendPermission.ALWAYS);
+    }
+
+    private Load load(TestData.Settings settings, Duration stopGrace, Clock clock, SendPermission permission) {
         var props = settings.build();
         var schedule = new BaseSchedule(props);
-        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props, schedule), schedule, clock, registry, stopGrace);
+        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props, schedule), schedule, permission, clock, registry, stopGrace);
         return load;
     }
 
@@ -89,6 +94,24 @@ class LoadTest {
         assertThat(journal.outcomes.values().stream().filter(it -> it.bankStatus() == TransferStatus.POSTED).count()).isEqualTo(status.posted());
         assertThat(journal.outcomes.values().stream().filter(it -> it.bankStatus() == TransferStatus.REJECTED).count()).isEqualTo(status.rejected());
         assertThat(status.rejectedByReason().values().stream().mapToLong(Long::longValue).sum()).isEqualTo(status.rejected());
+    }
+
+    @Test
+    void sends_nothing_while_another_instance_holds_the_lease_and_starts_at_the_pace_without_catching_up_once_it_holds_it() throws Exception {
+        try (var gateway = new FakeGateway()) {
+            var granted = new AtomicBoolean(false);
+            var load = load(TestData.settings(gateway.url()).tps(200), DEFAULT_GRACE, Clock.systemUTC(), granted::get);
+
+            load.begin();
+            Thread.sleep(1_000);
+            assertThat(load.status().requested()).isZero();
+            granted.set(true);
+            Thread.sleep(1_000);
+            load.stop();
+
+            assertThat(load.status().requested()).isBetween(150L, 220L);
+            assertThat(gateway.attemptsById).hasSize((int) load.status().requested());
+        }
     }
 
     @Test

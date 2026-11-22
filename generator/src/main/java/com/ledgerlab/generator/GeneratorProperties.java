@@ -25,6 +25,7 @@ public record GeneratorProperties(
     Periods periods,
     Reconciliation reconciliation,
     Totals totals,
+    Lease lease,
     ProfileProperties profile
 ) {
     /**
@@ -120,6 +121,26 @@ public record GeneratorProperties(
 
     /** The clients' totals are read every {@link #readInterval} and their increments folded every {@link #rollupInterval}. */
     public record Totals(Duration readInterval, Duration rollupInterval) {
+    }
+
+    /**
+     * One instance sends at a time. {@link #owner} names this instance in the lease, which lasts {@link #duration}; the holder
+     * renews it every {@link #renewEvery}, the others try to take it every {@link #acquireEvery}. The holder sends only until
+     * {@link #sendWindow} after it sent its last successful renewal: shorter than the lease, so a holder cut off from the
+     * database is silent before another may take over.
+     */
+    public record Lease(String owner, Duration duration, Duration renewEvery, Duration acquireEvery, Duration sendWindow) {
+        public Lease {
+            if (owner.isBlank()) {
+                throw new IllegalArgumentException("generator.lease.owner must not be blank");
+            }
+            if (sendWindow.compareTo(duration) >= 0) {
+                throw new IllegalArgumentException("generator.lease.send-window must be shorter than generator.lease.duration");
+            }
+            if (renewEvery.compareTo(sendWindow) >= 0) {
+                throw new IllegalArgumentException("generator.lease.renew-every must be shorter than generator.lease.send-window");
+            }
+        }
     }
 
     /**

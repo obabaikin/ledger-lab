@@ -190,7 +190,7 @@ services:
     module: generator
     port: 8082
     replicas: 1
-    # The clients go on sending while the new pod warms up; two at once share the journal's totals.
+    # The new pod starts beside the old one and stays silent until the old one lets go of the sender lease.
     rollingUpdate: true
     # The bank's clients. Sized when the journals of a run stayed on the heap (at most 179 MiB live at 279,000 entries,
     # measured on the server); the journal is in Postgres now, and the heap holds the requests in flight.
@@ -199,8 +199,8 @@ services:
     # limited the same way.
     nativeReserve: 450Mi
     # A crash of the JVM leaves its error log here (a SIGSEGV on 2026-11-17 took it away with the pod); it lives as long
-    # as the pod.
-    jvmOptions: -XX:ErrorFile=/dumps/hs_err_pid%p.log -Xlog:gc,gc+cpu:stdout:time,level,tags
+    # as the pod. A JVM out of heap would go on holding the sender lease, so it stops.
+    jvmOptions: -XX:ErrorFile=/dumps/hs_err_pid%p.log -XX:+ExitOnOutOfMemoryError -Xlog:gc,gc+cpu:stdout:time,level,tags
     dumps: 256Mi
     env:
       MALLOC_ARENA_MAX: "2"
