@@ -33,6 +33,7 @@ class LoadTest {
 
     private final RecordingJournal journal = new RecordingJournal();
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final MemoryMinuteStore minuteStore = new MemoryMinuteStore();
     private Load load;
 
     private Load load(TestData.Settings settings) {
@@ -50,7 +51,7 @@ class LoadTest {
     private Load load(TestData.Settings settings, Duration stopGrace, Clock clock, SendPermission permission) {
         var props = settings.build();
         var schedule = new BaseSchedule(props);
-        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props, schedule), schedule, permission, clock, registry, stopGrace);
+        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props, schedule, minuteStore), schedule, permission, clock, registry, stopGrace);
         return load;
     }
 
@@ -111,6 +112,17 @@ class LoadTest {
 
             assertThat(load.status().requested()).isBetween(150L, 220L);
             assertThat(gateway.attemptsById).hasSize((int) load.status().requested());
+        }
+    }
+
+    @Test
+    void a_stop_adds_the_answers_still_counted_in_memory_to_the_minutes() throws Exception {
+        try (var gateway = new FakeGateway()) {
+            var load = load(TestData.settings(gateway.url()).tps(200));
+            runFor(load, Duration.ofSeconds(1));
+
+            var counted = minuteStore.between(Instant.EPOCH, Instant.now()).stream().mapToLong(MinuteCounts::total).sum();
+            assertThat(counted).isPositive().isEqualTo(responses(ResponseKind.ACCEPTED));
         }
     }
 

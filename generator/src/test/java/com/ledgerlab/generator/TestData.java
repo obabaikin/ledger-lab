@@ -89,6 +89,7 @@ public final class TestData {
                 new GeneratorProperties.Reconciliation(Duration.ofSeconds(60), DataSize.ofMegabytes(32), 20, 16),
                 new GeneratorProperties.Totals(Duration.ofSeconds(1), Duration.ofMinutes(1)),
                 new GeneratorProperties.Lease("test", Duration.ofSeconds(5), Duration.ofSeconds(1), Duration.ofMillis(100), Duration.ofSeconds(3)),
+                new GeneratorProperties.Minutes(Duration.ofSeconds(1), Duration.ofSeconds(10)),
                 new ProfileProperties(duplicateDelays.isEmpty() ? 0.0 : 1.0, duplicateDelays, INVALID_SHARE, INVALID_SHARE));
         }
 

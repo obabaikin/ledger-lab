@@ -26,6 +26,7 @@ public record GeneratorProperties(
     Reconciliation reconciliation,
     Totals totals,
     Lease lease,
+    Minutes minutes,
     ProfileProperties profile
 ) {
     /**
@@ -139,6 +140,18 @@ public record GeneratorProperties(
             }
             if (renewEvery.compareTo(sendWindow) >= 0) {
                 throw new IllegalArgumentException("generator.lease.renew-every must be shorter than generator.lease.send-window");
+            }
+        }
+    }
+
+    /**
+     * The answers counted by minute are added to the database every {@link #flushInterval}; a minute is given out
+     * {@link #settle} after its end, longer than a flush, so the last counts of a pod that stopped in it are in.
+     */
+    public record Minutes(Duration flushInterval, Duration settle) {
+        public Minutes {
+            if (settle.compareTo(flushInterval) <= 0) {
+                throw new IllegalArgumentException("generator.minutes.settle must be longer than generator.minutes.flush-interval");
             }
         }
     }

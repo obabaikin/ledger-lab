@@ -9,9 +9,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 class ResponseMinutesTest {
 
@@ -35,12 +38,20 @@ class ResponseMinutesTest {
         }
     };
     private static final GeneratorProperties SETTINGS = TestData.settings("http://localhost:1").build();
-    private final ResponseMinutes minutes = new ResponseMinutes(clock, SETTINGS, new BaseSchedule(SETTINGS));
+    private static final Duration SETTLE = SETTINGS.minutes().settle();
+    private final MemoryMinuteStore store = new MemoryMinuteStore();
+    private final ResponseMinutes minutes = new ResponseMinutes(clock, SETTINGS, new BaseSchedule(SETTINGS), store);
 
     private void record(ResponseKind kind, int times) {
         for (var i = 0; i < times; i++) {
             minutes.record(kind);
         }
+        minutes.flush();
+    }
+
+    /** The moment a minute that started then is given out. */
+    private static Instant settled(Instant minute) {
+        return minute.plusSeconds(60).plus(SETTLE);
     }
 
     @Test
@@ -53,7 +64,7 @@ class ResponseMinutesTest {
         record(ResponseKind.STOPPING, 1);
         record(ResponseKind.NOT_CONNECTED, 1);
         record(ResponseKind.NO_RESPONSE, 2);
-        now.set(NOON.plusSeconds(60));
+        now.set(settled(NOON));
 
         assertThat(minutes.completeAfter(null)).containsExactly(new MinuteResponses(NOON, 100, 100, 5, 4));
     }
@@ -63,19 +74,43 @@ class ResponseMinutesTest {
         record(ResponseKind.ACCEPTED, 1);
         record(ResponseKind.CANCELLED, 3);
         record(ResponseKind.SEND_ERROR, 2);
-        now.set(NOON.plusSeconds(60));
+        now.set(settled(NOON));
 
         assertThat(minutes.completeAfter(null)).containsExactly(new MinuteResponses(NOON, 100, 1, 0, 0));
     }
 
     @Test
-    void the_running_minute_is_left_out_until_it_is_over() {
+    void a_minute_is_given_out_only_once_the_settle_time_after_its_end_has_passed() {
         record(ResponseKind.ACCEPTED, 1);
-        now.set(NOON.plusSeconds(59));
+        now.set(settled(NOON).minusMillis(1));
         assertThat(minutes.completeAfter(null)).isEmpty();
 
-        now.set(NOON.plusSeconds(60));
+        now.set(settled(NOON));
         assertThat(minutes.completeAfter(null)).hasSize(1);
+    }
+
+    @Test
+    void counts_a_failed_write_left_behind_are_added_by_the_next_flush_once() {
+        var failing = new AtomicBoolean(true);
+        var flaky = new MemoryMinuteStore() {
+            @Override
+            public void add(List<MinuteCounts> counts) {
+                if (failing.get()) {
+                    throw new DataAccessResourceFailureException("database down");
+                }
+                super.add(counts);
+            }
+        };
+        var minutes = new ResponseMinutes(clock, SETTINGS, new BaseSchedule(SETTINGS), flaky);
+        minutes.record(ResponseKind.ACCEPTED);
+        minutes.flush();
+        minutes.record(ResponseKind.ACCEPTED);
+        failing.set(false);
+        minutes.flush();
+        minutes.flush();
+        now.set(settled(NOON));
+
+        assertThat(minutes.completeAfter(null)).containsExactly(new MinuteResponses(NOON, 100, 2, 0, 0));
     }
 
     @Test
@@ -83,7 +118,7 @@ class ResponseMinutesTest {
         record(ResponseKind.ACCEPTED, 1);
         now.set(NOON.plusSeconds(120));
         record(ResponseKind.ACCEPTED, 2);
-        now.set(NOON.plusSeconds(180));
+        now.set(settled(NOON.plusSeconds(120)));
 
         assertThat(minutes.completeAfter(null)).extracting(MinuteResponses::minute).containsExactly(NOON, NOON.plusSeconds(120));
     }
@@ -93,7 +128,7 @@ class ResponseMinutesTest {
         record(ResponseKind.ACCEPTED, 1);
         now.set(NOON.plusSeconds(60));
         record(ResponseKind.ACCEPTED, 1);
-        now.set(NOON.plusSeconds(120));
+        now.set(settled(NOON.plusSeconds(60)));
 
         assertThat(minutes.completeAfter(NOON)).extracting(MinuteResponses::minute).containsExactly(NOON.plusSeconds(60));
     }
@@ -101,7 +136,7 @@ class ResponseMinutesTest {
     @Test
     void asked_for_the_minutes_after_one_that_has_not_come_the_answer_is_empty() {
         record(ResponseKind.ACCEPTED, 1);
-        now.set(NOON.plusSeconds(60));
+        now.set(settled(NOON));
 
         assertThat(minutes.completeAfter(NOON.plusSeconds(60))).isEmpty();
         assertThat(minutes.completeAfter(NOON.plusSeconds(3_600))).isEmpty();
@@ -110,8 +145,10 @@ class ResponseMinutesTest {
     @Test
     void minutes_older_than_the_retention_are_dropped() {
         record(ResponseKind.ACCEPTED, 1);
-        now.set(NOON.plus(Duration.ofDays(2)).plusSeconds(60));
+        now.set(settled(NOON.plus(SETTINGS.load().minutesRetention())));
+        minutes.flush();
 
         assertThat(minutes.completeAfter(null)).isEmpty();
+        assertThat(store.between(NOON, NOON)).isEmpty();
     }
 }

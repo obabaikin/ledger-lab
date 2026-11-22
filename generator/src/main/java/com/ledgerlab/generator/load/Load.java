@@ -339,6 +339,7 @@ public class Load implements SmartLifecycle {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        minutes.flush();
         log.info(
             "The load stopped: requested={} acknowledged={} failed={} unknown={}",
             requested.sum(), acknowledged.sum(), failed.sum(), unknown.sum());

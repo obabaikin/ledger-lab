@@ -94,6 +94,9 @@ generator:
     # How soon a new pod takes over once the old one let go.
     acquire-every: 100ms
     send-window: 3s
+  minutes:
+    flush-interval: 1s
+    settle: 10s
   profile:
     duplicate-share: 0.02
     # 0: both inserts race on the key; 50ms: accepted, no result yet; 1s: the result is in.

@@ -51,7 +51,7 @@ class SenderLeaseTest extends IntegrationTest {
             new GeneratorProperties.Load(true, l.tps(), l.maxPulseTps(), l.maxPulse(), l.waitShare(), l.waitTimeout(), l.minutesRetention(), l.profile()),
             p.accounts(), p.journal(), p.periods(), p.reconciliation(), p.totals(),
             new GeneratorProperties.Lease(owner, q.duration(), q.renewEvery(), q.acquireEvery(), q.sendWindow()),
-            p.profile());
+            p.minutes(), p.profile());
         var lease = new SenderLease(JdbcClient.create(source), settings, new SimpleMeterRegistry());
         leases.add(lease);
         return lease;
