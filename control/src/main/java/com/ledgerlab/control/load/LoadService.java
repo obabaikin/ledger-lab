@@ -6,6 +6,7 @@ import com.ledgerlab.control.entry.InviteNotValidException;
 import com.ledgerlab.control.entry.InviteRepository;
 import com.ledgerlab.control.entry.SessionNotFoundException;
 import com.ledgerlab.control.generator.GeneratorClient;
+import com.ledgerlab.control.generator.LoadStatus;
 import com.ledgerlab.control.generator.Pulse;
 import com.ledgerlab.control.generator.PulseRequest;
 import com.ledgerlab.control.http.Reply;
@@ -45,7 +46,7 @@ public class LoadService {
      * pulse the generator may have taken without saying so is kept: the next press waits for it as for any.
      */
     @Transactional(noRollbackFor = GeneratorDidNotAnswerException.class)
-    public Pulse raise(UUID sessionId, @Nullable Integer tps, @Nullable Integer seconds) throws InterruptedException {
+    public Pulse raise(UUID sessionId, @Nullable Integer tps, @Nullable Integer seconds) {
         var load = props.load();
         if (tps == null || seconds == null || !load.tpsOptions().contains(tps) || !load.secondsOptions().contains(seconds)) {
             throw new InvalidLoadException();
@@ -70,7 +71,14 @@ public class LoadService {
             }
         }
         var pulse = new LoadPulse(at, tps, seconds, at.plusSeconds(seconds));
-        switch (generator.pulse(new PulseRequest(tps, seconds))) {
+        Reply<LoadStatus> reply;
+        try {
+            reply = generator.pulse(new PulseRequest(tps, seconds));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw keptUnconfirmed(pulse);
+        }
+        switch (reply) {
             case Reply.Answered<?> answered -> pulses.insert(pulse);
             case Reply.Refused<?> refused -> {
                 log.warn("Load: the generator refused a pulse of {} TPS for {} s: {} {}", tps, seconds, refused.status(), refused.error());

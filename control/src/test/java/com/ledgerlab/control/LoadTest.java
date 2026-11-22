@@ -2,9 +2,13 @@ package com.ledgerlab.control;
 
 import static com.ledgerlab.control.Fixtures.mapOf;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import com.ledgerlab.control.generator.GeneratorClient;
 import com.ledgerlab.control.http.ServiceHttp;
+import com.ledgerlab.control.load.GeneratorDidNotAnswerException;
+import com.ledgerlab.control.load.LoadService;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -33,6 +38,7 @@ class LoadTest extends IntegrationTest {
 
     @Autowired Cleanup cleanup;
     @Autowired GeneratorClient generatorClient;
+    @Autowired LoadService loadService;
 
     @BeforeEach
     void generatorTakesPulses() {
@@ -275,6 +281,29 @@ class LoadTest extends IntegrationTest {
 
         assertThat(unreadable.getStatusCode().value()).isEqualTo(503);
         assertThat(unreadable.getBody().get("error")).isEqualTo("generator-did-not-answer");
+        assertThat(pulses()).hasSize(1);
+        assertThat(load(sessionId, 1000, 10).getBody().get("error")).isEqualTo("load-running");
+    }
+
+    @Test
+    @DisplayName("a press interrupted while it calls the generator keeps the pulse as unanswered and leaves the thread interrupted")
+    void a_press_interrupted_while_it_calls_the_generator_keeps_the_pulse_as_unanswered_and_leaves_the_thread_interrupted() throws Exception {
+        generator.answer("POST", PULSE_PATH, 200, Fixtures.load(), Duration.ofSeconds(2));
+        var sessionId = visitor();
+        var pressing = new CompletableFuture<Thread>();
+        var stillInterrupted = new CompletableFuture<Boolean>();
+
+        var press = new Thread(() -> {
+            pressing.complete(Thread.currentThread());
+            assertThatThrownBy(() -> loadService.raise(sessionId, 1000, 10)).isInstanceOf(GeneratorDidNotAnswerException.class);
+            stillInterrupted.complete(Thread.currentThread().isInterrupted());
+        });
+        press.start();
+        await().atMost(Duration.ofSeconds(5)).pollInterval(Duration.ofMillis(10)).until(() -> !pulseCalls().isEmpty());
+        pressing.get().interrupt();
+        press.join(Duration.ofSeconds(5).toMillis());
+
+        assertThat(stillInterrupted.get()).isTrue();
         assertThat(pulses()).hasSize(1);
         assertThat(load(sessionId, 1000, 10).getBody().get("error")).isEqualTo("load-running");
     }
