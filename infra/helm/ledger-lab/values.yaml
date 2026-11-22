@@ -198,7 +198,10 @@ services:
     # As the gateway's: about 330 MiB outside the heap (measured), the heap fixed from the start, malloc's arenas
     # limited the same way.
     nativeReserve: 450Mi
-    jvmOptions: -Xlog:gc,gc+cpu:stdout:time,level,tags
+    # A crash of the JVM leaves its error log here (a SIGSEGV on 2026-11-17 took it away with the pod); it lives as long
+    # as the pod.
+    jvmOptions: -XX:ErrorFile=/dumps/hs_err_pid%p.log -Xlog:gc,gc+cpu:stdout:time,level,tags
+    dumps: 256Mi
     env:
       MALLOC_ARENA_MAX: "2"
   control:
