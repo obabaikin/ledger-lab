@@ -10,8 +10,8 @@ NODE_MEMORY="${NODE_MEMORY:-12g}"
 NODE_CPUS="${NODE_CPUS:-6}"
 CONTROL_PORT="${CONTROL_PORT:-8083}"
 API_PORT="${API_PORT:-6550}"
-TAG="dev-$(date +%Y%m%d%H%M%S)"
-MODULES="ledger-service gateway generator control reporting"
+# service:module, as in the chart's values
+SERVICES="ledger:ledger-service gateway:gateway generator:generator control:control reporting:reporting"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 KUBELET_DROP_IN="/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-crash-loop-backoff.conf"
@@ -30,18 +30,43 @@ fi
 # GC and pools by them; the target server has 6 vCPU.
 docker update --cpuset-cpus "0-$((NODE_CPUS - 1))" "k3d-$CLUSTER-server-0" >/dev/null
 
-# A jar of an earlier version left in build/libs would give the image build two to choose from.
-rm -f "$ROOT"/*/build/libs/*.jar
-(cd "$ROOT" && ./gradlew bootJar -q)
-for module in $MODULES; do
-  docker build -q -f "$ROOT/infra/docker/Dockerfile" -t "ledger-lab/$module:$TAG" "$ROOT/$module/build/libs"
+# Each image is tagged with the hash of its module's files as they are now; one the node has already is not built again,
+# and a service whose tag stays keeps its pods.
+tags=""
+builds=""
+images=""
+for pair in $SERVICES; do
+  service="${pair%%:*}"
+  module="${pair#*:}"
+  tag=$("$ROOT/infra/ci/module-tag.sh" "$module" --worktree)
+  tags="$tags --set services.$service.tag=$tag"
+  if ! docker exec "k3d-$CLUSTER-server-0" crictl inspecti "docker.io/ledger-lab/$module:$tag" >/dev/null 2>&1; then
+    builds="$builds $module:$tag"
+  fi
 done
-# shellcheck disable=SC2046
-k3d image import --cluster "$CLUSTER" $(for module in $MODULES; do echo "ledger-lab/$module:$TAG"; done)
+if [ -n "$builds" ]; then
+  tasks=""
+  for build in $builds; do
+    module="${build%%:*}"
+    # A jar of an earlier version left in build/libs would give the image build two to choose from.
+    rm -f "$ROOT/$module"/build/libs/*.jar
+    tasks="$tasks :$module:bootJar"
+  done
+  # shellcheck disable=SC2086
+  (cd "$ROOT" && ./gradlew $tasks -q)
+  for build in $builds; do
+    module="${build%%:*}"
+    docker build -q -f "$ROOT/infra/docker/Dockerfile" -t "ledger-lab/$build" "$ROOT/$module/build/libs"
+    images="$images ledger-lab/$build"
+  done
+  # shellcheck disable=SC2086
+  k3d image import --cluster "$CLUSTER" $images
+fi
 
 VERSION="$(git -C "$ROOT" describe --tags --match 'v[0-9]*' --long --always --dirty=+changes)"
+# shellcheck disable=SC2086
 helm upgrade --install ledger-lab "$ROOT/infra/helm/ledger-lab" --namespace "$NAMESPACE" --create-namespace \
-  --set image.tag="$TAG" --set version="$VERSION" --wait --timeout 10m "$@"
+  $tags --set version="$VERSION" --wait --timeout 10m "$@"
 
 # k3s installs its ingress controller on its own schedule, after helm already reports the release ready.
 INGRESS_ATTEMPTS="${INGRESS_ATTEMPTS:-90}"

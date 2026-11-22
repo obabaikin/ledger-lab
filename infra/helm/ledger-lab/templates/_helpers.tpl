@@ -1,5 +1,5 @@
 {{- define "ledger-lab.image" -}}
-{{ .root.Values.image.repository }}/{{ .service.module }}:{{ .root.Values.image.tag }}
+{{ .root.Values.image.repository }}/{{ .service.module }}:{{ .service.tag | default .root.Values.image.tag }}
 {{- end }}
 
 {{- define "ledger-lab.labels" -}}

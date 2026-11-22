@@ -1,6 +1,7 @@
 # Local k3d defaults. Real passwords come from --set or a values file outside the repository.
 image:
   repository: ledger-lab
+  # A service's own tag (services.<name>.tag, from infra/ci/module-tag.sh) takes the place of this one.
   tag: dev
   pullPolicy: IfNotPresent
 
