@@ -79,7 +79,7 @@ class TwoInstancesTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("a started instance returns from its start only once it reads partitions, and its consumer waits for the warm-up")
+    @DisplayName("a started instance returns from its start only once it reads partitions, its consumer started by the runner")
     void a_started_instance_returns_from_its_start_only_once_it_reads_partitions() {
         var other = start();
 

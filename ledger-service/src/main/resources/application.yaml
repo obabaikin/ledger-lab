@@ -45,10 +45,6 @@ ledger:
     send-timeout: 30s
   consumer:
     retry-backoff: 500ms
-    # Batches posted and rolled back before the consumer joins the group, so the partitions it takes over meet a compiled path.
-    warm-up:
-      rounds: 300
-      max-duration: 20s
     # Without partitions by then the instance reports ready anyway: reconciliation needs no Kafka (ADR 0012).
     assignment-wait: 2m
   accounts:
