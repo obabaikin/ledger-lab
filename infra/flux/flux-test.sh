@@ -4,7 +4,8 @@
 # pointer deployed in full, that pointer is found by the version control reports, also when a tag or the version is
 # digits alone, and the window's jobs open and close it with a memory limit and no right beyond reading and patching the
 # pointer's Kustomization and listing Kustomizations, fail when the Kustomization is not left as they were to leave it,
-# and do not both start after a time without the node.
+# do not both start after a time without the node, and end, the opening one without waiting for a reconciliation,
+# before the job of the other kind is due.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -173,22 +174,34 @@ cd "$HERE/../.."
 
 window="$work/window.yaml"
 "$HERE/window.sh" >"$window"
-schedule_of() { object_of "$1" "$2" | grep -E '^  schedule:|^ +flux ' | sed 's/^ *//' | tr '\n' ' '; }
-check "the window opens at ten past every hour by resuming the pointer" "$(schedule_of "$window" deploy-window-open)" \
-  'schedule: "10 * * * *" flux resume kustomization deploy --namespace flux-system '
+schedule_of() { object_of "$1" "$2" | grep -E '^  schedule:|^ +flux |^ +kubectl .* patch ' | sed 's/^ *//' | tr '\n' ' '; }
+check "the window opens at ten past every hour by removing the pointer's pause" \
+  "$(schedule_of "$window" deploy-window-open)" \
+  'schedule: "10 * * * *" kubectl --namespace flux-system patch kustomization deploy --type merge \ '
 check "the window closes at twenty past every hour by suspending the pointer" \
   "$(schedule_of "$window" deploy-window-close)" \
   'schedule: "20 * * * *" flux suspend kustomization deploy --namespace flux-system '
 
 minute_of() { object_of "$window" "$1" | sed -n 's/^  schedule: "\([0-9]*\) .*/\1/p'; }
 deadline_of() { object_of "$window" "$1" | sed -n 's/^  startingDeadlineSeconds: //p'; }
+life_of() { object_of "$window" "$1" | sed -n 's/^      activeDeadlineSeconds: //p'; }
+HOUR_SECONDS=3600
 window_seconds=$((($(minute_of deploy-window-close) - $(minute_of deploy-window-open)) * 60))
 for job in deploy-window-open deploy-window-close; do
   deadline=$(deadline_of "$job")
   if [ "${deadline:-$window_seconds}" -lt "$window_seconds" ]; then within=shorter; else within="${deadline:-none}"; fi
   check "$job skips a run missed for longer than a time shorter than the window, so both never start at once" \
     "$within" shorter
+  life=$(life_of "$job")
+  latest=$((${deadline:-$HOUR_SECONDS} + ${life:-$HOUR_SECONDS}))
+  if [ "$latest" -lt "$window_seconds" ]; then within=shorter; else within="$latest of $window_seconds"; fi
+  check "$job, started late and retried, has ended before the window's length has passed" "$within" shorter
+  closed_seconds=$((HOUR_SECONDS - window_seconds))
+  if [ "$latest" -lt "$closed_seconds" ]; then within=shorter; else within="$latest of $closed_seconds"; fi
+  check "$job, started late and retried, has ended before the time the window stays closed has passed" "$within" shorter
 done
+check "both jobs keep their retries within the job's life" \
+  "$(grep -A1 '^      backoffLimit: 2$' "$window" | grep -c '^      activeDeadlineSeconds: [0-9]*$')" 2
 
 # A job's script, run with a flux that changes nothing and a kubectl that answers with the state given.
 tools="$work/tools"
@@ -200,6 +213,7 @@ EOF
 cat >"$tools/kubectl" <<'EOF'
 #!/bin/sh
 echo "$@" >>"$CALLS"
+case " $* " in *" get "*) ;; *) exit 0 ;; esac
 printf '%s' "$SUSPEND_STATE"
 exit "$KUBECTL_EXIT"
 EOF
@@ -215,19 +229,22 @@ job_ends() {
     echo failed
   fi
 }
+check "the opening job does not wait for a reconciliation: it runs no flux, whose resume waits" \
+  "$(script_of deploy-window-open | grep -cE '(^| )flux |wait' || true)" 0
 check "the closing job ends well when the pointer is suspended" "$(job_ends deploy-window-close true)" ended
 check "the closing job fails when the pointer is not suspended after flux suspend" \
   "$(job_ends deploy-window-close false)" failed
 check "the closing job fails when the pointer has no suspend after flux suspend" "$(job_ends deploy-window-close '')" failed
 check "the opening job ends well when the pointer is resumed" "$(job_ends deploy-window-open false)" ended
 check "the opening job ends well when the resumed pointer has no suspend at all" "$(job_ends deploy-window-open '')" ended
-check "the opening job fails when the pointer is still suspended after flux resume" \
+check "the opening job fails when the pointer is still suspended after the patch" \
   "$(job_ends deploy-window-open true)" failed
 check "a job that cannot read the pointer's state fails" "$(job_ends deploy-window-open false 1)" failed
-check "the jobs ask flux, then read the state of the pointer alone" \
+check "the jobs change the pause, then read the state, of the pointer alone" \
   "$(sort -u "$work/calls" | tr '\n' ';')" \
   "--namespace flux-system get kustomization deploy -o jsonpath={.spec.suspend};\
-resume kustomization deploy --namespace flux-system;suspend kustomization deploy --namespace flux-system;"
+--namespace flux-system patch kustomization deploy --type merge --patch {\"spec\":{\"suspend\":false}};\
+suspend kustomization deploy --namespace flux-system;"
 check "both jobs run their script with a shell that stops at the first failure" \
   "$(grep -c '^ *command: \[sh, -euc\]$' "$window")" 2
 check "both jobs keep UTC" "$(grep -c '^  timeZone: Etc/UTC$' "$window")" 2
@@ -237,8 +254,12 @@ check "the jobs may read and patch the pointer's Kustomization, list Kustomizati
   "$(rules_of "$window")" \
   "- apiGroups: [kustomize.toolkit.fluxcd.io] resources: [kustomizations] resourceNames: [deploy] verbs: [get, patch] \
 - apiGroups: [kustomize.toolkit.fluxcd.io] resources: [kustomizations] verbs: [list] "
-check "the jobs may list Kustomizations, which the CLI does before it suspends or resumes" \
+check "the jobs may list Kustomizations, which the CLI does before it suspends" \
   "$(grep -c '^    verbs: \[list\]$' "$window")" 1
+check "the deadlines can be moved with the schedules" \
+  "$(WINDOW_START_DEADLINE_SECONDS=30 WINDOW_ACTIVE_DEADLINE_SECONDS=60 "$HERE/window.sh" |
+    grep -E '^ +(starting|active)DeadlineSeconds:' | sed 's/^ *//' | sort | uniq -c | tr -s ' \n' ' ')" \
+  ' 2 activeDeadlineSeconds: 60 2 startingDeadlineSeconds: 30 '
 check "the schedules can be moved" \
   "$(WINDOW_OPENS='*/2 * * * *' WINDOW_CLOSES='1-59/2 * * * *' "$HERE/window.sh" | grep -E '^  schedule:' | tr '\n' ' ')" \
   '  schedule: "*/2 * * * *"   schedule: "1-59/2 * * * *" '

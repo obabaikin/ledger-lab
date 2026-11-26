@@ -2,8 +2,9 @@
 # The deploy window: the hours' minutes in which a new pointer may start a deploy. Outside it the Kustomization that
 # applies the pointer is suspended; a chain of releases that has started is not held by it and runs to its end.
 # Prints the manifest of the two CronJobs that open and close the window and of their rights; install.sh applies it.
-# WINDOW_OPENS and WINDOW_CLOSES take the place of the two schedules (cron, UTC); a window shorter than the default
-# start deadline needs a shorter WINDOW_START_DEADLINE_SECONDS too.
+# WINDOW_OPENS and WINDOW_CLOSES take the place of the two schedules (cron, UTC); moved schedules need
+# WINDOW_START_DEADLINE_SECONDS and WINDOW_ACTIVE_DEADLINE_SECONDS that together stay below the window's length and
+# below the time it stays closed.
 set -eu
 
 FLUX_NAMESPACE=flux-system
@@ -18,8 +19,17 @@ CLOSES="${WINDOW_CLOSES:-20 * * * *}"
 # A run missed for longer, as after the node was down, is skipped. Shorter than the window and than the time it stays
 # closed, so of the two missed runs at most one starts and the Kustomization is left as the later schedule says.
 START_DEADLINE_SECONDS="${WINDOW_START_DEADLINE_SECONDS:-300}"
+# A job, its retries included, ends this long after it was created, also when its pod never started, as while the
+# image is pulled. With the start deadline it stays below the window and the time it stays closed, so a late job
+# never acts after the job of the other kind; the spare minute holds the 30 s a stopped pod is given to end.
+ACTIVE_DEADLINE_SECONDS="${WINDOW_ACTIVE_DEADLINE_SECONDS:-240}"
 SUSPENDED=true
 RESUMED=false
+# flux resume waits for the reconciliation, 5 minutes by default, and fails when the wait runs out; its retry then
+# opened a window that had closed meanwhile. The patch removes the pause and returns.
+RESUME="kubectl --namespace $FLUX_NAMESPACE patch kustomization $POINTER --type merge \\
+                    --patch '{\"spec\":{\"suspend\":$RESUMED}}'"
+SUSPEND="flux suspend kustomization $POINTER --namespace $FLUX_NAMESPACE"
 
 cat <<EOF
 apiVersion: v1
@@ -38,7 +48,7 @@ rules:
     resources: [kustomizations]
     resourceNames: [$POINTER]
     verbs: [get, patch]
-  # flux suspend and resume list before they patch, and a list cannot be narrowed to one name.
+  # flux suspend lists before it patches, and a list cannot be narrowed to one name.
   - apiGroups: [kustomize.toolkit.fluxcd.io]
     resources: [kustomizations]
     verbs: [list]
@@ -76,6 +86,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: $ACTIVE_DEADLINE_SECONDS
       template:
         spec:
           serviceAccountName: $ACCOUNT
@@ -88,14 +99,15 @@ spec:
             - name: flux
               image: $FLUX_CLI_IMAGE
               command: [sh, -euc]
-              # flux exits 0 also when it left the Kustomization as it was, so the job reads the state it was to leave.
+              # The command exits 0 also when it left the Kustomization as it was, so the job reads the state it was to
+              # leave.
               args:
                 - |
-                  flux $3 kustomization $POINTER --namespace $FLUX_NAMESPACE
+                  $3
                   suspended=\$(kubectl --namespace $FLUX_NAMESPACE get kustomization $POINTER \\
                     -o jsonpath='{.spec.suspend}')
                   if [ "\${suspended:-$RESUMED}" != $4 ]; then
-                    echo "after flux $3 the Kustomization $POINTER has suspend '\$suspended', not $4" >&2
+                    echo "$ACCOUNT-$1 left the Kustomization $POINTER with suspend '\$suspended', not $4" >&2
                     exit 1
                   fi
               securityContext:
@@ -106,5 +118,5 @@ spec:
                 limits: {memory: $MEMORY}
 EOF
 }
-window_job open "$OPENS" resume "$RESUMED"
-window_job close "$CLOSES" suspend "$SUSPENDED"
+window_job open "$OPENS" "$RESUME" "$RESUMED"
+window_job close "$CLOSES" "$SUSPEND" "$SUSPENDED"
