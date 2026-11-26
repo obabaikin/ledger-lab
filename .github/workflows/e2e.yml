@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '23 2 * * *'
   workflow_dispatch:
+    inputs:
+      base:
+        description: The commit installed first, instead of the parent commit
+        required: false
+        type: string
   pull_request:
     branches: [main]
     types: [opened, reopened, synchronize, labeled]
@@ -29,7 +34,7 @@ jobs:
       contents: read
       actions: read
     outputs:
-      deploy: ${{ steps.changed.outputs.deploy }}
+      mode: ${{ steps.changed.outputs.mode }}
     env:
       CI_WORKFLOW: .github/workflows/ci.yml
       IMAGES_JOB: images
@@ -41,20 +46,16 @@ jobs:
           persist-credentials: false
       - name: Anything to deploy since the parent commit
         id: changed
-        env:
-          # infra/ci/changed.sh's exit code for nothing to deploy.
-          CHANGED_NOTHING: 3
         run: |
           infra/ci/changed.sh HEAD^ HEAD && code=0 || code=$?
-          case "$code" in
-            0) echo "deploy=true" >>"$GITHUB_OUTPUT" ;;
-            "$CHANGED_NOTHING") echo "deploy=false" >>"$GITHUB_OUTPUT" ;;
-            *) exit "$code" ;;
-          esac
+          base_flux=no
+          if git cat-file -e HEAD^:infra/flux/release.sh 2>/dev/null; then base_flux=yes; fi
+          mode=$(infra/e2e/scenario.py mode --event "$GITHUB_EVENT_NAME" --changed "$code" --base-flux "$base_flux")
+          echo "mode=$mode" >>"$GITHUB_OUTPUT"
       # CI's run of this push to main, not of a tag pushed on the same commit (its images job is skipped); the jobs of a
       # run are those of its latest attempt.
       - name: Wait for CI's images job of this commit
-        if: steps.changed.outputs.deploy == 'true' || github.event_name != 'push'
+        if: steps.changed.outputs.mode != 'skip'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -86,7 +87,8 @@ jobs:
     runs-on: ubuntu-latest
     # Tools and the parent's images, Flux and the parent's bank, the bank's steady state, the chain of releases over
     # it (13 to 19 minutes on k3d when the chart changed and all five services are checked, about 7 with two), the
-    # crash, and the verdicts of the periods crossed and of the one after them (up to 17 minutes).
+    # crash, and the verdicts of the periods crossed and of the one after them (up to 17 minutes). WAITS_MINUTES
+    # below follows this number.
     timeout-minutes: 60
     # Per job, so a run the job's condition skips (a pull request's other label) takes no place and cancels nothing.
     # Only a pull request's run is cancelled by a newer one: a cancelled run on main would hold the deploy pointer.
@@ -97,7 +99,10 @@ jobs:
       contents: read
     env:
       # Only a push is skipped: a nightly run still replaces control for its version (scenario.py mode).
-      NOTHING_TO_DEPLOY: ${{ github.event_name == 'push' && needs.images-ready.outputs.deploy == 'false' }}
+      NOTHING_TO_DEPLOY: ${{ needs.images-ready.outputs.mode == 'skip' }}
+      # The job's time limit less the time to print the report, collect the cluster's state and upload it: the waits
+      # of install-base.sh and scenario.py give up then and say what they waited for, before the job is cut.
+      WAITS_MINUTES: 52
       K3D_VERSION: v5.9.0
       K3D_SHA256: 06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0
       KUBECTL_VERSION: v1.36.4
@@ -112,6 +117,8 @@ jobs:
       # be built.
       COMMIT_IMAGES_SOURCE: ${{ github.ref == 'refs/heads/main' && 'registry' || 'any' }}
     steps:
+      - name: The moment the waits give up
+        run: echo "E2E_DEADLINE=$(($(date +%s) + WAITS_MINUTES * 60))" >>"$GITHUB_ENV"
       - name: Nothing to deploy
         if: env.NOTHING_TO_DEPLOY == 'true'
         run: echo "nothing to deploy since the parent commit, skipped"
@@ -153,17 +160,25 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       # The server deploys each commit of main over its first parent, so that step is the one tested. A pull request's
       # checkout is its merge into main, whose first parent is main. A parent from before Flux cannot be installed.
+      # A run started by hand may name another commit to deploy over, one that Flux can install.
       - name: How this commit is tested against its parent
         if: env.NOTHING_TO_DEPLOY != 'true'
         id: mode
+        env:
+          BASE_INPUT: ${{ inputs.base }}
         run: |
-          infra/ci/changed.sh HEAD^ HEAD && code=0 || code=$?
+          base=$(git rev-parse --verify --quiet "${BASE_INPUT:-HEAD^}^{commit}") || { echo "no commit ${BASE_INPUT:-HEAD^}" >&2; exit 1; }
+          infra/ci/changed.sh "$base" HEAD && code=0 || code=$?
           base_flux=no
-          if git cat-file -e HEAD^:infra/flux/release.sh 2>/dev/null; then base_flux=yes; fi
+          if git cat-file -e "$base:infra/flux/release.sh" 2>/dev/null; then base_flux=yes; fi
           mode=$(infra/e2e/scenario.py mode --event "$GITHUB_EVENT_NAME" --changed "$code" --base-flux "$base_flux")
-          echo "$mode, parent $(git rev-parse --short HEAD^)"
+          echo "$mode, base $(git rev-parse --short "$base")"
+          if [ -n "$BASE_INPUT" ] && [ "$mode" != transition ]; then
+            echo "the base $BASE_INPUT is from before Flux: it cannot be installed" >&2
+            exit 1
+          fi
           echo "mode=$mode" >>"$GITHUB_OUTPUT"
-          if [ "$mode" = transition ]; then echo "base=$(git rev-parse HEAD^)" >>"$GITHUB_OUTPUT"; fi
+          if [ "$mode" = transition ]; then echo "base=$base" >>"$GITHUB_OUTPUT"; fi
       # Flux reads the pointer and the commits from a repository on the runner (infra/k3d/flux.sh): the run cannot
       # write a pointer to GitHub, and a pull request's merge commit is on no branch there.
       - name: Start the bank in k3d through Flux
@@ -183,10 +198,11 @@ jobs:
           BASE: ${{ steps.mode.outputs.base }}
           IMAGES_SOURCE: ${{ env.COMMIT_IMAGES_SOURCE }}
         run: infra/e2e/scenario.py run ${BASE:+--base "$BASE"} --artifacts "$RUNNER_TEMP/e2e-artifacts"
-      # Also after the scenario's own collection: a failed start or the time limit leave none.
+      # Also after the scenario's own collection (in cluster/, taken when it failed): a failed start or the time limit
+      # leave none.
       - name: Collect the cluster's state
         if: failure() || cancelled()
-        run: infra/e2e/scenario.py collect --artifacts "$RUNNER_TEMP/e2e-artifacts/cluster"
+        run: infra/e2e/scenario.py collect --artifacts "$RUNNER_TEMP/e2e-artifacts/cluster-at-the-end"
       - if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

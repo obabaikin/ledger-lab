@@ -2,6 +2,8 @@
 # Deploys a commit to the k3d cluster the way the server is deployed: Flux follows a deploy branch whose release.yaml
 # names the commit (infra/flux/release.sh). The branch and the commit live in a bare repository under build/, served to
 # the cluster over HTTP (infra/k3d/git-http.py), so the working repository and its remote are left as they are.
+# The pointer is written by the commit's own release.sh, module-tag.sh and changed.sh, as infra/ci/move-pointer.sh
+# writes it: the commit's images are tagged by its own module-tag.sh (infra/k3d/images.sh), whatever this tree's says.
 # Usage: infra/k3d/flux.sh [<commit>] [<values file in the repository> ...]; the commit defaults to HEAD. Returns once
 # the pointer moved; WAIT=1 also waits until the last release of the chain is ready on the new revision. ONLY_IMAGES=1
 # stops once the commit's images are in the node and moves nothing.
@@ -28,10 +30,17 @@ SITE_TIMEOUT_SECONDS=5
 CHAIN_TIMEOUT_SECONDS="${CHAIN_TIMEOUT_SECONDS:-3600}"
 # The name k3d gives the host inside the cluster.
 HOST_IN_CLUSTER=host.k3d.internal
+CHANGED=infra/ci/changed.sh
+MODULE_TAG=infra/ci/module-tag.sh
+RELEASE=infra/flux/release.sh
 
 commit=$(git -C "$ROOT" rev-parse --verify --quiet "${1:-HEAD}^{commit}") || { echo "no commit ${1:-HEAD}" >&2; exit 2; }
 [ $# -gt 0 ] && shift
 url="http://$HOST_IN_CLUSTER:$GIT_PORT/$REPOSITORY"
+for script in "$CHANGED" "$MODULE_TAG" "$RELEASE"; do
+  git -C "$ROOT" cat-file -e "$commit:$script" 2>/dev/null ||
+    { echo "$commit lacks $script: from before Flux, it cannot be deployed this way" >&2; exit 2; }
+done
 
 CLUSTER="$CLUSTER" "$ROOT/infra/k3d/cluster.sh"
 if helm status ledger-lab --namespace "$NAMESPACE" >/dev/null 2>&1; then
@@ -61,7 +70,10 @@ git -C "$ROOT" push -q -f "$bare" "$commit:refs/heads/main"
 # The pointer: one commit on the deploy branch with release.yaml alone, made without a checkout.
 release=$(mktemp)
 previous=$(mktemp)
-trap 'rm -f "$release" "$previous"' EXIT
+# The commit's scripts, laid out as in the repository: they call each other by relative paths.
+own=$(mktemp -d)
+trap 'rm -rf "$release" "$previous" "$own"' EXIT
+git -C "$ROOT" archive "$commit" -- "$CHANGED" "$MODULE_TAG" "$RELEASE" | tar -x -C "$own"
 parent=$(git -C "$bare" rev-parse --verify --quiet "refs/heads/$POINTER_BRANCH" || true)
 deployed=""
 if [ -n "$parent" ]; then
@@ -75,9 +87,9 @@ if [ -n "$parent" ]; then
   fi
 fi
 if [ -n "$deployed" ]; then
-  (cd "$ROOT" && PREVIOUS_RELEASE="$previous" infra/flux/release.sh "$commit" "$url" "$@") >"$release"
+  (cd "$ROOT" && PREVIOUS_RELEASE="$previous" "$own/$RELEASE" "$commit" "$url" "$@") >"$release"
 else
-  (cd "$ROOT" && infra/flux/release.sh "$commit" "$url" "$@") >"$release"
+  (cd "$ROOT" && "$own/$RELEASE" "$commit" "$url" "$@") >"$release"
 fi
 blob=$(git -C "$bare" hash-object -w "$release")
 tree_object=$(printf '100644 blob %s\t%s\n' "$blob" "$POINTER_FILE" | git -C "$bare" mktree)

@@ -3,10 +3,12 @@
 
 Under the bank's steady load: a commit deployed over the bank as an earlier commit left it (--base, the step the server
 makes from one commit of main to the next) by moving the deploy pointer (infra/k3d/flux.sh), once the bank has kept its
-guarantee for as long as a release check looks back. The chain of releases must reach the commit one release after
-another, the release check must be given to the services that changed and pass, the pods of those services and of
-control must be new and, with the chart unchanged, every other pod must be as it was (by uid and restarts). Without
---base the commit is the one installed, and only the order of its chain is checked.
+guarantee for as long as a release check looks back. The bank must run --base in full before that. The chain of
+releases must reach the commit one release after another; the services that changed are those whose image tag differs
+in git between the two commits, each by its commit's own infra/ci/module-tag.sh: the releases must set the commit's
+tags, the release check must be given to those services and pass, their pods and control's must be new and, with the
+chart unchanged, every other pod must be as it was (by uid and restarts). Without --base the commit is the one
+installed, and only the order of its chain is checked.
 Then ledger-0 and the gateway's pod are killed: after the chain, as a release check counts a pod killed in its window
 as a broken guarantee.
 Then every period the scenario crossed must be reconciled BALANCED under load (a share of the generator's steady speed
@@ -24,6 +26,8 @@ Usage: infra/e2e/scenario.py run|steady|collect [--base <commit>] [--commit <com
   collect  the cluster's state into --artifacts: logs of every pod (and its previous container), get, describe, events,
            Flux's objects, control's periods
 E2E_MUTATE_SUM=1 expects the money on the accounts one cent higher at the end, so a run must fail.
+E2E_DEADLINE=<seconds of the epoch> ends every wait at that moment at the latest, so a run in CI still prints its
+report before the job is cut.
 """
 
 import argparse
@@ -47,7 +51,10 @@ FLUX = ROOT / "infra" / "k3d" / "flux.sh"
 # As infra/flux/release.sh names the chart, the chain and the releases with a service's image.
 CHART = "infra/helm/ledger-lab"
 CHAIN = ("platform", "reporting", "ledger", "gateway", "generator", "control")
-SERVICES = ("ledger", "gateway", "generator", "control", "reporting")
+MODULES = {"ledger": "ledger-service", "gateway": "gateway", "generator": "generator", "control": "control",
+           "reporting": "reporting"}
+SERVICES = tuple(MODULES)
+MODULE_TAG = "infra/ci/module-tag.sh"
 CONTROL = "control"
 GATEWAY = "gateway"
 LEDGER = "ledger"
@@ -74,6 +81,9 @@ ACCEPTED_QUERY = 'sum(increase(gateway_transfers_total{{outcome="accepted"}}[{r}
 # The bank is at its steady speed when it accepted nearly all the generator sends at it.
 STEADY_LOAD_SHARE = 0.9
 STEADY_TIMEOUT_SECONDS = 900
+# The moment, in seconds of the epoch, by which every wait of a run gives up, whatever its own limit: CI sets it
+# (.github/workflows/e2e.yml) so that the report with the reason is printed before the job is cut.
+DEADLINE_ENV = "E2E_DEADLINE"
 
 # Flux's HelmRelease: kind, conditions, the phase of a passed test hook, the chart version of a commit.
 HELM_RELEASES = "helmreleases.helm.toolkit.fluxcd.io"
@@ -143,7 +153,6 @@ def say(text):
 
 
 def duration_seconds(text):
-    """A duration as control's Spring properties read it: one number and one unit, or plain seconds."""
     text = str(text).strip()
     if text.isdigit():
         return int(text)
@@ -154,15 +163,15 @@ def duration_seconds(text):
 
 
 def crossed_starts(start, end, period_seconds):
-    """The starts of the periods that share any time with [start, end); the bank cuts periods at multiples of their length."""
+    # The bank cuts periods at multiples of their length.
     first = int(start // period_seconds) * period_seconds
     return list(range(first, math.ceil(end), period_seconds))
 
 
 def waited_starts(started, ended, period_seconds):
-    """The periods the scenario crossed, and the one after: its reconciliation resolves the transfers the last one left
-    unknown to the clients."""
     starts = crossed_starts(started, ended, period_seconds)
+    # The period after the last one crossed: its reconciliation resolves the transfers that one left unknown to the
+    # clients.
     return starts + [starts[-1] + period_seconds]
 
 
@@ -184,7 +193,6 @@ def pending_starts(periods, starts):
 
 
 def client_numbers(details):
-    """The gateway's accepted count and the clients' view of it: journal, statement, unknown, breaks, resolved."""
     report = details.get("report") or {}
     client = report.get("client") or {}
     statement = client.get("statement") or {}
@@ -194,9 +202,6 @@ def client_numbers(details):
 
 
 def period_checks(details, following):
-    """Four checks a period: its verdict, the clients' journal against the gateway, the transfers the clients got no
-    answer for against what the next period's reconciliation resolved (it resolves the previous period's), and
-    reporting against the books."""
     period, report = details["period"], details.get("report") or {}
     name = f"period {clock(epoch(period['start']))}-{clock(epoch(period['end']))}"
     verdict_ok = period.get("state") == STATE_RECONCILED and period.get("verdict") == VERDICT_BALANCED
@@ -222,7 +227,6 @@ def period_checks(details, following):
 
 
 def totals_line(all_details, following):
-    """following: the period after the last one checked, whose reconciliation resolves that one's unknown transfers."""
     accepted = journal = resolved = 0
     for details in all_details:
         numbers = client_numbers(details)
@@ -235,8 +239,6 @@ def totals_line(all_details, following):
 
 
 def steady_tps(load):
-    """The generator's lowest steady speed as the chart's values set it: the base, or with the day's profile on, the
-    lowest the profile goes."""
     profile = load.get("profile") or {}
     if profile.get("enabled"):
         return min(profile["nightTps"], profile["dayMinTps"])
@@ -244,11 +246,10 @@ def steady_tps(load):
 
 
 def load_check(details, tps, started, ended):
-    """The period accepted at least MIN_LOAD_SHARE of the steady speed over the time it shares with the scenario, and
-    more than nothing: a bank without traffic balances too."""
     period = details["period"]
     start, end = epoch(period["start"]), epoch(period["end"])
     inside = max(0.0, min(end, ended) - max(start, started))
+    # More than nothing however short the time inside: a bank without traffic balances too.
     least = max(1, math.floor(MIN_LOAD_SHARE * tps * inside))
     accepted = client_numbers(details)[0]
     return Check(f"period {clock(start)}-{clock(end)} under load", accepted is not None and accepted >= least,
@@ -269,14 +270,23 @@ def money_check(before, after, opening, mutate):
 
 
 def check_window(values):
-    """The longest time a release check of the chart looks back: the slowest service's rollout and the settling."""
-    rollout = max(int(values["services"][service]["rolloutSeconds"]) for service in SERVICES)
-    return rollout + int(values["releaseCheck"]["settleSeconds"])
+    try:
+        rollout = max(int(values["services"][service]["rolloutSeconds"]) for service in SERVICES)
+        return rollout + int(values["releaseCheck"]["settleSeconds"])
+    except (KeyError, TypeError):
+        return None
+
+
+def steady_window(running, chart):
+    # The release checks of the deploy look back as the commit's chart tells them, whatever the bank runs with now; a
+    # bank from before the release check names no window.
+    windows = [window for window in (check_window(running), check_window(chart)) if window is not None]
+    if not windows:
+        raise ScenarioError("neither the bank's values nor the commit's chart name a release check's window")
+    return max(windows)
 
 
 def steady_state(broken, accepted, tps, window):
-    """Whether a release check looking back over the window from now would pass, and the bank ran at its steady speed
-    all that time. broken: the count behind each of the release check's guarantees; returns (steady, why)."""
     over = {name: count for name, count in broken.items() if count > 0}
     least = math.ceil(STEADY_LOAD_SHARE * tps * window)
     detail = (f"in the last {window}s the gateway accepted {accepted:.0f}, at least {least} "
@@ -285,7 +295,6 @@ def steady_state(broken, accepted, tps, window):
 
 
 def uid_check(before, after, what):
-    """before, after: pod -> (uid, restarts of each container), from pods_except."""
     changed = sorted(name for name in before if after.get(name) != before[name])
     added = sorted(set(after) - set(before))
     ok = bool(before) and not changed and not added
@@ -295,14 +304,13 @@ def uid_check(before, after, what):
 
 
 def choose_mode(event, changed, base_has_flux):
-    """How a commit is tested against its parent: a push with nothing to deploy is skipped (the job stays green, and
-    the deploy pointer passes such a commit without asking); a parent that Flux can deploy is installed and the commit
-    deployed over it, control at least being replaced for its version; over a parent from before Flux there is no
-    such step to test, so the commit itself is installed."""
     if changed not in (CHANGED_SOMETHING, CHANGED_NOTHING):
         raise ValueError(f"changed.sh failed: exit {changed}")
+    # The deploy pointer passes such a commit without asking for its run; any other event still replaces control for
+    # its version.
     if changed == CHANGED_NOTHING and event == PUSH_EVENT:
         return MODE_SKIP
+    # Over a parent from before Flux there is no step from one pointer to the next to test.
     return MODE_TRANSITION if base_has_flux else MODE_INSTALL
 
 
@@ -314,7 +322,7 @@ def condition(release, kind):
 
 
 def latest(release):
-    """The newest revision in the release's history, as Flux lists it first."""
+    # Flux lists the newest revision first.
     history = (release.get("status") or {}).get("history") or []
     return history[0] if history else {}
 
@@ -324,22 +332,20 @@ def named(releases):
 
 
 def on_commit(release, commit):
-    """Ready on the chart of the commit: Flux names a chart built from a commit <version>+<12 characters of it>.<n>, and
-    a release with a test is ready once the test has passed."""
+    # Flux names a chart built from a commit <version>+<12 characters of it>.<n>, and a release with a test is ready
+    # once the test has passed.
     state = condition(release, READY)
     mark = f"+{commit[:REVISION_COMMIT_LENGTH]}."
     return mark in latest(release).get("chartVersion", "") and state is not None and state.get("status") == STATUS_TRUE
 
 
 def reached(releases, commit):
-    """The releases of the chain that are ready on the commit, in the chain's order."""
     by_name = named(releases)
     return [name for name in CHAIN if name in by_name and on_commit(by_name[name], commit)]
 
 
 def chain_failure(releases, since):
-    """The first release of the chain that has stopped it since the pointer moved, with Flux's words for it; a
-    condition from before that time is left from an earlier deploy."""
+    # A condition from before the pointer moved is left from an earlier deploy.
     by_name = named(releases)
     for name in CHAIN:
         for kind, status in STOPPED:
@@ -350,8 +356,6 @@ def chain_failure(releases, since):
 
 
 def order_check(releases):
-    """Each release of the chain was deployed no earlier than the one before it became ready, its test included: two
-    services are never replaced at the same time."""
     by_name = named(releases)
     early, times = [], []
     for before, after in zip(CHAIN, CHAIN[1:]):
@@ -367,7 +371,6 @@ def order_check(releases):
 
 
 def tags_of(releases):
-    """service -> the image tag its release sets."""
     by_name = named(releases)
     tags = {}
     for service in SERVICES:
@@ -376,18 +379,29 @@ def tags_of(releases):
     return tags
 
 
+def tags_check(release_tags, git_tags):
+    other = {service: f"release {release_tags.get(service)}, git {tag}" for service, tag in git_tags.items()
+             if release_tags.get(service) != tag}
+    return Check("each release sets the image tag git gives its service at the commit", not other,
+                 f"other tags {other}" if other else f"{git_tags}")
+
+
+def deployed(releases):
+    by_name = named(releases)
+    return ", ".join(f"{name} {latest(by_name.get(name, {})).get('chartVersion', 'not installed')} "
+                     f"(Ready {(condition(by_name.get(name, {}), READY) or {}).get('status')})" for name in CHAIN)
+
+
 def updated_services(before, after):
     return {service for service in SERVICES if before.get(service) != after.get(service)}
 
 
 def expected_checked(updated, chart_differs):
-    """The services infra/flux/release.sh gives the release check: those whose image tag changed, or every one when the
-    chart changed, as it can replace any pod."""
+    # As infra/flux/release.sh gives it: a changed chart can replace any pod.
     return set(SERVICES) if chart_differs else set(updated)
 
 
 def release_check_checks(releases, expected):
-    """The release check is turned on for the expected services and for no other, and each one's test hook passed."""
     by_name = named(releases)
     assigned = {name for name in SERVICES
                 if (((by_name.get(name, {}).get("spec") or {}).get("values") or {}).get("releaseCheck") or {}).get("enabled")}
@@ -408,7 +422,6 @@ def service_uids(pods, service):
 
 
 def replaced_check(before, after, services):
-    """Every pod of the services the deploy had to replace is a new one."""
     kept = {}
     for service in sorted(services):
         old, new = service_uids(before, service), service_uids(after, service)
@@ -419,7 +432,6 @@ def replaced_check(before, after, services):
 
 
 def back(pods, killed):
-    """ledger-0 and a gateway pod ready again, neither of them one that was killed."""
     now = [pod for pod in live(pods) if ready(pod) and pod["metadata"]["uid"] not in killed]
     return (any(pod["metadata"]["name"] == CRASHED_LEDGER_POD for pod in now)
             and any(pod["metadata"].get("labels", {}).get(NAME_LABEL) == GATEWAY for pod in now))
@@ -450,9 +462,37 @@ def pods_except(pods, services):
             for pod in live(pods) if pod["metadata"].get("labels", {}).get(NAME_LABEL) not in services}
 
 
+def output(argv, **options):
+    result = subprocess.run(argv, capture_output=True, text=True, **options)
+    if result.returncode != 0:
+        raise ScenarioError(f"{' '.join(argv)}: exit {result.returncode}: {result.stderr.strip()}")
+    return result.stdout
+
+
 def chart_changed(base, commit, root=ROOT):
-    """Whether the chart differs between the two commits, as infra/flux/release.sh compares it."""
     return subprocess.run(["git", "-C", str(root), "diff", "--quiet", base, commit, "--", CHART]).returncode != 0
+
+
+def module_tags(commit, root=ROOT):
+    # By the commit's own rule, as its images were tagged (infra/k3d/images.sh, CI's images job) and its pointer
+    # written: the rule may differ between the base and the commit.
+    with tempfile.TemporaryDirectory() as own:
+        rule = Path(own) / Path(MODULE_TAG).name
+        rule.write_text(output(["git", "-C", str(root), "show", f"{commit}:{MODULE_TAG}"]), encoding="utf-8")
+        return {service: output(["sh", str(rule), module, commit], cwd=str(root)).strip()
+                for service, module in MODULES.items()}
+
+
+def chart_values(commit, root=ROOT):
+    # Helm reads the YAML: a chart of one template that prints the values it has.
+    with tempfile.TemporaryDirectory() as probe:
+        (Path(probe) / "templates").mkdir()
+        (Path(probe) / "Chart.yaml").write_text("apiVersion: v2\nname: values\nversion: 0.0.0\n", encoding="utf-8")
+        (Path(probe) / "templates" / "values.json").write_text("{{ toJson .Values }}\n", encoding="utf-8")
+        (Path(probe) / "values.yaml").write_text(
+            output(["git", "-C", str(root), "show", f"{commit}:{CHART}/values.yaml"]), encoding="utf-8")
+        printed = output(["helm", "template", "values", probe])
+    return json.loads(printed[printed.index("{"):])
 
 
 class Cluster:
@@ -476,7 +516,6 @@ class Cluster:
             raise ScenarioError(f"kubectl points at {context}, not k3d-{self.cluster}: the scenario kills pods")
 
     def values(self):
-        """The chart's values as the last release of the chain got them: the chart's own, the cluster's, the pointer's."""
         output = self.command("helm", "get", "values", CONTROL, "--namespace", self.namespace, "--all", "-o", "json")
         return json.loads(output.stdout)
 
@@ -491,7 +530,6 @@ class Cluster:
                             "-d", POSTGRES_DATABASE, "-c", sql).stdout.strip()
 
     def money(self):
-        """(the balances' total, the opening total)"""
         total, opening = self.psql(MONEY_SQL).split("|")
         return int(total), int(opening)
 
@@ -502,8 +540,6 @@ class Cluster:
         return result.stdout
 
     def query(self, promql, at):
-        """One number from the bank's Prometheus, read as the release check reads it; release_check.NotChecked without
-        one."""
         proxy = f"/api/v1/namespaces/{self.namespace}/services/{PROMETHEUS_SERVICE}/proxy"
         return release_check.query_value(self.raw, proxy, promql, at)
 
@@ -531,6 +567,8 @@ class Scenario:
         self.checks = []
         self.stages = []
         self.summary = []
+        ends = os.environ.get(DEADLINE_ENV)
+        self.run_ends = float(ends) if ends else None
 
     def stage(self, name, action):
         say(f"== {name}")
@@ -542,15 +580,31 @@ class Scenario:
             self.stages.append((name, took))
             say(f"== {name}: {took:.0f}s")
 
+    def until(self, moment, words):
+        if self.run_ends is not None and self.run_ends < moment:
+            return self.run_ends, f"before the run's time ran out ({DEADLINE_ENV})"
+        return moment, words
+
     def wait(self, what, reached_it, timeout):
-        deadline = time.time() + timeout
-        while not reached_it():
+        deadline, limit = self.until(time.time() + timeout, f"within {timeout}s")
+        while True:
+            # The API server of a node whose pods are being replaced or killed may refuse a read: only the deadline
+            # ends the wait.
+            try:
+                if reached_it():
+                    return
+                failure = ""
+            except ScenarioError as error:
+                failure = f"; the last read failed: {error}"
             if time.time() > deadline:
-                raise ScenarioError(f"{what}: not within {timeout}s")
+                raise ScenarioError(f"{what}: not {limit}{failure}")
             time.sleep(POLL_SECONDS)
 
     def git(self, *argv):
-        return subprocess.run(["git", "-C", str(ROOT), *argv], capture_output=True, text=True, check=True).stdout.strip()
+        return output(["git", "-C", str(ROOT), *argv]).strip()
+
+    def commit_of(self, name):
+        return self.git("rev-parse", "--verify", f"{name}^{{commit}}")
 
     def setup(self):
         self.k.require_k3d()
@@ -558,9 +612,9 @@ class Scenario:
         self.period_seconds = int(values["periodMinutes"]) * SECONDS_PER_MINUTE
         self.verdict_deadline = duration_seconds(values["closing"]["verdictDeadline"])
         self.tps = steady_tps(values["load"])
-        self.window = check_window(values)
-        self.base = self.args.base
-        self.commit = self.git("rev-parse", "--verify", f"{self.args.commit}^{{commit}}")
+        self.base = self.commit_of(self.args.base) if self.args.base else None
+        self.commit = self.commit_of(self.args.commit)
+        self.window = steady_window(values, chart_values(self.commit))
         # As infra/flux/release.sh writes the version into the pointer.
         self.version = self.git("describe", "--tags", "--match", "v[0-9]*", "--long", "--always", self.commit)
         self.mutate = os.environ.get(MUTATE_ENV) == "1"
@@ -573,6 +627,7 @@ class Scenario:
             if self.mutate:
                 say(f"{MUTATE_ENV}=1: the money is expected one cent higher, so this run must fail")
             if self.base:
+                self.stage("the bank runs the base", self.on_base)
                 # Before the bank is watched for its steady state: a build takes the processor from it.
                 self.stage("the commit's images", lambda: self.flux("images", {ONLY_IMAGES_ENV: "1"}))
             self.stage("wait for a steady bank", self.steady)
@@ -606,8 +661,8 @@ class Scenario:
         return steady_state(broken, accepted, self.tps, self.window)
 
     def steady(self):
-        """Returns once a release check started now would not count what the bank's start left behind."""
-        deadline = time.time() + STEADY_TIMEOUT_SECONDS
+        # A release check started before this returns would count what the bank's start left behind.
+        deadline, limit = self.until(time.time() + STEADY_TIMEOUT_SECONDS, f"within {STEADY_TIMEOUT_SECONDS}s")
         told = None
         while True:
             ok, detail = self.steady_now()
@@ -618,7 +673,7 @@ class Scenario:
                 say(f"not steady yet: {detail}")
                 told = detail
             if time.time() > deadline:
-                raise ScenarioError(f"the bank is not steady within {STEADY_TIMEOUT_SECONDS}s: {detail}")
+                raise ScenarioError(f"the bank is not steady {limit}: {detail}")
             time.sleep(POLL_SECONDS)
 
     def flux(self, name, env):
@@ -634,37 +689,52 @@ class Scenario:
             raise ScenarioError(f"flux.sh ({name}): exit {code}")
 
     def chain(self, since):
-        """Waits until every release of the chain is ready on the commit; returns the releases."""
-        deadline = time.time() + CHAIN_TIMEOUT_SECONDS
-        told = None
+        deadline, limit = self.until(time.time() + CHAIN_TIMEOUT_SECONDS, f"within {CHAIN_TIMEOUT_SECONDS}s")
+        told = done = None
         while True:
-            releases = self.k.releases()
-            done = reached(releases, self.commit)
-            if len(done) == len(CHAIN):
-                return releases
-            failure = chain_failure(releases, since)
-            if failure:
-                raise ScenarioError(f"the chain stopped at {failure}")
-            if done != told:
-                say(f"on the commit: {', '.join(done) or 'no release yet'}")
-                told = done
+            # As in wait: a read the API server refused is not the chain's failure.
+            try:
+                releases = self.k.releases()
+                failed_read = ""
+            except ScenarioError as error:
+                releases = None
+                failed_read = f"; the last read failed: {error}"
+            if releases is not None:
+                done = reached(releases, self.commit)
+                if len(done) == len(CHAIN):
+                    return releases
+                failure = chain_failure(releases, since)
+                if failure:
+                    raise ScenarioError(f"the chain stopped at {failure}")
+                if done != told:
+                    say(f"on the commit: {', '.join(done) or 'no release yet'}")
+                    told = done
             if time.time() > deadline:
-                raise ScenarioError(f"the chain did not reach {self.commit} within {CHAIN_TIMEOUT_SECONDS}s: "
-                                    f"ready on it {done or 'none'}")
+                raise ScenarioError(f"the chain did not reach {self.commit} {limit}: "
+                                    f"ready on it {done or 'none'}{failed_read}")
             time.sleep(POLL_SECONDS)
 
+    def require_on(self, commit, releases):
+        if len(reached(releases, commit)) != len(CHAIN):
+            raise ScenarioError(f"the cluster does not run {commit}: {deployed(releases)}")
+
+    def on_base(self):
+        self.require_on(self.base, self.k.releases())
+        self.tags = module_tags(self.commit)
+        self.updated = updated_services(module_tags(self.base), self.tags)
+
     def deploy(self):
-        tags_before = tags_of(self.k.releases())
         before = self.settled_pods()
         since = math.floor(time.time())
         # The images are in the node since the stage before, so the registry is not asked again under the watch.
         self.flux("pointer", {IMAGES_SOURCE_ENV: IMAGES_ANY})
         releases = self.chain(since)
-        updated = updated_services(tags_before, tags_of(releases))
+        updated = self.updated
         chart_differs = chart_changed(self.base, self.commit)
         say(f"from {self.base}: chart {'changed' if chart_differs else 'unchanged'}, new images of "
             f"{', '.join(sorted(updated)) or 'no service'}")
         self.checks.append(order_check(releases))
+        self.checks.append(tags_check(tags_of(releases), self.tags))
         self.checks += release_check_checks(releases, expected_checked(updated, chart_differs))
         replaced = updated | {CONTROL}
         after = self.settled_pods()
@@ -676,9 +746,7 @@ class Scenario:
 
     def installed(self):
         releases = self.k.releases()
-        done = reached(releases, self.commit)
-        if len(done) != len(CHAIN):
-            raise ScenarioError(f"the cluster does not run {self.commit}: ready on it {done or 'none'}")
+        self.require_on(self.commit, releases)
         self.checks.append(order_check(releases))
 
     def crash(self):
@@ -699,14 +767,18 @@ class Scenario:
         self.checks.append(Check("killed ledger-0 and the gateway came back", True, f"ready in {time.time() - started:.0f}s"))
 
     def settled_pods(self):
+        settled = []
+
         def none_terminating():
             pods = self.k.pods()
-            return len(live(pods)) == len(pods)
+            if len(live(pods)) != len(pods):
+                return False
+            settled.append(pods)
+            return True
         self.wait("the replaced pods gone", none_terminating, TERMINATING_TIMEOUT_SECONDS)
-        return self.k.pods()
+        return settled[-1]
 
     def kept(self, before, after, replaced, what):
-        """Every pod outside the replaced services as it was before the deploy, at its end and a while later."""
         self.checks.append(uid_check(pods_except(before, replaced), pods_except(after, replaced),
                                      f"{what} (at its end)"))
         time.sleep(LATE_SNAPSHOT_SECONDS)
@@ -716,9 +788,10 @@ class Scenario:
 
     def verdicts(self):
         waited = waited_starts(self.started, self.ended, self.period_seconds)
-        deadline = verdicts_due(waited, self.period_seconds, self.verdict_deadline)
+        due = verdicts_due(waited, self.period_seconds, self.verdict_deadline)
+        deadline, limit = self.until(due, f"by {clock(due)} UTC")
         say(f"periods from {clock(waited[0])} to {clock(waited[-1])} and the one after: the last verdict is due by "
-            f"{clock(deadline)} UTC")
+            f"{clock(due)} UTC")
         waiting = None
         while True:
             try:
@@ -733,8 +806,7 @@ class Scenario:
                 say(f"waiting for the verdicts of {', '.join(clock(start) for start in pending)}")
                 waiting = pending
             if time.time() > deadline:
-                raise ScenarioError(f"no verdict by {clock(deadline)} UTC for "
-                                    f"{', '.join(clock(start) for start in pending)}")
+                raise ScenarioError(f"no verdict {limit} for {', '.join(clock(start) for start in pending)}")
             time.sleep(VERDICT_POLL_SECONDS)
         fetched = []
         for start in waited:

@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -14,8 +15,10 @@ INSTALL_BASE = Path(__file__).resolve().parent / "install-base.sh"
 VALUES = "periodMinutes: 5\n"
 RECORDER = """#!/bin/sh
 echo "{name} $* WAIT=${{WAIT:-}} FLUX_INSTALL_TIMEOUT=${{FLUX_INSTALL_TIMEOUT:-}} CHAIN=${{CHAIN_TIMEOUT_SECONDS:-}}" >>"$CALLS"
+if [ -f "$CALLS.{name}-hangs" ]; then sleep {hang}; echo "{name} returned" >>"$CALLS"; fi
 [ ! -f "$CALLS.{name}-fails" ]
 """
+HANG_SECONDS = 20
 KUBECTL = """#!/bin/sh
 case "$*" in
 *"get helmrelease/control"*) [ -f "$CALLS.running" ] ;;
@@ -39,9 +42,9 @@ class InstallBaseTest(unittest.TestCase):
         self.base = self.commit("base")
         shutil.copy(INSTALL_BASE, self.root / "infra" / "e2e" / "install-base.sh")
         bin_dir = Path(self.temp.name) / "bin"
-        for path, text in ((self.root / "infra" / "k3d" / "cluster.sh", RECORDER.format(name="cluster")),
-                           (self.root / "infra" / "k3d" / "flux.sh", RECORDER.format(name="flux")),
-                           (self.root / "infra" / "e2e" / "scenario.py", RECORDER.format(name="scenario")),
+        for path, text in ((self.root / "infra" / "k3d" / "cluster.sh", self.recorder("cluster")),
+                           (self.root / "infra" / "k3d" / "flux.sh", self.recorder("flux")),
+                           (self.root / "infra" / "e2e" / "scenario.py", self.recorder("scenario")),
                            (bin_dir / "kubectl", KUBECTL)):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
@@ -49,6 +52,11 @@ class InstallBaseTest(unittest.TestCase):
         self.env = dict(os.environ, CALLS=str(self.calls_file), PATH=f"{bin_dir}:{os.environ['PATH']}")
         self.env.pop("FLUX_INSTALL_TIMEOUT", None)
         self.env.pop("CHAIN_TIMEOUT_SECONDS", None)
+        self.env.pop("E2E_DEADLINE", None)
+
+    @staticmethod
+    def recorder(name):
+        return RECORDER.format(name=name, hang=HANG_SECONDS)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -97,7 +105,7 @@ class InstallBaseTest(unittest.TestCase):
         result = self.install("HEAD")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([line.split()[0] for line in self.calls()], ["cluster", "scenario", "flux"])
-        self.assertTrue(self.calls("scenario")[0].startswith("scenario steady "))
+        self.assertTrue(self.calls("scenario")[0].startswith(f"scenario steady --commit {self.base} "))
 
     def test_a_bank_that_does_not_get_steady_is_not_deployed_to(self):
         self.running()
@@ -111,6 +119,30 @@ class InstallBaseTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("other values", result.stderr)
         self.assertEqual(self.calls("flux") + self.calls("scenario") + self.calls("applied"), [])
+
+    def test_an_install_still_waiting_when_the_run_s_time_ends_is_stopped_then_and_says_so(self):
+        Path(f"{self.calls_file}.flux-hangs").touch()
+        self.env["E2E_DEADLINE"] = str(int(time.time()) + 2)
+        started = time.time()
+        result = self.install("HEAD")
+        self.assertLess(time.time() - started, HANG_SECONDS / 2)
+        self.assertEqual(result.returncode, 124)
+        self.assertIn(f"did not reach {self.base} before the run's time ran out (E2E_DEADLINE)", result.stderr)
+        self.assertEqual(self.calls("flux"), [f"flux {self.base} WAIT=1 FLUX_INSTALL_TIMEOUT=15m CHAIN=1800"])
+
+    def test_with_the_run_s_time_already_over_the_pointer_is_not_moved(self):
+        self.env["E2E_DEADLINE"] = str(int(time.time()) - 1)
+        result = self.install("HEAD")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("ran out before the pointer was moved", result.stderr)
+        self.assertEqual(self.calls("flux"), [])
+
+    def test_within_the_run_s_time_the_install_ends_as_flux_sh_ends(self):
+        self.env["E2E_DEADLINE"] = str(int(time.time()) + 600)
+        self.assertEqual(self.install("HEAD").returncode, 0)
+        self.assertEqual(self.calls("flux"), [f"flux {self.base} WAIT=1 FLUX_INSTALL_TIMEOUT=15m CHAIN=1800"])
+        Path(f"{self.calls_file}.flux-fails").touch()
+        self.assertEqual(self.install("HEAD").returncode, 1)
 
     def test_a_commit_from_before_flux_is_refused(self):
         self.git("rm", "-q", "infra/flux/release.sh")

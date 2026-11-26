@@ -8,7 +8,9 @@
 # before the job of the other kind is due; and notifications.sh: every event of the releases, the good ends too, goes
 # to the chart's Alertmanager, which takes the chain's last release for a deploy's end and keeps a failure until its
 # rollback has ended; and install.sh, with a helm and a kubectl that only write down what they get: the chart's
-# Prometheus may read the pods of Flux's namespace and nothing else there.
+# Prometheus may read the pods of Flux's namespace and nothing else there; and infra/k3d/flux.sh, in a repository of its
+# own beside scripts and tools that only write down their calls: a commit's pointer is written by that commit's own
+# scripts, and ONLY_IMAGES=1 moves nothing.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -341,6 +343,64 @@ timeout_minutes=$(minutes_of "$(sed -n 's/^  timeout: //p' "$first" | sort -u)")
 lifetime_minutes=$(minutes_of "$(alertmanager_value eventLifetime)")
 if [ "$lifetime_minutes" -gt "$timeout_minutes" ]; then outlives=longer; else outlives="$lifetime_minutes of $timeout_minutes"; fi
 check "a failure's event is kept longer than the timeout of a release, within which the rollback ends" "$outlives" longer
+
+k3d_repo="$work/k3d"
+k3d_calls="$work/k3d-calls"
+k3d_bare="$k3d_repo/build/flux-git/ledger-lab.git"
+mkdir -p "$k3d_repo/infra/k3d" "$k3d_repo/infra/flux" "$k3d_repo/infra/ci" "$k3d_repo/bin"
+recorder() {
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\necho "%s" >>"$CALLS"\n' "$1" >"$2"
+  chmod +x "$2"
+}
+cp "$HERE/../k3d/flux.sh" "$k3d_repo/infra/k3d/flux.sh"
+recorder cluster "$k3d_repo/infra/k3d/cluster.sh"
+recorder images "$k3d_repo/infra/k3d/images.sh"
+recorder install "$k3d_repo/infra/flux/install.sh"
+: >"$k3d_repo/infra/k3d/git-http.py"
+# No release ledger-lab of infra/k3d/up.sh, a network with a gateway, and nothing else answers.
+printf '#!/bin/sh\nexit 1\n' >"$k3d_repo/bin/helm"
+printf '#!/bin/sh\necho 192.0.2.1\n' >"$k3d_repo/bin/docker"
+printf '#!/bin/sh\nexit 0\n' >"$k3d_repo/bin/kubectl"
+chmod +x "$k3d_repo/bin/helm" "$k3d_repo/bin/docker" "$k3d_repo/bin/kubectl"
+# A commit's rule for its tags and its pointer, which names the rule that wrote it.
+rules_of_commit() {
+  printf '#!/bin/sh\necho "%s"\n' "$1-tag" >"$k3d_repo/infra/ci/module-tag.sh"
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\necho "pointer by %s for $1, tagged $("$(dirname "$0")/../ci/module-tag.sh")"\n' "$1" \
+    >"$k3d_repo/infra/flux/release.sh"
+  printf '#!/bin/sh\n' >"$k3d_repo/infra/ci/changed.sh"
+  chmod +x "$k3d_repo/infra/ci/module-tag.sh" "$k3d_repo/infra/flux/release.sh" "$k3d_repo/infra/ci/changed.sh"
+}
+k3d_git() { git -C "$k3d_repo" -c user.name=test -c user.email=test@example.invalid "$@"; }
+k3d_git init -q -b main
+printf 'build/\n' >"$k3d_repo/.gitignore"
+k3d_git add .gitignore infra/k3d
+k3d_git commit -q -m "from before Flux"
+before_flux=$(k3d_git rev-parse HEAD)
+rules_of_commit base
+k3d_git add -A
+k3d_git commit -q -m base
+k3d_base=$(k3d_git rev-parse HEAD)
+rules_of_commit tree
+k3d_git add -A
+k3d_git commit -q -m tree
+flux_sh() { (cd "$work" && PATH="$k3d_repo/bin:$PATH" CALLS="$k3d_calls" "$k3d_repo/infra/k3d/flux.sh" "$@" 2>&1); }
+k3d_pointer() { git -C "$k3d_bare" show deploy:release.yaml 2>/dev/null || echo "no pointer"; }
+
+ONLY_IMAGES=1 flux_sh "$k3d_base" >/dev/null
+check "ONLY_IMAGES=1 puts the commit's images into the node and neither writes a pointer nor touches Flux" \
+  "$(tr '\n' ' ' <"$k3d_calls"), $(k3d_pointer)" "cluster images , no pointer"
+: >"$k3d_calls"
+flux_sh "$k3d_base" >/dev/null
+check "without it the pointer is written and Flux told of it" "$(tr '\n' ' ' <"$k3d_calls")" "cluster images install "
+check "a commit's pointer is written by that commit's own release.sh and module-tag.sh, not by the working tree's" \
+  "$(k3d_pointer)" "pointer by base for $k3d_base, tagged base-tag"
+status=0
+refused=$(flux_sh "$before_flux") || status=$?
+check "a commit from before the pointer's scripts is refused, and the pointer stays" \
+  "$status, $(echo "$refused" | grep -c 'lacks infra/ci/changed.sh'), $(k3d_pointer)" \
+  "2, 1, pointer by base for $k3d_base, tagged base-tag"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed"

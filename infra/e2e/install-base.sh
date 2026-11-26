@@ -4,6 +4,8 @@
 # into the Secret every release reads (infra/flux/release.sh), not into the pointer: a commit from before
 # infra/e2e/values.yaml runs the same bank. On a cluster with the bank already, that is a deploy to the commit, started
 # once the bank is steady.
+# E2E_DEADLINE, the moment in seconds of the epoch by which a run's waits give up (infra/e2e/scenario.py reads it too),
+# stops the install then, whatever it waits for, and says so: CI's job is cut soon after, without a word.
 # Usage: infra/e2e/install-base.sh <commit>
 # Needs what infra/k3d/flux.sh needs.
 set -eu
@@ -22,6 +24,8 @@ export FLUX_INSTALL_TIMEOUT="${FLUX_INSTALL_TIMEOUT:-15m}"
 # A first install pulls Kafka, Postgres and the rest before its chain of a few minutes; a chain that has stopped is
 # not waited for longer.
 export CHAIN_TIMEOUT_SECONDS="${CHAIN_TIMEOUT_SECONDS:-1800}"
+# The exit code of timeout for a command it stopped.
+STOPPED=124
 
 [ $# -eq 1 ] || { echo "usage: $0 <commit>" >&2; exit 2; }
 base=$(git -C "$ROOT" rev-parse --verify --quiet "$1^{commit}") || { echo "no commit $1" >&2; exit 2; }
@@ -40,10 +44,24 @@ if [ "$running" = yes ]; then
     exit 1
   fi
   # A release check counts what a bank that has just started still does slowly.
-  "$ROOT/infra/e2e/scenario.py" steady --cluster "$CLUSTER" --namespace "$NAMESPACE"
+  "$ROOT/infra/e2e/scenario.py" steady --commit "$base" --cluster "$CLUSTER" --namespace "$NAMESPACE"
 else
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   k create secret generic "$SECRET_VALUES" "--from-file=$VALUES_KEY=$VALUES" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 fi
 
-CLUSTER="$CLUSTER" NAMESPACE="$NAMESPACE" WAIT=1 "$ROOT/infra/k3d/flux.sh" "$base"
+if [ -z "${E2E_DEADLINE:-}" ]; then
+  CLUSTER="$CLUSTER" NAMESPACE="$NAMESPACE" WAIT=1 "$ROOT/infra/k3d/flux.sh" "$base"
+  exit 0
+fi
+left=$((E2E_DEADLINE - $(date +%s)))
+if [ "$left" -le 0 ]; then
+  echo "the run's time (E2E_DEADLINE) ran out before the pointer was moved to $base" >&2
+  exit 1
+fi
+status=0
+CLUSTER="$CLUSTER" NAMESPACE="$NAMESPACE" WAIT=1 timeout "$left" "$ROOT/infra/k3d/flux.sh" "$base" || status=$?
+if [ "$status" -eq "$STOPPED" ]; then
+  echo "the bank did not reach $base before the run's time ran out (E2E_DEADLINE): stopped after ${left}s" >&2
+fi
+exit "$status"
