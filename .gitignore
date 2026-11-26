@@ -8,6 +8,7 @@ build/
 out/
 node_modules/
 *.class
+__pycache__/
 
 # IDE
 .idea/

@@ -5,7 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
-    # Images are built once, for each commit on main; a release tag only adds its name to that commit's images.
+    # A tag's commit was checked and its images built on main, so a tag only adds its name to those images.
     tags: ['v*']
 
 permissions:
@@ -22,6 +22,7 @@ concurrency:
 
 jobs:
   tests:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -44,6 +45,7 @@ jobs:
             **/build/test-results/
 
   secrets:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -64,11 +66,13 @@ jobs:
         run: ./gitleaks git --redact --no-banner
 
   infra:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       TERRAFORM_IMAGE: hashicorp/terraform:1.16.6@sha256:bfffc1ded5fbf0a17beaaf22eb4793980abdb19d0761ff6a3a0efb2ab4d9b316
       SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+      SHELLCHECK_DIRS: infra/server infra/k3d infra/terraform infra/ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,12 +89,24 @@ jobs:
           tf fmt -check -recursive -diff
           tf init -backend=false -input=false
           tf validate
-      - name: Shellcheck the server, k3d and Terraform scripts
-        run: docker run --rm -v "$PWD:/w" -w /w "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR infra/server/*.sh infra/k3d/*.sh infra/terraform/*.sh
+      - name: Shellcheck the infrastructure scripts
+        run: |
+          for dir in $SHELLCHECK_DIRS; do git ls-files -z -- "$dir/*.sh"; done |
+            xargs -0 -r docker run --rm -v "$PWD:/w" -w /w "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR
+      - name: Module tag tests
+        run: infra/ci/module-tag-test.sh
+      - name: ADR reference check tests
+        run: infra/ci/adr-links-test.sh
+      - name: Changed and missing images tests
+        run: |
+          infra/ci/changed-test.sh
+          infra/ci/missing-images-test.sh
+      - name: Every ADR reference has its file
+        run: infra/ci/adr-links.sh
 
   images:
-    if: github.event_name == 'push' && github.ref_type == 'branch'
-    needs: [tests, secrets]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [tests, secrets, infra]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -100,20 +116,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        with:
-          distribution: temurin
-          java-version: 25
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-      - run: ./gradlew bootJar
       - name: Log in to GHCR
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push the five images, tagged with the commit
+      - name: Find the modules whose image for their tag is not in GHCR yet
+        id: missing
         run: |
-          for module in $MODULES; do
-            image="$IMAGE_REPOSITORY/$module:$GITHUB_SHA"
+          missing=$(infra/ci/missing-images.sh)
+          echo "${missing:-every image is in GHCR already}"
+          echo "modules=$(echo "$missing" | cut -d' ' -f1 | xargs)" >>"$GITHUB_OUTPUT"
+      - if: steps.missing.outputs.modules != ''
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 25
+      - if: steps.missing.outputs.modules != ''
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Build and push the missing images, tagged with their module's tag
+        if: steps.missing.outputs.modules != ''
+        env:
+          BUILD_MODULES: ${{ steps.missing.outputs.modules }}
+        run: |
+          tasks=""
+          for module in $BUILD_MODULES; do tasks="$tasks :$module:bootJar"; done
+          ./gradlew $tasks
+          for module in $BUILD_MODULES; do
+            image="$IMAGE_REPOSITORY/$module:$(infra/ci/module-tag.sh "$module")"
             docker build -f infra/docker/Dockerfile -t "$image" \
               --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
               --label "org.opencontainers.image.revision=$GITHUB_SHA" "$module/build/libs"
@@ -128,18 +157,21 @@ jobs:
       contents: read
       packages: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Log in to GHCR
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Add the release tag to the five images main built from this commit
+      - name: Add the release tag to the image of each module's tag
         run: |
+          missing=$(infra/ci/missing-images.sh)
+          if [ -n "$missing" ]; then
+            echo "no image in GHCR for: $missing; tag a commit of main once its CI run has pushed the images" >&2
+            exit 1
+          fi
           for module in $MODULES; do
-            if ! docker buildx imagetools inspect "$IMAGE_REPOSITORY/$module:$GITHUB_SHA" >/dev/null 2>&1; then
-              echo "no $module image for $GITHUB_SHA: tag a commit of main once its CI run has pushed the images" >&2
-              exit 1
-            fi
-          done
-          for module in $MODULES; do
-            docker buildx imagetools create -t "$IMAGE_REPOSITORY/$module:$GITHUB_REF_NAME" "$IMAGE_REPOSITORY/$module:$GITHUB_SHA"
+            docker buildx imagetools create -t "$IMAGE_REPOSITORY/$module:$GITHUB_REF_NAME" \
+              "$IMAGE_REPOSITORY/$module:$(infra/ci/module-tag.sh "$module")"
           done
