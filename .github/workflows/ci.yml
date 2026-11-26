@@ -101,6 +101,8 @@ jobs:
         run: python3 -m unittest discover -v -s infra/release-check -p '*_test.py'
       - name: Deploy pointer and window tests
         run: infra/flux/flux-test.sh
+      - name: Deploy pointer mover tests
+        run: infra/ci/move-pointer-test.sh
       - name: Module tag tests
         run: infra/ci/module-tag-test.sh
       - name: ADR reference check tests

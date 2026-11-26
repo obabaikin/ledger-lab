@@ -56,6 +56,7 @@ check "every release takes a new commit as a new chart" "$(grep -c '^      recon
 check "every release reads the cluster's own Secret of values" \
   "$(grep -A1 '^  valuesFrom:$' "$first" | grep -c '^    - {kind: Secret, name: ledger-lab-values, optional: true}$')" 6
 check "every service's tag is written as a string" "$(grep -cE '^    services: \{[a-z]+: \{tag: "[0-9a-f]{12}"\}\}$' "$first")" 5
+check "the chart's commit is written as a string" "$(grep -cE '^  ref: \{commit: "[0-9a-f]{40}"\}$' "$first")" 1
 check "every release's version is written as a string" "$(grep -cE '^    version: "[^"]+"$' "$first")" 6
 check "without a pointer before, no service is checked" "$(checked "$first")" ""
 
@@ -121,7 +122,7 @@ point "$work/broken.yaml"
 deployed="$work/deployed.yaml"
 "$HERE/deployed-release.sh" "$(version_of "$base")" >"$deployed"
 check "the deployed pointer is the one holding the version control reports, not the pointer before" \
-  "$(grep '^  ref: ' "$deployed")" "  ref: {commit: $base}"
+  "$(grep '^  ref: ' "$deployed")" "  ref: {commit: \"$base\"}"
 PREVIOUS_RELEASE="$deployed" "$HERE/release.sh" "$fixed" "$URL" >"$work/fixed.yaml"
 check "after a rollback a service below the failed one, deployed for the first time, is checked" \
   "$(checked "$work/fixed.yaml")" "gateway generator "
@@ -154,7 +155,7 @@ else
     "$(grep -c "^    version: \"$(version_of "$numbered")\"\$" "$work/numbered.yaml")" 6
   point "$work/numbered.yaml"
   check "the deployed pointer is found by a version of digits alone" \
-    "$("$HERE/deployed-release.sh" "$(version_of "$numbered")" | grep '^  ref: ')" "  ref: {commit: $numbered}"
+    "$("$HERE/deployed-release.sh" "$(version_of "$numbered")" | grep '^  ref: ')" "  ref: {commit: \"$numbered\"}"
 fi
 
 charted=$(commit_change infra/helm/ledger-lab/values.yaml)
@@ -167,7 +168,7 @@ check "a commit that changes neither a tag nor the chart has no service checked"
 PREVIOUS_RELEASE="$work/again.yaml" "$HERE/release.sh" "$elsewhere" "$URL" >"$work/later.yaml"
 check "the chart is compared with the deployed pointer's commit, not with the commit before" \
   "$(checked "$work/later.yaml")" "$ALL_SERVICES"
-sed 's/^  ref: {commit: [0-9a-f]*}$/  ref: {commit: 0000000000000000000000000000000000000000}/' "$work/charted.yaml" \
+sed 's/^  ref: {commit: "[0-9a-f]*"}$/  ref: {commit: "0000000000000000000000000000000000000000"}/' "$work/charted.yaml" \
   >"$work/unknown.yaml"
 PREVIOUS_RELEASE="$work/unknown.yaml" "$HERE/release.sh" "$elsewhere" "$URL" >"$work/blind.yaml" 2>/dev/null
 check "a deployed pointer whose commit is not here has every service checked" "$(checked "$work/blind.yaml")" \

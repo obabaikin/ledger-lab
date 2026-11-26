@@ -43,8 +43,8 @@ fi
 version=$(git describe --tags --match 'v[0-9]*' --long --always "$commit")
 
 # The lines that carry the chart's commit and a service's tag: written below, read back from the deployed pointer.
-# A tag or a version may be digits alone, which YAML without the quotes reads as a number.
-commit_line() { echo "  ref: {commit: $1}"; }
+# A commit, a tag or a version may be digits alone, which YAML without the quotes reads as a number.
+commit_line() { echo "  ref: {commit: \"$1\"}"; }
 tag_line() { echo "    services: {$1: {tag: \"$2\"}}"; }
 previous_tag() {
   [ -n "$PREVIOUS_RELEASE" ] || return 0
