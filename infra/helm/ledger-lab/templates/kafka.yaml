@@ -1,3 +1,4 @@
+{{- if include "ledger-lab.renders" (list . "platform") -}}
 {{- $_ := include "ledger-lab.checkNumbers" . }}
 apiVersion: v1
 kind: Service
@@ -67,10 +68,15 @@ kind: ConfigMap
 metadata:
   name: create-topics
 data:
-  create-topics.sh: {{ .Files.Get "files/create-topics.sh" | quote }}
+  {{- $script := .Files.Get "files/create-topics.sh" }}
+  {{- if not $script }}
+  {{- fail "files/create-topics.sh is empty or missing: a Job that runs it would succeed without a topic" }}
+  {{- end }}
+  create-topics.sh: {{ $script | quote }}
 ---
 # Created again only when its spec or the script change, so every change of the topics is checked.
 {{ include "ledger-lab.setupJob" (dict "name" "create-topics" "spec" (include "ledger-lab.createTopicsSpec" .) "inputs" (.Files.Get "files/create-topics.sh")) }}
+{{- end }}
 {{- define "ledger-lab.createTopicsSpec" -}}
 backoffLimit: 10
 template:

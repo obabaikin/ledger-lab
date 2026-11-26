@@ -37,8 +37,8 @@ tag() {
     echo none
   fi
 }
-# The chart reads some files through symlinks out of its directory (files/create-topics.sh); git versions a symlink as
-# its target's path, so the targets are compared too.
+# A chart reading a file through a symlink out of its directory changes with the target; git versions a symlink as its
+# target's path, so the targets are compared too.
 chart_paths() {
   echo "$CHART"
   git ls-tree -r "$1" -- "$CHART" | while read -r mode _ object path; do

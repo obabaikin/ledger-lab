@@ -3,6 +3,7 @@
 {{- $periodLength := printf "%dm" (int .Values.periodMinutes) }}
 {{- $retention := printf "%dh" (int .Values.retentionHours) }}
 {{- range $name, $service := .Values.services }}
+{{- if include "ledger-lab.renders" (list $root $name) }}
 {{- $usesKafka := has $name (list "ledger" "gateway" "reporting") }}
 ---
 apiVersion: v1
@@ -24,7 +25,8 @@ metadata:
 spec:
   {{- if eq $name "ledger" }}
   serviceName: {{ $name }}
-  # Instances start and stop together; each one's partitions wait for it under its name (static membership).
+  # Instances start together on install; the policy covers scaling only, so an update still replaces them one at a
+  # time, highest first.
   podManagementPolicy: Parallel
   {{- else if $service.rollingUpdate }}
   # The new pod takes requests once it is ready; only then the old one stops.
@@ -42,7 +44,7 @@ spec:
       annotations: {{- include "ledger-lab.scrape" $root | nindent 8 }}
         {{- if eq $name "control" }}
         # The keys reach control as env, read at start: a changed key restarts it.
-        checksum/keys: {{ include (print $root.Template.BasePath "/secret.yaml") $root | sha256sum }}
+        checksum/keys: {{ $root.Values.keys | toJson | sha256sum }}
         {{- end }}
     spec:
       # The services never call the Kubernetes API.
@@ -222,4 +224,5 @@ spec:
         - name: dumps
           emptyDir: {sizeLimit: {{ . }}}
           {{- end }}
+{{- end }}
 {{- end }}

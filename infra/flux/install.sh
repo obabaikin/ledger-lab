@@ -1,0 +1,50 @@
+#!/bin/sh
+# Flux in the cluster and the one thing it watches: the deploy pointer, a branch holding release.yaml (release.sh).
+# Usage: infra/flux/install.sh <git URL of the repository with the deploy branch>; safe to run again.
+# Needs kubectl and helm on PATH, pointed at the cluster.
+set -eu
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+FLUX_NAMESPACE=flux-system
+FLUX_CHART=fluxcd-community/flux2
+FLUX_CHART_REPOSITORY=https://fluxcd-community.github.io/helm-charts
+FLUX_CHART_VERSION=2.20.0
+POINTER_BRANCH=deploy
+POINTER_INTERVAL=1m
+NAMESPACE="${NAMESPACE:-ledger-lab}"
+
+if [ $# -ne 1 ]; then
+  echo "usage: $0 <git URL of the repository with the $POINTER_BRANCH branch>" >&2
+  exit 2
+fi
+url="$1"
+
+helm repo add fluxcd-community "$FLUX_CHART_REPOSITORY" --force-update >/dev/null
+# --no-hooks: the chart's pre-install check runs a pod without a memory limit, and the chart offers none to set.
+helm upgrade --install flux "$FLUX_CHART" --version "$FLUX_CHART_VERSION" --namespace "$FLUX_NAMESPACE" \
+  --create-namespace --no-hooks -f "$HERE/flux-values.yaml" --wait --timeout 5m
+
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -f - <<EOF
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: $POINTER_BRANCH
+  namespace: $FLUX_NAMESPACE
+spec:
+  interval: $POINTER_INTERVAL
+  url: $url
+  ref: {branch: $POINTER_BRANCH}
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: $POINTER_BRANCH
+  namespace: $FLUX_NAMESPACE
+spec:
+  interval: $POINTER_INTERVAL
+  sourceRef: {kind: GitRepository, name: $POINTER_BRANCH}
+  path: ./
+  # A release left out of the pointer by mistake must not uninstall a service with its data; removing one is done by hand.
+  prune: false
+EOF

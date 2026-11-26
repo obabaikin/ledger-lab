@@ -35,7 +35,7 @@ services:
     depends_on:
       - kafka
     volumes:
-      - ./infra/kafka/create-topics.sh:/create-topics.sh:ro
+      - ./infra/helm/ledger-lab/files/create-topics.sh:/create-topics.sh:ro
     entrypoint: ["/bin/sh", "/create-topics.sh"]
     restart: "no"
 

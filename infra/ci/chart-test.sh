@@ -1,6 +1,6 @@
 #!/bin/sh
 # Checks the chart with helm template: the setup Jobs' names follow their spec only, the bank's numbers have upper
-# bounds, and control's pulse options are the chart's load values.
+# bounds, control's pulse options are the chart's load values, and the six components split the chart without a gap.
 set -eu
 
 CHART="$(cd "$(dirname "$0")/../helm/ledger-lab" && pwd)"
@@ -79,6 +79,10 @@ changed_role=$(monitor_role)
 CHART="$original"
 differs "a changed create-topics script, a new create-topics" "$changed_topics" "$topics"
 check "a changed create-topics script leaves monitor-role" "$changed_role" "$role"
+: >"$copy/ledger-lab/files/create-topics.sh"
+CHART="$copy/ledger-lab"
+refuses "an empty create-topics script" "files/create-topics.sh is empty or missing"
+CHART="$original"
 differs "a new monitor password, a new monitor-role" "$(monitor_role --set passwords.monitor=other)" "$role"
 
 refuses "accounts.count above a Java int" "accounts.count must be at most 2147483647" --set accounts.count=2147483648
@@ -102,6 +106,34 @@ check "control's highest pulse is load.maxTps" "$(control_env MAXTPS)" '- {name:
 check "control's step is load.tpsStep" "$(control_env TPSSTEP)" '- {name: CONTROL_LOAD_TPSSTEP, value: "200"}'
 check "control's first pulse is load.defaultPulseTps" "$(control_env DEFAULTTPS)" \
   '- {name: CONTROL_LOAD_DEFAULTTPS, value: "1400"}'
+
+# Flux builds the chart from git without the symlinks that point out of its directory, so a linked file arrives empty.
+check "the chart holds no symlink" "$(find "$CHART" -type l)" ""
+
+COMPONENTS="platform reporting ledger gateway generator control"
+# The documents of a render, one per line, in order, so that two renders compare as sets of objects.
+documents() {
+  python3 -c 'import sys; [print(d.strip().replace("\n", "\\n")) for d in sys.stdin.read().split("\n---\n") if d.strip()]' | sort
+}
+union() {
+  for component in $COMPONENTS; do render --set component="$component" "$@"; echo; done | documents
+}
+whole=$(render | documents)
+check "the six components together are the whole chart" "$(union)" "$whole"
+check "the six components hold no object twice" "$(union | wc -l)" "$(printf "%s\n" "$whole" | wc -l)"
+server_values="$CHART/../../server/values.yaml"
+check "the six components together are the whole chart, with the server's values" \
+  "$(union -f "$server_values" --set ingress.host=example.org)" \
+  "$(render -f "$server_values" --set ingress.host=example.org | documents)"
+kinds() { render --set component="$1" | grep -E '^(kind|  name):' | paste -d' ' - - | sort | tr '\n' ';'; }
+check "gateway renders only the gateway" "$(kinds gateway)" "kind: Deployment   name: gateway;kind: Service   name: gateway;"
+check "ledger renders only the ledger" "$(kinds ledger)" "kind: Service   name: ledger;kind: StatefulSet   name: ledger;"
+check "platform renders no workload of the bank's services" \
+  "$(render --set component=platform | grep -E '^(kind|  name):' | paste -d' ' - - |
+    grep -cE '^kind: (Deployment|StatefulSet) +name: (ledger|gateway|generator|control|reporting)$' || true)" 0
+refuses "an unknown component" "component must be empty, platform or one of" --set component=web
+check "a service's release checks the bank's numbers too" \
+  "$(helm template ledger-lab "$CHART" --set component=gateway --set retentionHours=8761 2>&1 | grep -c 'at most 8760')" 1
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed"

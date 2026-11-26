@@ -5,6 +5,10 @@ image:
   tag: dev
   pullPolicy: IfNotPresent
 
+# The part of the bank this release holds: platform or a service's name (Flux deploys each as a release of its own,
+# infra/flux/release.sh); empty holds all of it.
+component: ""
+
 # Shown on the page; the deploy scripts set it, the image carries none (built once, deployed under any tag).
 version: dev
 
@@ -198,8 +202,9 @@ services:
     # The new pod starts beside the old one and stays silent until the old one lets go of the sender lease.
     rollingUpdate: true
     # The bank's clients. Sized when the journals of a run stayed on the heap (at most 179 MiB live at 279,000 entries,
-    # measured on the server); the journal is in Postgres now, and the heap holds the requests in flight.
-    memory: 1280Mi
+    # measured on the server); the journal is in Postgres now, and the heap holds the requests in flight. Cut from
+    # 1280Mi to make room for Flux beside the bank in the 12 GB node.
+    memory: 1080Mi
     # As the gateway's: about 330 MiB outside the heap (measured), the heap fixed from the start, malloc's arenas
     # limited the same way.
     nativeReserve: 450Mi

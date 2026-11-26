@@ -84,3 +84,16 @@ metadata:
   labels: {{- include "ledger-lab.labels" (dict "name" .name) | nindent 4 }}
 spec: {{- .spec | nindent 2 }}
 {{- end }}
+
+{{- /*
+Whether a template's objects belong to the release being rendered: each service is a release of its own, so a deploy
+replaces one service at a time; "platform" holds what they share. An empty component renders all of it, as
+one release. Takes (list $root "platform" | "<service>"); "true" or "".
+*/}}
+{{- define "ledger-lab.renders" -}}
+{{- $root := index . 0 }}{{ $part := index . 1 }}{{ $component := $root.Values.component | default "" }}
+{{- if not (or (eq $component "") (eq $component "platform") (hasKey $root.Values.services $component)) }}
+{{- fail (printf "component must be empty, platform or one of %s, not %s" (keys $root.Values.services | sortAlpha | join ", ") $component) }}
+{{- end }}
+{{- if or (eq $component "") (eq $component $part) }}true{{ end }}
+{{- end }}

@@ -1,3 +1,4 @@
+{{- if include "ledger-lab.renders" (list . "platform") -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -86,6 +87,7 @@ spec:
 # on an empty volume, so a role added later is created here, on the database that already exists. The extension lands
 # in public, closed to the services' roles; the exporter's role may only see into it.
 {{ include "ledger-lab.setupJob" (dict "name" "monitor-role" "spec" (include "ledger-lab.monitorRoleSpec" .) "inputs" .Values.passwords.monitor) }}
+{{- end }}
 {{- define "ledger-lab.monitorRoleSpec" -}}
 backoffLimit: 10
 template:

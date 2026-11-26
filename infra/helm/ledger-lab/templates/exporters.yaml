@@ -1,3 +1,4 @@
+{{- if include "ledger-lab.renders" (list . "platform") -}}
 {{- $exporters := .Values.exporters }}
 apiVersion: apps/v1
 kind: DaemonSet
@@ -91,3 +92,4 @@ spec:
           resources:
             requests: {memory: {{ $exporters.postgres.memory }}}
             limits: {memory: {{ $exporters.postgres.memory }}}
+{{- end }}
