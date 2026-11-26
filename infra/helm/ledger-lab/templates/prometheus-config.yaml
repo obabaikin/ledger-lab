@@ -69,17 +69,74 @@ data:
           - source_labels: [__name__]
             regex: container_memory_working_set_bytes
             action: keep
+      # Whether a deploy is running, for the alert on one that runs late: Flux has no metric of a release's state.
+      - job_name: flux
+        scrape_interval: {{ .Values.exporters.scrapeInterval }}
+        scrape_timeout: {{ .Values.exporters.scrapeTimeout }}
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [{{ .Values.flux.namespace }}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: helm-controller
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: http-prom
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: job
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: controller_runtime_active_workers
+            action: keep
       {{- if .Values.certManager.enabled }}
       - job_name: cert-manager
         scrape_interval: 1m
         static_configs:
           - targets: [{{ .Values.certManager.metricsTarget | quote }}]
+      {{- end }}
     rule_files: [/etc/prometheus/rules.yml]
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager:{{ .Values.alertmanager.port }}"]
+  {{- $limits := dict "kafka" .Values.kafka.memory "postgres" .Values.postgres.memory "prometheus" .Values.prometheus.memory "alertmanager" .Values.alertmanager.memory "node-exporter" .Values.exporters.node.memory "postgres-exporter" .Values.exporters.postgres.memory }}
+  {{- range $name, $service := .Values.services }}
+  {{- $_ := set $limits $name $service.memory }}
+  {{- end }}
+  {{- $memory := .Values.alerts.memory }}
+  {{- $deploy := .Values.alerts.deploy }}
   rules.yml: |
     groups:
+      - name: memory
+        rules:
+          - alert: NodeMemoryLow
+            expr: node_memory_MemAvailable_bytes < {{ include "ledger-lab.bytes" (printf "%dMi" (include "ledger-lab.whole" (list "alerts.memory.nodeAvailableMiB" $memory.nodeAvailableMiB false) | int64)) }}
+            for: {{ .Values.alerts.heldFor }}
+            annotations:
+              summary: "The node has less than {{ int64 $memory.nodeAvailableMiB }} MiB of memory available"
+          {{- range $container, $limit := $limits }}
+          - alert: ContainerMemoryNearLimit
+            expr: max by (namespace, pod, container) (container_memory_working_set_bytes{namespace={{ $.Release.Namespace | quote }}, container={{ $container | quote }}}) > {{ $memory.limitShare }} * {{ include "ledger-lab.bytes" $limit }}
+            for: {{ $.Values.alerts.heldFor }}
+            # Tells the rules of one name apart.
+            labels:
+              container: {{ $container }}
+            annotations:
+              summary: "Container {{ $container }} of pod {{ "{{" }} $labels.pod {{ "}}" }} uses more than {{ $memory.limitShare }} of its memory limit of {{ $limit }}"
+          {{- end }}
+      - name: deploy
+        rules:
+          - alert: DeployRunsLate
+            expr: minute() >= {{ include "ledger-lab.whole" (list "alerts.deploy.deadlineMinute" $deploy.deadlineMinute true) }} and on() max(avg_over_time(controller_runtime_active_workers{job="helm-controller", controller="helmrelease"}[{{ $deploy.busyWindow }}])) > {{ $deploy.busyShare }}
+            annotations:
+              summary: "A deploy is still running at minute {{ int64 $deploy.deadlineMinute }} of the hour"
+      {{- if .Values.certManager.enabled }}
       - name: certificates
         rules:
-          # No Alertmanager: the alert shows on Prometheus' /alerts page.
           - alert: CertificateExpiresSoon
             expr: certmanager_certificate_expiration_timestamp_seconds - time() < {{ .Values.certManager.expiryAlertDays }} * 24 * 3600
             labels:

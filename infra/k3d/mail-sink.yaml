@@ -1,0 +1,51 @@
+# A mailbox for the k3d cluster in place of the real SMTP server: it takes what Alertmanager mails (mail-values.yaml)
+# and shows it on port 8025, as a page and as JSON under /api/v1/messages. Applied by hand to the bank's namespace.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mail-sink
+spec:
+  selector: {app.kubernetes.io/name: mail-sink}
+  ports:
+    - {name: smtp, port: 1025}
+    - {name: http, port: 8025}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mail-sink
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: mail-sink}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: mail-sink}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: mailpit
+          image: axllent/mailpit:v1.34.0
+          ports:
+            - {name: smtp, containerPort: 1025}
+            - {name: http, containerPort: 8025}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {memory: 64Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            # The mails are kept in a database file here and go with the pod.
+            - {name: mails, mountPath: /tmp}
+      volumes:
+        - name: mails
+          emptyDir: {}

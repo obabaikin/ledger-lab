@@ -1,0 +1,42 @@
+{{- /* The commit of a chart built by Flux, whose version is <version>+<12 characters of the commit>.<n>. */ -}}
+{{ define "deploy.commit" }}{{ reReplaceAll "^.*\\+([0-9a-f]+)\\.[0-9]+$" "$1" . }}{{ end }}
+
+{{ define "deploy.done.subject" }}deploy {{ template "deploy.commit" .CommonLabels.revision }}: OK{{ end }}
+
+{{- /*
+A rollback's event carries the chart it went back to, the failure's the chart that failed: the commit is the failure's.
+*/ -}}
+{{ define "deploy.failed.subject" -}}
+{{- $revision := "" }}{{ $outcome := "FAILED" -}}
+{{- range .Alerts -}}
+{{- if eq .Labels.reason "RollbackSucceeded" }}{{ $outcome = "ROLLED BACK" -}}
+{{- else if eq .Labels.reason "RollbackFailed" }}{{ $outcome = "ROLLBACK FAILED" -}}
+{{- else }}{{ $revision = .Labels.revision }}{{ end -}}
+{{- end -}}
+deploy {{ template "deploy.commit" $revision }}: {{ $outcome }} at {{ .CommonLabels.name }}
+{{- end }}
+
+{{ define "deploy.text" -}}
+{{- $rollback := false -}}
+{{ range .Alerts -}}
+{{- if or (eq .Labels.reason "RollbackSucceeded") (eq .Labels.reason "RollbackFailed") }}{{ $rollback = true }}{{ end -}}
+{{ .StartsAt.UTC.Format "2006-01-02 15:04:05 UTC" }}  {{ .Labels.reason }}  {{ .Labels.name }}
+{{ .Annotations.message }}
+{{ if eq .Labels.reason "TestFailed" -}}
+The event does not carry the line of the release check; it is the last line of
+  kubectl --namespace {{ .Labels.namespace }} logs job/release-check-{{ .Labels.name }}
+{{ end }}
+{{ end -}}
+{{ if and (not $rollback) (ne .CommonLabels.reason "TestSucceeded") -}}
+No rollback is reported yet: a mail follows when it ends. Without one the release is stalled and is handled by hand:
+  kubectl --namespace {{ .CommonLabels.namespace }} get helmrelease {{ .CommonLabels.name }}
+{{ end -}}
+{{- end }}
+
+{{ define "alert.subject" }}alert: {{ .CommonLabels.alertname }}{{ if gt (len .Alerts.Firing) 1 }} ({{ len .Alerts.Firing }}){{ end }}{{ end }}
+
+{{ define "alert.text" -}}
+{{ range .Alerts.Firing -}}
+{{ .StartsAt.UTC.Format "2006-01-02 15:04:05 UTC" }}  {{ .Annotations.summary }}
+{{ end -}}
+{{- end }}

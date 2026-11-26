@@ -16,6 +16,16 @@ prometheus.io/path: /actuator/prometheus
 http://prometheus:9090
 {{- end }}
 
+{{- /*
+A memory size of the values file in bytes, for a rule that compares it with a measured one. Takes "<n>Mi" or "<n>Gi".
+*/}}
+{{- define "ledger-lab.bytes" -}}
+{{- if not (regexMatch "^[0-9]+(Mi|Gi)$" (toString .)) }}
+{{- fail (printf "a memory limit must be a whole number of Mi or Gi, not %v" .) }}
+{{- end }}
+{{- if hasSuffix "Mi" . }}{{ mul (trimSuffix "Mi" . | int64) 1048576 }}{{ else }}{{ mul (trimSuffix "Gi" . | int64) 1073741824 }}{{ end }}
+{{- end }}
+
 {{- define "ledger-lab.restricted" -}}
 allowPrivilegeEscalation: false
 capabilities: {drop: [ALL]}

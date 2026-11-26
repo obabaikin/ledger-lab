@@ -135,6 +135,62 @@ prometheus:
   # Below the volume: the oldest blocks go first when the series outgrow it.
   retentionSize: 4GB
 
+# Mails the operator what Prometheus' alerts say (alerts, below) and what Flux reports of the releases
+# (infra/flux/notifications.sh).
+alertmanager:
+  image: prom/alertmanager:v0.35.1
+  port: 9093
+  memory: 64Mi
+  mail:
+    # Empty in k3d: nothing is mailed, the alerts show on Alertmanager's own page.
+    to: ""
+    from: ""
+    # host:port of the SMTP server.
+    smarthost: ""
+    # Empty takes the Mailjet keys of the invites (keys.mailjetApiKey and keys.mailjetApiSecret), which are that
+    # account's SMTP login.
+    username: ""
+    password: ""
+    requireTls: true
+  # The first mail about a group of alerts waits this long for the rest of the group, a group that grew is mailed again
+  # after groupInterval, one that stays as it is after repeatInterval.
+  groupWait: 30s
+  groupInterval: 5m
+  repeatInterval: 12h
+  deploy:
+    # The release whose passed test ends a deploy: the last of the chain in infra/flux/release.sh.
+    lastRelease: control
+    # A Flux event has no end; it counts as over this long after it came. Above the timeout of a release
+    # (infra/flux/release.sh), within which its rollback ends, so the failure is still there for the rollback's mail.
+    eventLifetime: 15m
+    # A rollback reported this soon after the failure shares the failure's mail; a later one gets a mail of its own
+    # within rollbackInterval.
+    failureWait: 2m
+    rollbackInterval: 1m
+
+# What Prometheus alerts on (templates/prometheus-config.yaml).
+alerts:
+  # A condition holds this long before it is an alert.
+  heldFor: 2m
+  memory:
+    # Of a container's limit; the limits are the ones of this file.
+    limitShare: 0.9
+    # MemAvailable of the node: the limits together exceed the server while the gateway is replaced.
+    nodeAvailableMiB: 300
+  deploy:
+    # A deploy starts in the window from :10 to :20 (infra/flux/window.sh); one still running from this minute of the
+    # hour on is an alert.
+    deadlineMinute: 55
+    # A deploy is running while helm-controller's worker was busy for more than busyShare of the last busyWindow: an
+    # upgrade and its test hold the worker for minutes, a look at an unchanged release for a second or two, and
+    # between two releases of a chain it is idle for about half a minute.
+    busyWindow: 2m
+    busyShare: 0.5
+
+# Flux as infra/flux/install.sh installs it; Prometheus reads helm-controller's metrics there.
+flux:
+  namespace: flux-system
+
 # Outside the bank's work path: they only feed Prometheus, and nothing waits for them.
 exporters:
   scrapeInterval: 5s

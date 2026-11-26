@@ -5,7 +5,9 @@
 # digits alone, and the window's jobs open and close it with a memory limit and no right beyond reading and patching the
 # pointer's Kustomization and listing Kustomizations, fail when the Kustomization is not left as they were to leave it,
 # do not both start after a time without the node, and end, the opening one without waiting for a reconciliation,
-# before the job of the other kind is due.
+# before the job of the other kind is due; and notifications.sh: every event of the releases, the good ends too, goes
+# to the chart's Alertmanager, which takes the chain's last release for a deploy's end and keeps a failure until its
+# rollback has ended.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -263,6 +265,31 @@ check "the deadlines can be moved with the schedules" \
 check "the schedules can be moved" \
   "$(WINDOW_OPENS='*/2 * * * *' WINDOW_CLOSES='1-59/2 * * * *' "$HERE/window.sh" | grep -E '^  schedule:' | tr '\n' ' ')" \
   '  schedule: "*/2 * * * *"   schedule: "1-59/2 * * * *" '
+
+notifications="$work/notifications.yaml"
+"$HERE/notifications.sh" >"$notifications"
+CHART_VALUES="$HERE/../helm/ledger-lab/values.yaml"
+# A value of the chart's alertmanager block, by its key.
+alertmanager_value() { sed -n '/^alertmanager:$/,/^[a-z]/p' "$CHART_VALUES" | sed -n "s/^ *$1: //p"; }
+check "what Flux reports goes to the chart's Alertmanager, in the bank's namespace, on the chart's port" \
+  "$(object_of "$notifications" deploy-mail | grep -E '^  (type|address):' | sed 's/^ *//' | tr '\n' ' ')" \
+  "type: alertmanager address: http://alertmanager.ledger-lab:$(alertmanager_value port)/api/v2/alerts/ "
+check "the Provider and the Alert follow the namespace of the bank" \
+  "$(NAMESPACE=bank "$HERE/notifications.sh" | grep -c -e '^  namespace: bank$' -e 'http://alertmanager.bank:')" 3
+check "the Alert reports the good end of a release too, not only its errors" \
+  "$(grep -c '^  eventSeverity: info$' "$notifications")" 1
+check "the Alert reports every release" "$(grep -A1 '^  eventSources:$' "$notifications" | tail -1)" \
+  '    - {kind: HelmRelease, name: "*"}'
+check "the Alert sends through the Provider" "$(grep -c '^  providerRef: {name: deploy-mail}$' "$notifications")" 1
+check "install.sh applies the notifications" \
+  "$(grep -cF 'notifications.sh" | kubectl apply -f -' "$HERE/install.sh")" 1
+check "the chart mails a deploy's good end at the last release of the chain" "$(alertmanager_value lastRelease)" \
+  "$(grep '^kind: HelmRelease$' -A2 "$first" | sed -n 's/^  name: //p' | tail -1)"
+minutes_of() { echo "${1%m}"; }
+timeout_minutes=$(minutes_of "$(sed -n 's/^  timeout: //p' "$first" | sort -u)")
+lifetime_minutes=$(minutes_of "$(alertmanager_value eventLifetime)")
+if [ "$lifetime_minutes" -gt "$timeout_minutes" ]; then outlives=longer; else outlives="$lifetime_minutes of $timeout_minutes"; fi
+check "a failure's event is kept longer than the timeout of a release, within which the rollback ends" "$outlives" longer
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed"

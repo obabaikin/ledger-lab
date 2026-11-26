@@ -1,0 +1,8 @@
+# Values for a k3d run that mails: Alertmanager sends to the cluster's mailbox (mail-sink.yaml) instead of nowhere.
+# Passed to infra/k3d/flux.sh after the commit.
+alertmanager:
+  mail:
+    to: deploy@example.invalid
+    from: no-reply@example.invalid
+    smarthost: mail-sink:1025
+    requireTls: false

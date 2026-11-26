@@ -1,5 +1,6 @@
 #!/bin/sh
 # Flux in the cluster and the one thing it watches: the deploy pointer, a branch holding release.yaml (release.sh).
+# What it reports of the releases goes to the chart's Alertmanager (notifications.sh).
 # Usage: infra/flux/install.sh <git URL of the repository with the deploy branch>; safe to run again.
 # The pointer is applied only in the deploy window (window.sh); WINDOW=off leaves it applied at any time and removes
 # the window's jobs.
@@ -52,6 +53,8 @@ spec:
   # A release left out of the pointer by mistake must not uninstall a service with its data; removing one is done by hand.
   prune: false
 EOF
+
+NAMESPACE="$NAMESPACE" "$HERE/notifications.sh" | kubectl apply -f -
 
 if [ "$WINDOW" = "$WINDOW_OFF" ]; then
   "$HERE/window.sh" | kubectl delete --ignore-not-found -f - >/dev/null

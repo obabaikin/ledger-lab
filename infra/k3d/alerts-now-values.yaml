@@ -1,0 +1,10 @@
+# Values for a k3d run that shows every alert of Prometheus at once: each container counts as near its memory limit,
+# the node as out of memory, and a deploy as late at any minute of the hour. Passed to infra/k3d/flux.sh after
+# mail-values.yaml.
+alerts:
+  heldFor: 30s
+  memory:
+    limitShare: 0.01
+    nodeAvailableMiB: 1000000
+  deploy:
+    deadlineMinute: 0

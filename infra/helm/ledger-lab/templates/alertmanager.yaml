@@ -1,0 +1,126 @@
+{{- if include "ledger-lab.renders" (list . "platform") -}}
+{{- $alertmanager := .Values.alertmanager }}
+{{- $mail := $alertmanager.mail }}
+{{- $templates := .Files.Get "files/alertmanager-mail.tmpl" }}
+{{- if not $templates }}
+{{- fail "files/alertmanager-mail.tmpl is empty or missing: the mails would have no text" }}
+{{- end }}
+{{- /* helm-controller's reasons of the events that end a release: its test passed, it failed, its rollback ended. */}}
+{{- $passed := "TestSucceeded" }}
+{{- $failed := list "InstallFailed" "UpgradeFailed" "TestFailed" "RollbackSucceeded" "RollbackFailed" }}
+# A Secret, not a ConfigMap: the config holds the SMTP login.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager
+type: Opaque
+stringData:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: {{ $alertmanager.deploy.eventLifetime }}
+      {{- if $mail.to }}
+      smtp_smarthost: {{ required "alertmanager.mail.smarthost is needed to mail alertmanager.mail.to" $mail.smarthost | quote }}
+      smtp_from: {{ required "alertmanager.mail.from is needed to mail alertmanager.mail.to" $mail.from | quote }}
+      smtp_require_tls: {{ $mail.requireTls }}
+      {{- with $mail.username | default .Values.keys.mailjetApiKey }}
+      smtp_auth_username: {{ . | quote }}
+      smtp_auth_password: {{ $mail.password | default $.Values.keys.mailjetApiSecret | quote }}
+      {{- end }}
+      {{- end }}
+    templates: [/etc/alertmanager/mail.tmpl]
+    route:
+      receiver: alerts
+      group_by: [alertname]
+      group_wait: {{ $alertmanager.groupWait }}
+      group_interval: {{ $alertmanager.groupInterval }}
+      repeat_interval: {{ $alertmanager.repeatInterval }}
+      routes:
+        # Flux reports every step of every release (infra/flux/notifications.sh); only the ends of a deploy are mailed.
+        - matchers: ['kind="HelmRelease"']
+          receiver: unmailed
+          routes:
+            - matchers: ['name="{{ $alertmanager.deploy.lastRelease }}"', 'reason="{{ $passed }}"']
+              receiver: deploy-done
+              group_by: [revision]
+            - matchers: ['reason=~"{{ join "|" $failed }}"']
+              receiver: deploy-failed
+              group_by: [name]
+              group_wait: {{ $alertmanager.deploy.failureWait }}
+              group_interval: {{ $alertmanager.deploy.rollbackInterval }}
+    receivers:
+      - name: unmailed
+      {{- range $receiver, $subject := dict "alerts" "alert.subject" "deploy-done" "deploy.done.subject" "deploy-failed" "deploy.failed.subject" }}
+      - name: {{ $receiver }}
+        {{- if $mail.to }}
+        email_configs:
+          - to: {{ $mail.to | quote }}
+            headers:
+              Subject: '{{ "{{" }} template "{{ $subject }}" . {{ "}}" }}'
+            # Plain text only; the default is an HTML page.
+            html: ""
+            text: '{{ "{{" }} template "{{ hasPrefix "deploy" $receiver | ternary "deploy.text" "alert.text" }}" . {{ "}}" }}'
+        {{- end }}
+      {{- end }}
+  mail.tmpl: {{ $templates | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  labels: {{- include "ledger-lab.labels" (dict "name" "alertmanager") | nindent 4 }}
+spec:
+  selector: {{- include "ledger-lab.labels" (dict "name" "alertmanager") | nindent 4 }}
+  ports:
+    - port: {{ $alertmanager.port }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  labels: {{- include "ledger-lab.labels" (dict "name" "alertmanager") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "ledger-lab.labels" (dict "name" "alertmanager") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" "alertmanager") | nindent 8 }}
+      annotations:
+        # Alertmanager reads its config at start; a changed config has to restart the pod.
+        checksum/config: {{ print (toJson $alertmanager) (toJson .Values.keys) $templates | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: alertmanager
+          image: {{ $alertmanager.image }}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --web.listen-address=:{{ $alertmanager.port }}
+            # One pod: no peers to look for.
+            - --cluster.listen-address=
+          ports:
+            - containerPort: {{ $alertmanager.port }}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: {{ $alertmanager.port }}}
+          securityContext:
+            readOnlyRootFilesystem: true
+            {{- include "ledger-lab.restricted" . | nindent 12 }}
+          resources:
+            requests: {memory: {{ $alertmanager.memory }}}
+            limits: {memory: {{ $alertmanager.memory }}}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager}
+            - {name: data, mountPath: /alertmanager}
+      volumes:
+        - name: config
+          secret: {secretName: alertmanager}
+        # What was mailed already is forgotten with the pod: an alert that still holds is mailed again.
+        - name: data
+          emptyDir: {}
+{{- end }}
