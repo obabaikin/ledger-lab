@@ -31,6 +31,10 @@ rules:
     resources: [kustomizations]
     resourceNames: [$POINTER]
     verbs: [get, patch]
+  # flux suspend and resume list before they patch, and a list cannot be narrowed to one name.
+  - apiGroups: [kustomize.toolkit.fluxcd.io]
+    resources: [kustomizations]
+    verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -2,7 +2,7 @@
 # Checks release.sh, deployed-release.sh and window.sh by their output: every release rolls back on a failure and
 # detects drift, a service is checked when its tag or the chart differs from the pointer deployed in full, that pointer
 # is found by the version control reports, and the window's jobs open and close it with a memory limit and no right
-# beyond the pointer's Kustomization.
+# beyond reading and patching the pointer's Kustomization and listing Kustomizations.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -136,9 +136,13 @@ check "the window closes at twenty past every hour by suspending the pointer" \
   'schedule: "20 * * * *" args: [suspend, kustomization, deploy, --namespace, flux-system] '
 check "both jobs keep UTC" "$(grep -c '^  timeZone: Etc/UTC$' "$window")" 2
 check "both jobs have a memory limit" "$(grep -c '^ *limits: {memory: 64Mi}$' "$window")" 2
-check "the jobs may read and patch the pointer's Kustomization and nothing else" \
-  "$(grep -E '^    (resources|resourceNames|verbs):' "$window" | sed 's/^ *//' | tr '\n' ' ')" \
-  'resources: [kustomizations] resourceNames: [deploy] verbs: [get, patch] '
+rules_of() { awk '/^rules:$/ { on = 1; next } /^---$/ { on = 0 } on && !/^ *#/' "$1" | sed 's/^ *//' | tr '\n' ' '; }
+check "the jobs may read and patch the pointer's Kustomization, list Kustomizations and nothing else" \
+  "$(rules_of "$window")" \
+  "- apiGroups: [kustomize.toolkit.fluxcd.io] resources: [kustomizations] resourceNames: [deploy] verbs: [get, patch] \
+- apiGroups: [kustomize.toolkit.fluxcd.io] resources: [kustomizations] verbs: [list] "
+check "the jobs may list Kustomizations, which the CLI does before it suspends or resumes" \
+  "$(grep -c '^    verbs: \[list\]$' "$window")" 1
 check "the schedules can be moved" \
   "$(WINDOW_OPENS='*/2 * * * *' WINDOW_CLOSES='1-59/2 * * * *' "$HERE/window.sh" | grep -E '^  schedule:' | tr '\n' ' ')" \
   '  schedule: "*/2 * * * *"   schedule: "1-59/2 * * * *" '
