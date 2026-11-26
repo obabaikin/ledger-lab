@@ -16,7 +16,8 @@ initMemory: 64Mi
 setupWaitSeconds: 300
 
 # The bank's clock, the same in every service: they cut time at the same instants (ADR 0021). A changed length needs
-# empty databases: the services refuse to start beside partitions cut for another one.
+# empty databases: the services refuse to start beside partitions cut for another one. Emptied volumes need the setup
+# Jobs deleted too, or the topics and the monitor role are not created again (templates/_helpers.tpl).
 periodMinutes: 60
 # Control's closing of a period, counted from its end: the bank's counts are read once at settleDelay; the ledger's
 # check and the clients' reconciliation are asked about checkWait after they were started, then every retryWait; a

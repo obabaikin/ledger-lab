@@ -73,7 +73,8 @@ with load options that do not fit, so the chart says so before the deploy instea
 A setup Job named by a hash of its spec and of what else it reads (a script, a password): an upgrade that changes none
 of them leaves the finished Job as it is, a change replaces it. It is kept after it finishes: Helm creates an object of
 its manifest that the cluster lacks, so a Job deleted after its time would run again on every upgrade. For the same
-reason a failed one runs again once it is deleted by hand. Takes (dict "name" "spec" "inputs").
+reason a failed one holds every later release, which waits for Jobs, until it is deleted by hand and so runs again; and
+a wiped volume does not run it again unless it is deleted with the volume. Takes (dict "name" "spec" "inputs").
 */}}
 {{- define "ledger-lab.setupJob" -}}
 apiVersion: batch/v1
