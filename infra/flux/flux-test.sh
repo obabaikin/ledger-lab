@@ -305,9 +305,16 @@ case "$*" in
   ;;
 esac
 EOF_KUBECTL
-printf '#!/bin/sh\n' >"$installer/helm"
+helm_calls="$work/helm-calls"
+# shellcheck disable=SC2016
+printf '#!/bin/sh\necho "$*" >>"$HELM_CALLS"\n' >"$installer/helm"
 chmod +x "$installer/kubectl" "$installer/helm"
-PATH="$installer:$PATH" APPLIED="$applied" NAMESPACE=bank "$HERE/install.sh" "$URL" >/dev/null
+PATH="$installer:$PATH" APPLIED="$applied" HELM_CALLS="$helm_calls" NAMESPACE=bank "$HERE/install.sh" "$URL" >/dev/null
+flux_timeout() { sed -n 's/^upgrade --install flux .* --wait --timeout \([^ ]*\)$/\1/p' "$helm_calls" | tail -1; }
+check "install.sh waits 5 minutes for Flux's pods" "$(flux_timeout)" 5m
+PATH="$installer:$PATH" APPLIED="$work/applied-again.yaml" HELM_CALLS="$helm_calls" FLUX_INSTALL_TIMEOUT=15m \
+  "$HERE/install.sh" "$URL" >/dev/null
+check "a node without Flux's images is given the time the caller names" "$(flux_timeout)" 15m
 # The object of a kind and a name in what install.sh applied, on one line.
 applied_of() {
   awk -v kind="$1" -v name="$2" '/^---$/ { if (on && named) print line; on = 0; named = 0; line = ""; next }

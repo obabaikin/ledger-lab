@@ -5,6 +5,7 @@
 # Usage: infra/flux/install.sh <git URL of the repository with the deploy branch>; safe to run again.
 # The pointer is applied only in the deploy window (window.sh); WINDOW=off leaves it applied at any time and removes
 # the window's jobs.
+# FLUX_INSTALL_TIMEOUT: how long Flux's own pods may take to start; a node that has none of their images needs more.
 # Needs kubectl and helm on PATH, pointed at the cluster.
 set -eu
 
@@ -21,6 +22,7 @@ PROMETHEUS_ACCOUNT=prometheus
 METRICS_READER=prometheus-pods
 WINDOW_OFF=off
 WINDOW="${WINDOW:-on}"
+FLUX_INSTALL_TIMEOUT="${FLUX_INSTALL_TIMEOUT:-5m}"
 
 if [ $# -ne 1 ]; then
   echo "usage: $0 <git URL of the repository with the $POINTER_BRANCH branch>" >&2
@@ -31,7 +33,7 @@ url="$1"
 helm repo add fluxcd-community "$FLUX_CHART_REPOSITORY" --force-update >/dev/null
 # --no-hooks: the chart's pre-install check runs a pod without a memory limit, and the chart offers none to set.
 helm upgrade --install flux "$FLUX_CHART" --version "$FLUX_CHART_VERSION" --namespace "$FLUX_NAMESPACE" \
-  --create-namespace --no-hooks -f "$HERE/flux-values.yaml" --wait --timeout 5m
+  --create-namespace --no-hooks -f "$HERE/flux-values.yaml" --wait --timeout "$FLUX_INSTALL_TIMEOUT"
 
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl apply -f - <<EOF

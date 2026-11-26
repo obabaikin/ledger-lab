@@ -3,7 +3,8 @@
 # names the commit (infra/flux/release.sh). The branch and the commit live in a bare repository under build/, served to
 # the cluster over HTTP (infra/k3d/git-http.py), so the working repository and its remote are left as they are.
 # Usage: infra/k3d/flux.sh [<commit>] [<values file in the repository> ...]; the commit defaults to HEAD. Returns once
-# the pointer moved; WAIT=1 also waits until the last release of the chain is ready on the new revision.
+# the pointer moved; WAIT=1 also waits until the last release of the chain is ready on the new revision. ONLY_IMAGES=1
+# stops once the commit's images are in the node and moves nothing.
 # The deploy window is off, so the pointer is applied at once; WINDOW=on keeps it (schedules: infra/flux/window.sh).
 # Which services get the release check is decided against the pointer the cluster runs in full: the one holding the
 # version control reports (infra/flux/deployed-release.sh). While control does not answer, no service is checked.
@@ -44,6 +45,10 @@ git -C "$ROOT" worktree remove --force "$tree" 2>/dev/null || true
 git -C "$ROOT" worktree add -q --detach "$tree" "$commit"
 CLUSTER="$CLUSTER" "$ROOT/infra/k3d/images.sh" "$tree" >/dev/null
 git -C "$ROOT" worktree remove --force "$tree"
+if [ "${ONLY_IMAGES:-0}" = 1 ]; then
+  echo "images of $commit in the node"
+  exit 0
+fi
 
 bare="$GIT_BASE/$REPOSITORY"
 if [ ! -d "$bare" ]; then

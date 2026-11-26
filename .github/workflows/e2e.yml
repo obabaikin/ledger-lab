@@ -1,0 +1,195 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, labeled]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+  MODULES: ledger-service gateway generator control reporting
+
+jobs:
+  # On main (pushed, nightly or by hand) the test runs exactly the images CI pushed to GHCR, so it waits for CI's images
+  # job of the same commit; a push with nothing to deploy waits for nothing.
+  # A job of its own, so the wait does not count against the test's time limit.
+  images-ready:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deploy: ${{ steps.changed.outputs.deploy }}
+    env:
+      CI_WORKFLOW: .github/workflows/ci.yml
+      IMAGES_JOB: images
+      POLL_SECONDS: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Anything to deploy since the parent commit
+        id: changed
+        env:
+          # infra/ci/changed.sh's exit code for nothing to deploy.
+          CHANGED_NOTHING: 3
+        run: |
+          infra/ci/changed.sh HEAD^ HEAD && code=0 || code=$?
+          case "$code" in
+            0) echo "deploy=true" >>"$GITHUB_OUTPUT" ;;
+            "$CHANGED_NOTHING") echo "deploy=false" >>"$GITHUB_OUTPUT" ;;
+            *) exit "$code" ;;
+          esac
+      # CI's run of this push to main, not of a tag pushed on the same commit (its images job is skipped); the jobs of a
+      # run are those of its latest attempt.
+      - name: Wait for CI's images job of this commit
+        if: steps.changed.outputs.deploy == 'true' || github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while :; do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=100" \
+              --jq "[.workflow_runs[] | select(.path == \"$CI_WORKFLOW\")] | max_by(.created_at) | .id // empty")
+            job=""
+            if [ -n "$run" ]; then
+              job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
+                --jq "[.jobs[] | select(.name == \"$IMAGES_JOB\")] | last | if . then \"\\(.status) \\(.conclusion)\" else \"\" end")
+            fi
+            case "$job" in
+              "completed success") echo "images: pushed"; exit 0 ;;
+              completed*) echo "CI's $IMAGES_JOB job ended as: ${job#completed }" >&2; exit 1 ;;
+              *) echo "CI's $IMAGES_JOB job: ${job:-not started}"; sleep "$POLL_SECONDS" ;;
+            esac
+          done
+
+  # The deploy pointer (infra/ci/move-pointer.sh) reads this workflow by its file's name and moves to a commit of main
+  # only when the commit's last completed run here passed: renaming the file stops the deploys.
+  e2e:
+    needs: images-ready
+    if: >-
+      (needs.images-ready.result == 'success' || needs.images-ready.result == 'skipped') && !cancelled()
+      && (github.event_name != 'pull_request'
+          || (github.event.pull_request.head.repo.full_name == github.repository
+              && contains(github.event.pull_request.labels.*.name, 'e2e')
+              && (github.event.action != 'labeled' || github.event.label.name == 'e2e')))
+    runs-on: ubuntu-latest
+    # Tools and the parent's images, Flux and the parent's bank, the bank's steady state, the chain of releases over
+    # it (13 to 19 minutes on k3d when the chart changed and all five services are checked, about 7 with two), the
+    # crash, and the verdicts of the periods crossed and of the one after them (up to 17 minutes).
+    timeout-minutes: 60
+    # Per job, so a run the job's condition skips (a pull request's other label) takes no place and cancels nothing.
+    # Only a pull request's run is cancelled by a newer one: a cancelled run on main would hold the deploy pointer.
+    concurrency:
+      group: e2e-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    env:
+      # Only a push is skipped: a nightly run still replaces control for its version (scenario.py mode).
+      NOTHING_TO_DEPLOY: ${{ github.event_name == 'push' && needs.images-ready.outputs.deploy == 'false' }}
+      K3D_VERSION: v5.9.0
+      K3D_SHA256: 06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0
+      KUBECTL_VERSION: v1.36.4
+      KUBECTL_SHA256: 8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a
+      HELM_VERSION: v4.3.0
+      HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+      # A GitHub runner has 4 vCPU and 16 GB.
+      NODE_CPUS: 4
+      # A daemon left after an image's build would hold its memory beside the bank.
+      GRADLE_OPTS: -Dorg.gradle.daemon=false
+      # On main the commit's own images are exactly those the server will pull (infra/k3d/images.sh); its parent's may
+      # be built.
+      COMMIT_IMAGES_SOURCE: ${{ github.ref == 'refs/heads/main' && 'registry' || 'any' }}
+    steps:
+      - name: Nothing to deploy
+        if: env.NOTHING_TO_DEPLOY == 'true'
+        run: echo "nothing to deploy since the parent commit, skipped"
+      - if: env.NOTHING_TO_DEPLOY != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # git describe names the version the page shows, and Flux reads the commits from a copy of this clone.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install k3d, kubectl and Helm
+        if: env.NOTHING_TO_DEPLOY != 'true'
+        run: |
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$bin/k3d" "https://github.com/k3d-io/k3d/releases/download/$K3D_VERSION/k3d-linux-amd64"
+          echo "$K3D_SHA256  $bin/k3d" | sha256sum -c -
+          curl -fsSL -o "$bin/kubectl" "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
+          echo "$KUBECTL_SHA256  $bin/kubectl" | sha256sum -c -
+          curl -fsSL -o "$RUNNER_TEMP/helm.tar.gz" "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$bin" --strip-components=1 linux-amd64/helm
+          chmod +x "$bin/k3d" "$bin/kubectl"
+          echo "$bin" >>"$GITHUB_PATH"
+      - name: On main, this commit's images are those CI pushed to GHCR
+        if: env.NOTHING_TO_DEPLOY != 'true' && github.ref == 'refs/heads/main'
+        run: |
+          missing=$(infra/ci/missing-images.sh)
+          if [ -n "$missing" ]; then
+            echo "no image in GHCR for: $missing" >&2
+            exit 1
+          fi
+      # An image not in GHCR is built: a pull request's own, or the parent's when its tag is not there.
+      - if: env.NOTHING_TO_DEPLOY != 'true'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 25
+      - if: env.NOTHING_TO_DEPLOY != 'true'
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      # The server deploys each commit of main over its first parent, so that step is the one tested. A pull request's
+      # checkout is its merge into main, whose first parent is main. A parent from before Flux cannot be installed.
+      - name: How this commit is tested against its parent
+        if: env.NOTHING_TO_DEPLOY != 'true'
+        id: mode
+        run: |
+          infra/ci/changed.sh HEAD^ HEAD && code=0 || code=$?
+          base_flux=no
+          if git cat-file -e HEAD^:infra/flux/release.sh 2>/dev/null; then base_flux=yes; fi
+          mode=$(infra/e2e/scenario.py mode --event "$GITHUB_EVENT_NAME" --changed "$code" --base-flux "$base_flux")
+          echo "$mode, parent $(git rev-parse --short HEAD^)"
+          echo "mode=$mode" >>"$GITHUB_OUTPUT"
+          if [ "$mode" = transition ]; then echo "base=$(git rev-parse HEAD^)" >>"$GITHUB_OUTPUT"; fi
+      # Flux reads the pointer and the commits from a repository on the runner (infra/k3d/flux.sh): the run cannot
+      # write a pointer to GitHub, and a pull request's merge commit is on no branch there.
+      - name: Start the bank in k3d through Flux
+        if: env.NOTHING_TO_DEPLOY != 'true' && steps.mode.outputs.mode != 'skip'
+        id: up
+        env:
+          BASE: ${{ steps.mode.outputs.base }}
+        run: |
+          if [ -n "$BASE" ]; then
+            infra/e2e/install-base.sh "$BASE"
+          else
+            IMAGES_SOURCE="$COMMIT_IMAGES_SOURCE" infra/e2e/install-base.sh HEAD
+          fi
+      - name: Run the scenario
+        if: env.NOTHING_TO_DEPLOY != 'true' && steps.mode.outputs.mode != 'skip'
+        env:
+          BASE: ${{ steps.mode.outputs.base }}
+          IMAGES_SOURCE: ${{ env.COMMIT_IMAGES_SOURCE }}
+        run: infra/e2e/scenario.py run ${BASE:+--base "$BASE"} --artifacts "$RUNNER_TEMP/e2e-artifacts"
+      # Also after the scenario's own collection: a failed start or the time limit leave none.
+      - name: Collect the cluster's state
+        if: failure() || cancelled()
+        run: infra/e2e/scenario.py collect --artifacts "$RUNNER_TEMP/e2e-artifacts/cluster"
+      - if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-artifacts
+          path: ${{ runner.temp }}/e2e-artifacts
+          if-no-files-found: ignore

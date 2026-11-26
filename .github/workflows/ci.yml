@@ -72,7 +72,7 @@ jobs:
     env:
       TERRAFORM_IMAGE: hashicorp/terraform:1.16.6@sha256:bfffc1ded5fbf0a17beaaf22eb4793980abdb19d0761ff6a3a0efb2ab4d9b316
       SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
-      SHELLCHECK_DIRS: infra/server infra/k3d infra/terraform infra/ci infra/flux
+      SHELLCHECK_DIRS: infra/server infra/k3d infra/terraform infra/ci infra/flux infra/e2e
       HELM_VERSION: v4.3.0
       HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
     steps:
@@ -95,7 +95,7 @@ jobs:
         run: |
           for dir in $SHELLCHECK_DIRS; do git ls-files -z -- "$dir/*.sh"; done |
             xargs -0 -r docker run --rm -v "$PWD:/w" -w /w "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR
-      - name: k3d images tests
+      - name: End-to-end scenario and k3d images tests
         run: python3 -m unittest discover -v -s infra/e2e -p '*_test.py'
       - name: Release check tests
         run: python3 -m unittest discover -v -s infra/release-check -p '*_test.py'
