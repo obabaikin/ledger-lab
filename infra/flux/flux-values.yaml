@@ -1,24 +1,24 @@
 # Values of the fluxcd-community/flux2 chart (version in infra/flux/install.sh). Only the controllers a deploy needs:
 # the source of the chart and the pointer, the Kustomization that applies the pointer, the HelmReleases, the events
 # that mail the outcome. Images are tagged by the module's hash in the pointer, so image automation stays off.
-# Memory: an estimate before the peak is measured on k3d with the bank's chart; after the first chain source took
-# 53 MiB and kustomize 61 MiB.
+# Memory: 1.25 x the peak measured on k3d over seven chains of the bank's chart in five hours (kustomize 76 MiB,
+# helm 54, source 48, notification 43).
 sourceController:
   resources:
-    requests: {cpu: 50m, memory: 80Mi}
-    limits: {memory: 80Mi}
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 64Mi}
 kustomizeController:
   resources:
-    requests: {cpu: 50m, memory: 80Mi}
-    limits: {memory: 80Mi}
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {memory: 96Mi}
 helmController:
   resources:
-    requests: {cpu: 50m, memory: 64Mi}
-    limits: {memory: 64Mi}
+    requests: {cpu: 50m, memory: 68Mi}
+    limits: {memory: 68Mi}
 notificationController:
   resources:
-    requests: {cpu: 50m, memory: 64Mi}
-    limits: {memory: 64Mi}
+    requests: {cpu: 50m, memory: 56Mi}
+    limits: {memory: 56Mi}
 imageAutomationController:
   create: false
 imageReflectionController:
