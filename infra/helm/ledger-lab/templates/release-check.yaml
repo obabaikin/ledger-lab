@@ -1,0 +1,75 @@
+{{- /*
+The check after a service's upgrade: Flux runs the release's tests once the new pods are ready, and a failed one rolls
+this service back and holds the releases after it. The Job only asks Prometheus (files/release_check.py); the script
+comes with the hook, so a release without the check holds nothing of it.
+*/}}
+{{- if .Values.releaseCheck.enabled }}
+{{- $root := . }}
+{{- $script := .Files.Get "files/release_check.py" }}
+{{- if not $script }}
+{{- fail "files/release_check.py is empty or missing: the release check would not run" }}
+{{- end }}
+{{- $settle := include "ledger-lab.whole" (list "releaseCheck.settleSeconds" .Values.releaseCheck.settleSeconds true) }}
+{{- $aftermath := include "ledger-lab.whole" (list "releaseCheck.chaosAftermathSeconds" .Values.releaseCheck.chaosAftermathSeconds true) }}
+{{- range $name, $service := .Values.services }}
+{{- if include "ledger-lab.renders" (list $root $name) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: release-check-{{ $name }}
+  labels: {{- include "ledger-lab.labels" (dict "name" "release-check") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  release_check.py: {{ $script | quote }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: release-check-{{ $name }}
+  labels: {{- include "ledger-lab.labels" (dict "name" "release-check") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    # Kept after it ends, until the next check of this service: its line is the reason of a rollback.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  # A second try would judge a later window than the upgrade's.
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" "release-check") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: release-check
+          image: {{ $root.Values.releaseCheck.image }}
+          command: ["python3", "/scripts/release_check.py"]
+          env:
+            - {name: SERVICE, value: {{ $name | quote }}}
+            - {name: PROMETHEUS_URL, value: "http://prometheus:9090"}
+            - {name: ROLLOUT_SECONDS, value: {{ include "ledger-lab.whole" (list (printf "services.%s.rolloutSeconds" $name) $service.rolloutSeconds false) | quote }}}
+            - {name: SETTLE_SECONDS, value: {{ $settle | quote }}}
+            - {name: CHAOS_AFTERMATH_SECONDS, value: {{ $aftermath | quote }}}
+          # A failed check's line is also the pod's termination message, read without its log.
+          terminationMessagePolicy: FallbackToLogsOnError
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ $root.Values.releaseCheck.runAsUser }}
+            {{- include "ledger-lab.restricted" $root | nindent 12 }}
+          resources:
+            requests: {memory: {{ $root.Values.releaseCheck.memory }}}
+            limits: {memory: {{ $root.Values.releaseCheck.memory }}}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+      volumes:
+        - name: scripts
+          configMap: {name: release-check-{{ $name }}}
+{{- end }}
+{{- end }}
+{{- end }}

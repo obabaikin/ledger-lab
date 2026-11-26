@@ -3,6 +3,9 @@
 # each waiting for the one before it, so a deploy replaces one service at a time in a fixed order.
 # Usage: infra/flux/release.sh <commit> <git URL of the repository> [<values file> ...]; values files are paths in the
 # repository at that commit, applied after the chart's own. Prints release.yaml.
+# PREVIOUS_RELEASE names the release.yaml the pointer held before: a service whose image tag differs from the one there
+# gets the release check (the chart's templates/release-check.yaml); one that keeps its tag, or has none there, gets
+# none and does not wait for it. Without PREVIOUS_RELEASE, as on a first install, no service is checked.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -17,6 +20,7 @@ SECRET_VALUES=ledger-lab-values
 # Above the chart's setupWaitSeconds (a setup Job's wait for Kafka or Postgres) and a service's start under load.
 RELEASE_TIMEOUT=10m
 SOURCE_INTERVAL=1h
+PREVIOUS_RELEASE="${PREVIOUS_RELEASE:-}"
 
 if [ $# -lt 2 ]; then
   echo "usage: $0 <commit> <git URL> [<values file> ...]" >&2
@@ -28,7 +32,18 @@ shift 2
 for file in "$@"; do
   git cat-file -e "$commit:$file" 2>/dev/null || { echo "no $file at $commit" >&2; exit 2; }
 done
+if [ -n "$PREVIOUS_RELEASE" ] && [ ! -r "$PREVIOUS_RELEASE" ]; then
+  echo "no previous release file $PREVIOUS_RELEASE" >&2
+  exit 2
+fi
 version=$(git describe --tags --match 'v[0-9]*' --long --always "$commit")
+
+# The line of a release's values that carries its service's tag: written below, read back from the pointer before.
+tag_line() { echo "    services: {$1: {tag: $2}}"; }
+previous_tag() {
+  [ -n "$PREVIOUS_RELEASE" ] || return 0
+  sed -n "s/^$(tag_line "$1" '\([0-9a-f]*\)')\$/\1/p" "$PREVIOUS_RELEASE"
+}
 
 cat <<EOF
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -59,7 +74,15 @@ spec:
   releaseName: $component
   interval: $SOURCE_INTERVAL
   timeout: $RELEASE_TIMEOUT
+  # A release that fails, by its pods or by its test, goes back to its last revision and stays failed, so the releases
+  # after it do not start.
+  upgrade:
+    remediation: {retries: 0, remediateLastFailure: true, ignoreTestFailures: false}
+  driftDetection: {mode: enabled}
 EOF
+  if [ -n "$tag" ]; then
+    echo "  test: {enable: true}"
+  fi
   if [ -n "$previous" ]; then
     echo "  dependsOn: [{name: $previous}]"
   fi
@@ -84,7 +107,11 @@ EOF
     version: $version
 EOF
   if [ -n "$tag" ]; then
-    echo "    services: {$component: {tag: $tag}}"
+    tag_line "$component" "$tag"
+    before=$(previous_tag "$component")
+    if [ -n "$before" ] && [ "$before" != "$tag" ]; then
+      echo "    releaseCheck: {enabled: true}"
+    fi
   fi
   previous="$component"
 done

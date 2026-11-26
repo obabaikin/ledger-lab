@@ -5,6 +5,8 @@ import com.ledgerlab.control.DatabaseClock;
 import com.ledgerlab.control.entry.InviteNotValidException;
 import com.ledgerlab.control.entry.InviteRepository;
 import com.ledgerlab.control.entry.SessionNotFoundException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -19,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class ChaosService {
 
     private static final long MILLIS_PER_SECOND = 1000L;
+    /** Read by the release check (infra/release-check), which leaves a window with chaos in it unchecked. */
+    public static final String METRIC = "control.chaos.events";
 
     private static final Logger log = LoggerFactory.getLogger(ChaosService.class);
 
@@ -27,13 +31,22 @@ public class ChaosService {
     private final LedgerInstances ledger;
     private final DatabaseClock clock;
     private final ControlProperties props;
+    private final Counter crashes;
 
-    public ChaosService(InviteRepository invites, ChaosRepository events, LedgerInstances ledger, DatabaseClock clock, ControlProperties props) {
+    public ChaosService(
+        InviteRepository invites,
+        ChaosRepository events,
+        LedgerInstances ledger,
+        DatabaseClock clock,
+        ControlProperties props,
+        MeterRegistry registry
+    ) {
         this.invites = invites;
         this.clock = clock;
         this.events = events;
         this.ledger = ledger;
         this.props = props;
+        this.crashes = Counter.builder(METRIC).description("Chaos presses that sent a crash to the ledger").register(registry);
     }
 
     /**
@@ -61,6 +74,8 @@ public class ChaosService {
         if (readyIn > 0) {
             throw new ChaosUsedRecentlyException(readyIn);
         }
+        // Counted before the calls: an instance may crash even when its answer is lost.
+        crashes.increment();
         var crashed = ledger.crashAll();
         if (crashed.isEmpty()) {
             throw new LedgerDidNotAnswerException();

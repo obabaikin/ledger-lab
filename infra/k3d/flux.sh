@@ -4,6 +4,7 @@
 # the cluster over HTTP (infra/k3d/git-http.py), so the working repository and its remote are left as they are.
 # Usage: infra/k3d/flux.sh [<commit>] [<values file in the repository> ...]; the commit defaults to HEAD. Returns once
 # the pointer moved; WAIT=1 also waits until the last release of the chain is ready on the new revision.
+# The deploy window is off, so the pointer is applied at once; WINDOW=on keeps it (schedules: infra/flux/window.sh).
 # Needs docker, k3d, kubectl, helm and git on PATH.
 set -eu
 
@@ -16,6 +17,7 @@ TREES="$ROOT/build/flux-trees"
 SERVER_PID="$GIT_BASE/server.pid"
 GIT_PORT="${GIT_PORT:-9418}"
 POINTER_BRANCH=deploy
+POINTER_FILE=release.yaml
 FLUX_NAMESPACE=flux-system
 LAST_RELEASE=control
 CHAIN_TIMEOUT_SECONDS="${CHAIN_TIMEOUT_SECONDS:-3600}"
@@ -49,11 +51,17 @@ git -C "$ROOT" push -q -f "$bare" "$commit:refs/heads/main"
 
 # The pointer: one commit on the deploy branch with release.yaml alone, made without a checkout.
 release=$(mktemp)
-trap 'rm -f "$release"' EXIT
-(cd "$ROOT" && infra/flux/release.sh "$commit" "$url" "$@") >"$release"
-blob=$(git -C "$bare" hash-object -w "$release")
-tree_object=$(printf '100644 blob %s\trelease.yaml\n' "$blob" | git -C "$bare" mktree)
+previous=$(mktemp)
+trap 'rm -f "$release" "$previous"' EXIT
 parent=$(git -C "$bare" rev-parse --verify --quiet "refs/heads/$POINTER_BRANCH" || true)
+if [ -n "$parent" ]; then
+  git -C "$bare" show "$parent:$POINTER_FILE" >"$previous"
+  (cd "$ROOT" && PREVIOUS_RELEASE="$previous" infra/flux/release.sh "$commit" "$url" "$@") >"$release"
+else
+  (cd "$ROOT" && infra/flux/release.sh "$commit" "$url" "$@") >"$release"
+fi
+blob=$(git -C "$bare" hash-object -w "$release")
+tree_object=$(printf '100644 blob %s\t%s\n' "$blob" "$POINTER_FILE" | git -C "$bare" mktree)
 pointer=$(GIT_AUTHOR_NAME=k3d GIT_AUTHOR_EMAIL=k3d@localhost GIT_COMMITTER_NAME=k3d GIT_COMMITTER_EMAIL=k3d@localhost \
   git -C "$bare" commit-tree "$tree_object" ${parent:+-p "$parent"} -m "deploy $commit")
 git -C "$bare" update-ref "refs/heads/$POINTER_BRANCH" "$pointer"
@@ -65,7 +73,7 @@ if [ ! -f "$SERVER_PID" ] || ! kill -0 "$(cat "$SERVER_PID")" 2>/dev/null; then
   echo $! >"$SERVER_PID"
 fi
 
-NAMESPACE="$NAMESPACE" "$ROOT/infra/flux/install.sh" "$url"
+NAMESPACE="$NAMESPACE" WINDOW="${WINDOW:-off}" "$ROOT/infra/flux/install.sh" "$url"
 requested=$(date +%s)
 kubectl --namespace "$FLUX_NAMESPACE" annotate --overwrite gitrepository "$POINTER_BRANCH" \
   "reconcile.fluxcd.io/requestedAt=$requested" >/dev/null

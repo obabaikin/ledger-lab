@@ -19,6 +19,21 @@ initMemory: 64Mi
 # their volumes are provisioned first.
 setupWaitSeconds: 300
 
+# The check after a service's upgrade (templates/release-check.yaml): no transfer slower than 3 s, none refused and no
+# pool timeout while the service was replaced and for settleSeconds after, read from Prometheus.
+releaseCheck:
+  # infra/flux/release.sh turns it on for the releases whose image changed against the pointer before; a release that
+  # keeps its image has no check and does not wait.
+  enabled: false
+  image: python:3-alpine
+  memory: 64Mi
+  # The image's default user is root.
+  runAsUser: 65534
+  # The new version under load before it is judged.
+  settleSeconds: 120
+  # A chaos press this long before the checked time still leaves it unchecked; as control.outside.chaos-aftermath.
+  chaosAftermathSeconds: 60
+
 # The bank's clock, the same in every service: they cut time at the same instants (ADR 0021). A changed length needs
 # empty databases: the services refuse to start beside partitions cut for another one. Emptied volumes need the setup
 # Jobs deleted too, or the topics and the monitor role are not created again (templates/_helpers.tpl).
@@ -160,6 +175,10 @@ services:
     # Two: a third added no throughput, the ledger waits on row locks in Postgres, not on its own CPU (about
     # 120m per pod at 1300 TPS, measured on the server), and its memory is needed while the gateway is replaced.
     replicas: 2
+    # How far back from its end the release check looks, besides its settle time: the time an upgrade takes to replace
+    # the service's pods. An estimate for every service until it is measured on k3d; a longer one only reaches into
+    # the time checked for the release before.
+    rolloutSeconds: 120
     # A batch of 100 transfers per consumer, three consumers per pod. Its peak on the server was 392Mi.
     memory: 700Mi
   gateway:
@@ -169,6 +188,7 @@ services:
     # (docs/adr/0020-gateway-deploys-without-downtime.md). A deploy starts the new pod before the old one stops.
     replicas: 1
     rollingUpdate: true
+    rolloutSeconds: 120
     # The pause (5 s), the web server's drain (at most 15 s; the longest wait is 10 s) and the Kafka listeners' stop
     # (at most 10 s), with room left.
     terminationGraceSeconds: 40
@@ -199,6 +219,7 @@ services:
     module: generator
     port: 8082
     replicas: 1
+    rolloutSeconds: 90
     # The new pod starts beside the old one and stays silent until the old one lets go of the sender lease.
     rollingUpdate: true
     # The bank's clients. Sized when the journals of a run stayed on the heap (at most 179 MiB live at 279,000 entries,
@@ -218,6 +239,7 @@ services:
     module: control
     port: 8083
     replicas: 1
+    rolloutSeconds: 90
     # The kernel killed a 448Mi pod after 9 hours with a heap of half of it, so at least 224 MiB was outside the
     # heap then; the heap is fixed and the rest left to the JVM, its threads and malloc.
     memory: 512Mi
@@ -231,6 +253,7 @@ services:
     module: reporting
     port: 8084
     replicas: 1
+    rolloutSeconds: 90
     # The page's numbers go on while the new pod catches up.
     rollingUpdate: true
     memory: 448Mi

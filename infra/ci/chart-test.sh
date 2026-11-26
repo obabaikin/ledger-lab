@@ -1,6 +1,7 @@
 #!/bin/sh
 # Checks the chart with helm template: the setup Jobs' names follow their spec only, the bank's numbers have upper
-# bounds, control's pulse options are the chart's load values, and the six components split the chart without a gap.
+# bounds, control's pulse options are the chart's load values, the six components split the chart without a gap, and
+# only a release told so carries the release check.
 set -eu
 
 CHART="$(cd "$(dirname "$0")/../helm/ledger-lab" && pwd)"
@@ -134,6 +135,42 @@ check "platform renders no workload of the bank's services" \
 refuses "an unknown component" "component must be empty, platform or one of" --set component=web
 check "a service's release checks the bank's numbers too" \
   "$(helm template ledger-lab "$CHART" --set component=gateway --set retentionHours=8761 2>&1 | grep -c 'at most 8760')" 1
+
+checked() { render --set releaseCheck.enabled=true "$@"; }
+check_env() {
+  variable="$1"
+  shift
+  checked --set component=gateway "$@" | grep -F "{name: $variable," | sed 's/^ *//'
+}
+check "a release that is not told to has no release check" "$(render --set component=gateway | grep -c 'release-check' || true)" 0
+check "a release told to check carries the check of its own service only, as its helm test" \
+  "$(checked --set component=gateway --show-only templates/release-check.yaml |
+    grep -E '^(kind|  name|    helm.sh/hook):' | paste -d' ' - - - | tr -s ' ' | sort | tr '\n' ';')" \
+  "kind: ConfigMap name: release-check-gateway helm.sh/hook: test;kind: Job name: release-check-gateway helm.sh/hook: test;"
+check "the platform has no release check" "$(checked --set component=platform | grep -c 'release-check' || true)" 0
+check "the checks of the six components are the whole chart's" "$(union --set releaseCheck.enabled=true)" \
+  "$(checked | documents)"
+check "the check looks back over its service's rollout" \
+  "$(check_env ROLLOUT_SECONDS --set services.gateway.rolloutSeconds=75 --set services.ledger.rolloutSeconds=200)" \
+  '- {name: ROLLOUT_SECONDS, value: "75"}'
+check "the check waits releaseCheck.settleSeconds" "$(check_env SETTLE_SECONDS --set releaseCheck.settleSeconds=30)" \
+  '- {name: SETTLE_SECONDS, value: "30"}'
+check "the check's chaos aftermath is releaseCheck.chaosAftermathSeconds" \
+  "$(check_env CHAOS_AFTERMATH_SECONDS --set releaseCheck.chaosAftermathSeconds=45)" \
+  '- {name: CHAOS_AFTERMATH_SECONDS, value: "45"}'
+check "the check names its service" "$(check_env SERVICE)" '- {name: SERVICE, value: "gateway"}'
+check "the check has a memory limit" \
+  "$(checked --set component=gateway --set releaseCheck.memory=48Mi --show-only templates/release-check.yaml |
+    grep -c 'limits: {memory: 48Mi}')" 1
+check "the check carries the chart's script" \
+  "$(checked --set component=gateway --show-only templates/release-check.yaml | grep -c 'release_check.py: .*def check(')" 1
+refuses "a rollout length of zero" "services.gateway.rolloutSeconds must be above zero" \
+  --set component=gateway --set releaseCheck.enabled=true --set services.gateway.rolloutSeconds=0
+: >"$copy/ledger-lab/files/release_check.py"
+CHART="$copy/ledger-lab"
+refuses "an empty release check script" "files/release_check.py is empty or missing" \
+  --set component=gateway --set releaseCheck.enabled=true
+CHART="$original"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed"
