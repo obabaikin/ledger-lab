@@ -5,7 +5,9 @@
 # Usage: infra/k3d/flux.sh [<commit>] [<values file in the repository> ...]; the commit defaults to HEAD. Returns once
 # the pointer moved; WAIT=1 also waits until the last release of the chain is ready on the new revision.
 # The deploy window is off, so the pointer is applied at once; WINDOW=on keeps it (schedules: infra/flux/window.sh).
-# Needs docker, k3d, kubectl, helm and git on PATH.
+# Which services get the release check is decided against the pointer the cluster runs in full: the one holding the
+# version control reports (infra/flux/deployed-release.sh). While control does not answer, no service is checked.
+# Needs docker, k3d, kubectl, helm, git, curl and python3 on PATH.
 set -eu
 
 CLUSTER="${CLUSTER:-ledger-lab}"
@@ -20,6 +22,8 @@ POINTER_BRANCH=deploy
 POINTER_FILE=release.yaml
 FLUX_NAMESPACE=flux-system
 LAST_RELEASE=control
+CONTROL_PORT="${CONTROL_PORT:-8083}"
+SITE_TIMEOUT_SECONDS=5
 CHAIN_TIMEOUT_SECONDS="${CHAIN_TIMEOUT_SECONDS:-3600}"
 # The name k3d gives the host inside the cluster.
 HOST_IN_CLUSTER=host.k3d.internal
@@ -54,8 +58,18 @@ release=$(mktemp)
 previous=$(mktemp)
 trap 'rm -f "$release" "$previous"' EXIT
 parent=$(git -C "$bare" rev-parse --verify --quiet "refs/heads/$POINTER_BRANCH" || true)
+deployed=""
 if [ -n "$parent" ]; then
-  git -C "$bare" show "$parent:$POINTER_FILE" >"$previous"
+  deployed=$(curl -sf --max-time "$SITE_TIMEOUT_SECONDS" "http://localhost:$CONTROL_PORT/api/site" |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])' 2>/dev/null || true)
+  if [ -z "$deployed" ]; then
+    echo "control does not answer with its version: no service gets the release check" >&2
+  elif ! GIT_DIR="$bare" "$ROOT/infra/flux/deployed-release.sh" "$deployed" "$POINTER_BRANCH" >"$previous"; then
+    echo "no service gets the release check" >&2
+    deployed=""
+  fi
+fi
+if [ -n "$deployed" ]; then
   (cd "$ROOT" && PREVIOUS_RELEASE="$previous" infra/flux/release.sh "$commit" "$url" "$@") >"$release"
 else
   (cd "$ROOT" && infra/flux/release.sh "$commit" "$url" "$@") >"$release"

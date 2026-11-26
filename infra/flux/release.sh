@@ -3,9 +3,13 @@
 # each waiting for the one before it, so a deploy replaces one service at a time in a fixed order.
 # Usage: infra/flux/release.sh <commit> <git URL of the repository> [<values file> ...]; values files are paths in the
 # repository at that commit, applied after the chart's own. Prints release.yaml.
-# PREVIOUS_RELEASE names the release.yaml the pointer held before: a service whose image tag differs from the one there
-# gets the release check (the chart's templates/release-check.yaml); one that keeps its tag, or has none there, gets
-# none and does not wait for it. Without PREVIOUS_RELEASE, as on a first install, no service is checked.
+# PREVIOUS_RELEASE names the release.yaml of the last pointer whose whole chain was deployed (deployed-release.sh finds
+# it), not of the pointer before: after a rollback the services below the failed one still run what that one left them.
+# A service whose image tag differs from the one there gets the release check (the chart's
+# templates/release-check.yaml); one that keeps its tag, or has none there, gets none and does not wait for it. A chart
+# that differs from the one at that pointer's commit can replace any pod, so then every service is checked; so it is
+# when that commit is not in this repository and the charts cannot be compared. Without PREVIOUS_RELEASE, as on a first
+# install, no service is checked.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -38,12 +42,24 @@ if [ -n "$PREVIOUS_RELEASE" ] && [ ! -r "$PREVIOUS_RELEASE" ]; then
 fi
 version=$(git describe --tags --match 'v[0-9]*' --long --always "$commit")
 
-# The line of a release's values that carries its service's tag: written below, read back from the pointer before.
+# The lines that carry the chart's commit and a service's tag: written below, read back from the deployed pointer.
+commit_line() { echo "  ref: {commit: $1}"; }
 tag_line() { echo "    services: {$1: {tag: $2}}"; }
 previous_tag() {
   [ -n "$PREVIOUS_RELEASE" ] || return 0
   sed -n "s/^$(tag_line "$1" '\([0-9a-f]*\)')\$/\1/p" "$PREVIOUS_RELEASE"
 }
+
+chart_changed=false
+if [ -n "$PREVIOUS_RELEASE" ]; then
+  deployed=$(sed -n "s/^$(commit_line '\([0-9a-f]*\)')\$/\1/p" "$PREVIOUS_RELEASE")
+  if [ -z "$deployed" ] || ! git cat-file -e "$deployed^{commit}" 2>/dev/null; then
+    echo "no commit '$deployed' of $PREVIOUS_RELEASE here to compare the chart with: every service is checked" >&2
+    chart_changed=true
+  elif ! git diff --quiet "$deployed" "$commit" -- ":/$CHART"; then
+    chart_changed=true
+  fi
+fi
 
 cat <<EOF
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -54,7 +70,7 @@ metadata:
 spec:
   interval: $SOURCE_INTERVAL
   url: $url
-  ref: {commit: $commit}
+$(commit_line "$commit")
 EOF
 
 previous=""
@@ -109,7 +125,7 @@ EOF
   if [ -n "$tag" ]; then
     tag_line "$component" "$tag"
     before=$(previous_tag "$component")
-    if [ -n "$before" ] && [ "$before" != "$tag" ]; then
+    if [ "$chart_changed" = true ] || { [ -n "$before" ] && [ "$before" != "$tag" ]; }; then
       echo "    releaseCheck: {enabled: true}"
     fi
   fi

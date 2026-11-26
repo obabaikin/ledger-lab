@@ -21,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ChaosService {
 
     private static final long MILLIS_PER_SECOND = 1000L;
-    /** Read by the release check (infra/release-check), which leaves a window with chaos in it unchecked. */
+    /** Read by the release check (infra/helm/ledger-lab/files/release_check.py), which leaves a window with chaos in it unchecked. */
     public static final String METRIC = "control.chaos.events";
 
     private static final Logger log = LoggerFactory.getLogger(ChaosService.class);
