@@ -16,8 +16,6 @@ EXIT_KEPT = 0
 EXIT_FAILED = 1
 
 DEFAULT_SETTLE_SECONDS = 120
-# As control's control.outside.chaos-aftermath: slow transfers follow a crash of the ledger for this long.
-DEFAULT_CHAOS_AFTERMATH_SECONDS = 60
 PROMETHEUS_TIMEOUT_SECONDS = 10
 QUERY_PATH = "/api/v1/query"
 
@@ -108,7 +106,7 @@ def check(env, fetch=http_fetch, sleep=time.sleep, clock=time.time):
             raise NotChecked("PROMETHEUS_URL is not set")
         rollout = whole_seconds(env, "ROLLOUT_SECONDS")
         settle = whole_seconds(env, "SETTLE_SECONDS", DEFAULT_SETTLE_SECONDS)
-        aftermath = whole_seconds(env, "CHAOS_AFTERMATH_SECONDS", DEFAULT_CHAOS_AFTERMATH_SECONDS)
+        aftermath = whole_seconds(env, "CHAOS_AFTERMATH_SECONDS")
         window = max(1, rollout + settle)
         # A press shortly before the window still slows transfers inside it.
         chaos_window = window + aftermath

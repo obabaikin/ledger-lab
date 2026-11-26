@@ -46,7 +46,7 @@ abstract class IntegrationTest {
     private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT = new ParameterizedTypeReference<>() {
     };
 
-    /** In production topics are created by infrastructure (infra/kafka), not by the services. */
+    /** In production topics are created by the chart's create-topics Job (infra/helm/ledger-lab), not by the services. */
     @TestConfiguration(proxyBeanMethods = false)
     static class Topics {
 

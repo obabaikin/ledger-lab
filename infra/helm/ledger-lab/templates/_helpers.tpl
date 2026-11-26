@@ -12,6 +12,10 @@ prometheus.io/scrape: "true"
 prometheus.io/path: /actuator/prometheus
 {{- end }}
 
+{{- define "ledger-lab.prometheusUrl" -}}
+http://prometheus:9090
+{{- end }}
+
 {{- define "ledger-lab.restricted" -}}
 allowPrivilegeEscalation: false
 capabilities: {drop: [ALL]}

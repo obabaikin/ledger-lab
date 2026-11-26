@@ -14,7 +14,7 @@ if [ $# -lt 1 ] || [ $# -gt 2 ] || [ -z "$1" ]; then
   exit 2
 fi
 # As release.sh writes it into every release's values.
-version_line="    version: $1"
+version_line="    version: \"$1\""
 
 git rev-parse --verify --quiet "$POINTER^{commit}" >/dev/null || { echo "no pointer $POINTER" >&2; exit 2; }
 for pointer in $(git rev-list "$POINTER"); do

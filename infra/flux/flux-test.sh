@@ -1,8 +1,10 @@
 #!/bin/sh
-# Checks release.sh, deployed-release.sh and window.sh by their output: every release rolls back on a failure and
-# detects drift, a service is checked when its tag or the chart differs from the pointer deployed in full, that pointer
-# is found by the version control reports, and the window's jobs open and close it with a memory limit and no right
-# beyond reading and patching the pointer's Kustomization and listing Kustomizations.
+# Checks release.sh, deployed-release.sh and window.sh by their output: every release waits for the one before it in
+# the chain, rolls back on a failure and detects drift, a service is checked when its tag or the chart differs from the
+# pointer deployed in full, that pointer is found by the version control reports, also when a tag or the version is
+# digits alone, and the window's jobs open and close it with a memory limit and no right beyond reading and patching the
+# pointer's Kustomization and listing Kustomizations, fail when the Kustomization is not left as they were to leave it,
+# and do not both start after a time without the node.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -37,6 +39,21 @@ check "a failed upgrade of any release is rolled back, a failed test too" \
 check "every release detects drift" "$(grep -c '^  driftDetection: {mode: enabled}$' "$first")" 6
 check "the service releases run their tests, the platform has none" "$(grep -c '^  test: {enable: true}$' "$first")" 5
 check "the platform runs no test" "$(object_of "$first" platform | grep -c '^  test:' || true)" 0
+waits_for() {
+  awk '/^kind: HelmRelease$/ { if (name != "") printf "%s<-%s ", name, on; name = ""; on = ""; release = 1 }
+    release && name == "" && /^  name: / { name = $2 }
+    /^  dependsOn: / { on = $0; sub(/^  dependsOn: /, "", on) }
+    END { printf "%s<-%s ", name, on }' "$1"
+}
+check "every release waits for the one before it in the chain, the platform for none" "$(waits_for "$first")" \
+  "platform<- reporting<-[{name: platform}] ledger<-[{name: reporting}] gateway<-[{name: ledger}] \
+generator<-[{name: gateway}] control<-[{name: generator}] "
+check "every release has the timeout above a setup Job's wait" "$(grep -c '^  timeout: 10m$' "$first")" 6
+check "every release takes a new commit as a new chart" "$(grep -c '^      reconcileStrategy: Revision$' "$first")" 6
+check "every release reads the cluster's own Secret of values" \
+  "$(grep -A1 '^  valuesFrom:$' "$first" | grep -c '^    - {kind: Secret, name: ledger-lab-values, optional: true}$')" 6
+check "every service's tag is written as a string" "$(grep -cE '^    services: \{[a-z]+: \{tag: "[0-9a-f]{12}"\}\}$' "$first")" 5
+check "every release's version is written as a string" "$(grep -cE '^    version: "[^"]+"$' "$first")" 6
 check "without a pointer before, no service is checked" "$(checked "$first")" ""
 
 same="$work/same.yaml"
@@ -44,7 +61,7 @@ PREVIOUS_RELEASE="$first" "$HERE/release.sh" HEAD "$URL" >"$same"
 check "a service that keeps its tag is not checked" "$(checked "$same")" ""
 
 before="$work/before.yaml"
-sed 's/^    services: {gateway: {tag: [0-9a-f]*}}$/    services: {gateway: {tag: 000000000000}}/' "$first" >"$before"
+sed 's/^    services: {gateway: {tag: "[0-9a-f]*"}}$/    services: {gateway: {tag: "000000000000"}}/' "$first" >"$before"
 changed="$work/changed.yaml"
 PREVIOUS_RELEASE="$before" "$HERE/release.sh" HEAD "$URL" >"$changed"
 check "only the service whose tag changed is checked" "$(checked "$changed")" "gateway "
@@ -52,6 +69,13 @@ check "only the service whose tag changed is checked" "$(checked "$changed")" "g
 sed '/^    services: {ledger: /d' "$first" >"$before"
 PREVIOUS_RELEASE="$before" "$HERE/release.sh" HEAD "$URL" >"$changed"
 check "a service the pointer before did not hold is not checked" "$(checked "$changed")" ""
+
+# Digits alone, and digits around an e: both a number to YAML when unquoted.
+for digits in 123456789012 012345670123 12345e678901; do
+  sed "s/^    services: {gateway: {tag: \"[0-9a-f]*\"}}\$/    services: {gateway: {tag: \"$digits\"}}/" "$first" >"$before"
+  PREVIOUS_RELEASE="$before" "$HERE/release.sh" HEAD "$URL" >"$changed"
+  check "a tag of digits alone ($digits) in the deployed pointer is read as the tag it is" "$(checked "$changed")" "gateway "
+done
 
 if PREVIOUS_RELEASE="$work/absent.yaml" "$HERE/release.sh" HEAD "$URL" >/dev/null 2>&1; then
   check "a pointer before that cannot be read is refused" rendered refused
@@ -109,6 +133,27 @@ else
   check "a version no pointer holds gives no deployed pointer" none none
 fi
 
+# A commit without a tag before it has its abbreviated hash as its version; one of digits alone is found by trying.
+DIGITS_TRIES=5000
+numbered=""
+try=0
+while [ -z "$numbered" ] && [ "$try" -lt "$DIGITS_TRIES" ]; do
+  try=$((try + 1))
+  candidate=$(GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@localhost GIT_COMMITTER_NAME=test \
+    GIT_COMMITTER_EMAIL=test@localhost git commit-tree "$fixed^{tree}" -p "$fixed" -m "try $try")
+  case "$(version_of "$candidate")" in *[!0-9]*) ;; *) numbered="$candidate" ;; esac
+done
+if [ -z "$numbered" ]; then
+  check "a commit whose version is digits alone" none found
+else
+  "$HERE/release.sh" "$numbered" "$URL" >"$work/numbered.yaml"
+  check "a version of digits alone is written as a string" \
+    "$(grep -c "^    version: \"$(version_of "$numbered")\"\$" "$work/numbered.yaml")" 6
+  point "$work/numbered.yaml"
+  check "the deployed pointer is found by a version of digits alone" \
+    "$("$HERE/deployed-release.sh" "$(version_of "$numbered")" | grep '^  ref: ')" "  ref: {commit: $numbered}"
+fi
+
 charted=$(commit_change infra/helm/ledger-lab/values.yaml)
 PREVIOUS_RELEASE="$work/again.yaml" "$HERE/release.sh" "$charted" "$URL" >"$work/charted.yaml"
 check "a chart changed since the deployed pointer's commit has every service checked" \
@@ -128,12 +173,63 @@ cd "$HERE/../.."
 
 window="$work/window.yaml"
 "$HERE/window.sh" >"$window"
-schedule_of() { object_of "$1" "$2" | grep -E '^  schedule:|args:' | sed 's/^ *//' | tr '\n' ' '; }
+schedule_of() { object_of "$1" "$2" | grep -E '^  schedule:|^ +flux ' | sed 's/^ *//' | tr '\n' ' '; }
 check "the window opens at ten past every hour by resuming the pointer" "$(schedule_of "$window" deploy-window-open)" \
-  'schedule: "10 * * * *" args: [resume, kustomization, deploy, --namespace, flux-system] '
+  'schedule: "10 * * * *" flux resume kustomization deploy --namespace flux-system '
 check "the window closes at twenty past every hour by suspending the pointer" \
   "$(schedule_of "$window" deploy-window-close)" \
-  'schedule: "20 * * * *" args: [suspend, kustomization, deploy, --namespace, flux-system] '
+  'schedule: "20 * * * *" flux suspend kustomization deploy --namespace flux-system '
+
+minute_of() { object_of "$window" "$1" | sed -n 's/^  schedule: "\([0-9]*\) .*/\1/p'; }
+deadline_of() { object_of "$window" "$1" | sed -n 's/^  startingDeadlineSeconds: //p'; }
+window_seconds=$((($(minute_of deploy-window-close) - $(minute_of deploy-window-open)) * 60))
+for job in deploy-window-open deploy-window-close; do
+  deadline=$(deadline_of "$job")
+  if [ "${deadline:-$window_seconds}" -lt "$window_seconds" ]; then within=shorter; else within="${deadline:-none}"; fi
+  check "$job skips a run missed for longer than a time shorter than the window, so both never start at once" \
+    "$within" shorter
+done
+
+# A job's script, run with a flux that changes nothing and a kubectl that answers with the state given.
+tools="$work/tools"
+mkdir -p "$tools"
+cat >"$tools/flux" <<'EOF'
+#!/bin/sh
+echo "$@" >>"$CALLS"
+EOF
+cat >"$tools/kubectl" <<'EOF'
+#!/bin/sh
+echo "$@" >>"$CALLS"
+printf '%s' "$SUSPEND_STATE"
+exit "$KUBECTL_EXIT"
+EOF
+chmod +x "$tools/flux" "$tools/kubectl"
+script_of() {
+  object_of "$window" "$1" | awk '/^ +- \|$/ { on = 1; next } /^ +securityContext:$/ { on = 0 } on' | sed 's/^ *//'
+}
+job_ends() {
+  if CALLS="$work/calls" SUSPEND_STATE="$2" KUBECTL_EXIT="${3:-0}" PATH="$tools:$PATH" \
+      sh -euc "$(script_of "$1")" 2>/dev/null; then
+    echo ended
+  else
+    echo failed
+  fi
+}
+check "the closing job ends well when the pointer is suspended" "$(job_ends deploy-window-close true)" ended
+check "the closing job fails when the pointer is not suspended after flux suspend" \
+  "$(job_ends deploy-window-close false)" failed
+check "the closing job fails when the pointer has no suspend after flux suspend" "$(job_ends deploy-window-close '')" failed
+check "the opening job ends well when the pointer is resumed" "$(job_ends deploy-window-open false)" ended
+check "the opening job ends well when the resumed pointer has no suspend at all" "$(job_ends deploy-window-open '')" ended
+check "the opening job fails when the pointer is still suspended after flux resume" \
+  "$(job_ends deploy-window-open true)" failed
+check "a job that cannot read the pointer's state fails" "$(job_ends deploy-window-open false 1)" failed
+check "the jobs ask flux, then read the state of the pointer alone" \
+  "$(sort -u "$work/calls" | tr '\n' ';')" \
+  "--namespace flux-system get kustomization deploy -o jsonpath={.spec.suspend};\
+resume kustomization deploy --namespace flux-system;suspend kustomization deploy --namespace flux-system;"
+check "both jobs run their script with a shell that stops at the first failure" \
+  "$(grep -c '^ *command: \[sh, -euc\]$' "$window")" 2
 check "both jobs keep UTC" "$(grep -c '^  timeZone: Etc/UTC$' "$window")" 2
 check "both jobs have a memory limit" "$(grep -c '^ *limits: {memory: 64Mi}$' "$window")" 2
 rules_of() { awk '/^rules:$/ { on = 1; next } /^---$/ { on = 0 } on && !/^ *#/' "$1" | sed 's/^ *//' | tr '\n' ' '; }

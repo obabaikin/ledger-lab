@@ -155,9 +155,19 @@ check "the check looks back over its service's rollout" \
   '- {name: ROLLOUT_SECONDS, value: "75"}'
 check "the check waits releaseCheck.settleSeconds" "$(check_env SETTLE_SECONDS --set releaseCheck.settleSeconds=30)" \
   '- {name: SETTLE_SECONDS, value: "30"}'
-check "the check's chaos aftermath is releaseCheck.chaosAftermathSeconds" \
-  "$(check_env CHAOS_AFTERMATH_SECONDS --set releaseCheck.chaosAftermathSeconds=45)" \
+check "the check's chaos aftermath is chaosAftermathSeconds" \
+  "$(check_env CHAOS_AFTERMATH_SECONDS --set chaosAftermathSeconds=45)" \
   '- {name: CHAOS_AFTERMATH_SECONDS, value: "45"}'
+check "control's chaos aftermath is the same chaosAftermathSeconds" \
+  "$(render --set component=control --set chaosAftermathSeconds=45 | grep -F '{name: CONTROL_OUTSIDE_CHAOSAFTERMATH,' |
+    sed 's/^ *//')" \
+  '- {name: CONTROL_OUTSIDE_CHAOSAFTERMATH, value: "45s"}'
+check "the check and control ask the same Prometheus" \
+  "$(checked | grep -E '\{name: (PROMETHEUS_URL|CONTROL_PROMETHEUS_BASEURL),' | sed 's/.*value: //' | sort -u)" \
+  '"http://prometheus:9090"}'
+check "the check's image is named with its digest" \
+  "$(checked --set component=gateway --show-only templates/release-check.yaml |
+    grep -cE '^ +image: python:[0-9]+\.[0-9]+\.[0-9]+-alpine[0-9.]+@sha256:[0-9a-f]{64}$')" 1
 check "the check names its service" "$(check_env SERVICE)" '- {name: SERVICE, value: "gateway"}'
 check "the check has a memory limit" \
   "$(checked --set component=gateway --set releaseCheck.memory=48Mi --show-only templates/release-check.yaml |
@@ -166,6 +176,11 @@ check "the check carries the chart's script" \
   "$(checked --set component=gateway --show-only templates/release-check.yaml | grep -c 'release_check.py: .*def check(')" 1
 refuses "a rollout length of zero" "services.gateway.rolloutSeconds must be above zero" \
   --set component=gateway --set releaseCheck.enabled=true --set services.gateway.rolloutSeconds=0
+mkdir -p "$copy/ledger-lab/files/__pycache__" "$copy/packed"
+echo bytecode >"$copy/ledger-lab/files/__pycache__/release_check.pyc"
+helm package "$copy/ledger-lab" --destination "$copy/packed" >/dev/null
+check "the chart carries no bytecode a test run of the script left beside it" \
+  "$(tar -tzf "$copy"/packed/*.tgz | grep -c __pycache__ || true)" 0
 : >"$copy/ledger-lab/files/release_check.py"
 CHART="$copy/ledger-lab"
 refuses "an empty release check script" "files/release_check.py is empty or missing" \

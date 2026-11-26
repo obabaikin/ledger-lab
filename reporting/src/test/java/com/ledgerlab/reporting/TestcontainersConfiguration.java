@@ -24,7 +24,7 @@ class TestcontainersConfiguration {
             .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
     }
 
-    /** In production topics are created by infrastructure (infra/kafka), not by the services. */
+    /** In production topics are created by the chart's create-topics Job (infra/helm/ledger-lab), not by the services. */
     @Bean
     NewTopic transfersTopic(ReportingProperties props) {
         return new NewTopic(props.transfersTopic(), 4, (short) 1);

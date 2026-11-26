@@ -148,7 +148,8 @@ spec:
             {{- range $other := list "ledger" "gateway" "generator" "reporting" }}
             - {name: CONTROL_{{ upper $other }}_BASEURL, value: "http://{{ $other }}:{{ (get $root.Values.services $other).port }}"}
             {{- end }}
-            - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
+            - {name: CONTROL_PROMETHEUS_BASEURL, value: {{ include "ledger-lab.prometheusUrl" $root | quote }}}
+            - {name: CONTROL_OUTSIDE_CHAOSAFTERMATH, value: "{{ include "ledger-lab.whole" (list "chaosAftermathSeconds" $root.Values.chaosAftermathSeconds true) }}s"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
             - {name: CONTROL_LOAD_MINTPS, value: {{ int64 $root.Values.load.minPulseTps | quote }}}
             - {name: CONTROL_LOAD_MAXTPS, value: {{ int64 $root.Values.load.maxTps | quote }}}

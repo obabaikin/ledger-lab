@@ -14,6 +14,9 @@ version: dev
 
 managementPort: 9000
 chaos: true
+# Slow transfers follow a crash of the ledger for this long: control leaves the minutes after a chaos press out of the
+# bounds it promises, and the release check leaves a time this long after one unchecked.
+chaosAftermathSeconds: 60
 initMemory: 64Mi
 # A try of a setup Job (topics, the monitor role) waits this long for Kafka or Postgres to answer: on a fresh cluster
 # their volumes are provisioned first.
@@ -22,17 +25,16 @@ setupWaitSeconds: 300
 # The check after a service's upgrade (templates/release-check.yaml): no transfer slower than 3 s, none refused and no
 # pool timeout while the service was replaced and for settleSeconds after, read from Prometheus.
 releaseCheck:
-  # infra/flux/release.sh turns it on for the releases whose image changed against the pointer before; a release that
-  # keeps its image has no check and does not wait.
+  # infra/flux/release.sh turns it on for the services whose image tag differs from the one in the last pointer
+  # deployed in full, and for every service when the chart differs from that pointer's; a release without it does not
+  # wait.
   enabled: false
-  image: python:3-alpine
+  image: python:3.14.10-alpine3.24@sha256:5862d971d1f0ae26b258cefa4e893556b1d3aba81bd2ff30888704ad378bab67
   memory: 64Mi
   # The image's default user is root.
   runAsUser: 65534
   # The new version under load before it is judged.
   settleSeconds: 120
-  # A chaos press this long before the checked time still leaves it unchecked; as control.outside.chaos-aftermath.
-  chaosAftermathSeconds: 60
 
 # The bank's clock, the same in every service: they cut time at the same instants (ADR 0021). A changed length needs
 # empty databases: the services refuse to start beside partitions cut for another one. Emptied volumes need the setup
@@ -176,8 +178,9 @@ services:
     # 120m per pod at 1300 TPS, measured on the server), and its memory is needed while the gateway is replaced.
     replicas: 2
     # How far back from its end the release check looks, besides its settle time: the time an upgrade takes to replace
-    # the service's pods. An estimate for every service until it is measured on k3d; a longer one only reaches into
-    # the time checked for the release before.
+    # the service's pods. Measured on k3d at 400 TPS: a release of all five services at once was replaced in 34 s,
+    # the ledger's pods 23 s after each other; the values leave room for a slower server. A longer one only reaches
+    # into the time checked for the release before.
     rolloutSeconds: 120
     # A batch of 100 transfers per consumer, three consumers per pod. Its peak on the server was 392Mi.
     memory: 700Mi

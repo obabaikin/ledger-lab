@@ -11,6 +11,8 @@ import urllib.parse
 # The script lives in the chart: Flux builds the chart from its own directory only.
 CHART_FILES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helm", "ledger-lab", "files")
 sys.path.insert(0, CHART_FILES)
+# A __pycache__ beside the script would be packed into the chart.
+sys.dont_write_bytecode = True
 
 import release_check  # noqa: E402
 
@@ -179,12 +181,13 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(len(chaos), 1)
         self.assertEqual(re.findall(r"\[(\d+)s\]", chaos[0]), [str(ROLLOUT + SETTLE + AFTERMATH)])
 
-    def test_the_chaos_aftermath_defaults_to_a_minute(self):
+    def test_without_the_chaos_aftermath_the_release_is_not_checked_as_the_chart_alone_names_it(self):
         prometheus = Prometheus()
         values = env()
         del values["CHAOS_AFTERMATH_SECONDS"]
-        release_check.check(values, fetch=prometheus, sleep=lambda _: None, clock=lambda: NOW)
-        self.assertIn(f"[{ROLLOUT + SETTLE + 60}s]", next(q for q in prometheus.sent if CHAOS_FRAGMENT in q))
+        line, code = release_check.check(values, fetch=prometheus, sleep=lambda _: None, clock=lambda: NOW)
+        self.assertEqual((line, code), ("gateway: not checked: CHAOS_AFTERMATH_SECONDS is not set", 1))
+        self.assertEqual(prometheus.sent, [])
 
     def test_the_window_follows_the_rollout_length_not_a_fixed_one(self):
         prometheus = Prometheus()

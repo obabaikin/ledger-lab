@@ -43,8 +43,9 @@ fi
 version=$(git describe --tags --match 'v[0-9]*' --long --always "$commit")
 
 # The lines that carry the chart's commit and a service's tag: written below, read back from the deployed pointer.
+# A tag or a version may be digits alone, which YAML without the quotes reads as a number.
 commit_line() { echo "  ref: {commit: $1}"; }
-tag_line() { echo "    services: {$1: {tag: $2}}"; }
+tag_line() { echo "    services: {$1: {tag: \"$2\"}}"; }
 previous_tag() {
   [ -n "$PREVIOUS_RELEASE" ] || return 0
   sed -n "s/^$(tag_line "$1" '\([0-9a-f]*\)')\$/\1/p" "$PREVIOUS_RELEASE"
@@ -120,7 +121,7 @@ EOF
     - {kind: Secret, name: $SECRET_VALUES, optional: true}
   values:
     component: $component
-    version: $version
+    version: "$version"
 EOF
   if [ -n "$tag" ]; then
     tag_line "$component" "$tag"
