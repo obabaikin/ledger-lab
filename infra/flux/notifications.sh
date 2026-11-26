@@ -1,12 +1,21 @@
 #!/bin/sh
 # What Flux reports of the releases, sent to the chart's Alertmanager, which mails the ends of a deploy (the chart's
 # templates/alertmanager.yaml chooses which). Prints the manifest of the Provider and the Alert; install.sh applies it.
+# CHART_VALUES names the chart's values file, whose alertmanager.port is the port Alertmanager listens on.
 set -eu
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
 NAMESPACE="${NAMESPACE:-ledger-lab}"
 NAME=deploy-mail
-# The chart's Service of Alertmanager (alertmanager.port in its values) and Alertmanager's path for new alerts.
-ALERTMANAGER_URL="http://alertmanager.$NAMESPACE:9093/api/v2/alerts/"
+CHART_VALUES="${CHART_VALUES:-$HERE/../helm/ledger-lab/values.yaml}"
+
+port=$(sed -n '/^alertmanager:$/,/^[a-z]/s/^  port: \([0-9]*\)$/\1/p' "$CHART_VALUES")
+if [ -z "$port" ]; then
+  echo "no alertmanager.port in $CHART_VALUES" >&2
+  exit 1
+fi
+# The chart's Service of Alertmanager and Alertmanager's path for new alerts.
+ALERTMANAGER_URL="http://alertmanager.$NAMESPACE:$port/api/v2/alerts/"
 
 cat <<EOF_MANIFEST
 apiVersion: notification.toolkit.fluxcd.io/v1beta3

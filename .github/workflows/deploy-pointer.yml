@@ -3,12 +3,10 @@ name: deploy pointer
 on:
   schedule:
     # After the hour's deploy has had its time (the window opens at :10, a chain still running at :55 is alerted) and
-    # before the next window, so a pointer moved here is applied in it.
+    # before the next window, so a pointer moved here is applied in it. A passed e2e does not start a run: the pointer
+    # is applied in the window only, and a run in the middle of a chain could take the chain for done
+    # (move-pointer.sh's known limit, which a run started by hand keeps).
     - cron: '57 * * * *'
-  workflow_run:
-    workflows: [e2e]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,9 +20,7 @@ concurrency:
 jobs:
   move:
     # Without the site's address there is no deployment to move the pointer for.
-    if: >-
-      vars.DEPLOY_SITE_URL != '' &&
-      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    if: vars.DEPLOY_SITE_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

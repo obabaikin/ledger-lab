@@ -5,15 +5,21 @@
 
 {{- /*
 A rollback's event carries the chart it went back to, the failure's the chart that failed: the commit is the failure's.
+A rollback whose failure is no longer held (the failure's event has ended, or Alertmanager restarted) has only the
+commit it went back to, and says so.
 */ -}}
 {{ define "deploy.failed.subject" -}}
-{{- $revision := "" }}{{ $outcome := "FAILED" -}}
+{{- $failed := "" }}{{ $back := "" }}{{ $outcome := "FAILED" -}}
 {{- range .Alerts -}}
-{{- if eq .Labels.reason "RollbackSucceeded" }}{{ $outcome = "ROLLED BACK" -}}
-{{- else if eq .Labels.reason "RollbackFailed" }}{{ $outcome = "ROLLBACK FAILED" -}}
-{{- else }}{{ $revision = .Labels.revision }}{{ end -}}
+{{- if eq .Labels.reason "RollbackSucceeded" }}{{ $outcome = "ROLLED BACK" }}{{ $back = .Labels.revision -}}
+{{- else if eq .Labels.reason "RollbackFailed" }}{{ $outcome = "ROLLBACK FAILED" }}{{ $back = .Labels.revision -}}
+{{- else }}{{ $failed = .Labels.revision }}{{ end -}}
 {{- end -}}
-deploy {{ template "deploy.commit" $revision }}: {{ $outcome }} at {{ .CommonLabels.name }}
+{{- if $failed -}}
+deploy {{ template "deploy.commit" $failed }}: {{ $outcome }} at {{ .CommonLabels.name }}
+{{- else -}}
+deploy: {{ $outcome }} at {{ .CommonLabels.name }} (rollback to {{ template "deploy.commit" $back }})
+{{- end -}}
 {{- end }}
 
 {{ define "deploy.text" -}}

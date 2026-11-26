@@ -1,6 +1,7 @@
 #!/bin/sh
 # Flux in the cluster and the one thing it watches: the deploy pointer, a branch holding release.yaml (release.sh).
-# What it reports of the releases goes to the chart's Alertmanager (notifications.sh).
+# What it reports of the releases goes to the chart's Alertmanager (notifications.sh), and the chart's Prometheus may
+# read Flux's pods, where it finds helm-controller's metrics.
 # Usage: infra/flux/install.sh <git URL of the repository with the deploy branch>; safe to run again.
 # The pointer is applied only in the deploy window (window.sh); WINDOW=off leaves it applied at any time and removes
 # the window's jobs.
@@ -15,6 +16,9 @@ FLUX_CHART_VERSION=2.20.0
 POINTER_BRANCH=deploy
 POINTER_INTERVAL=1m
 NAMESPACE="${NAMESPACE:-ledger-lab}"
+# The chart's ServiceAccount of Prometheus.
+PROMETHEUS_ACCOUNT=prometheus
+METRICS_READER=prometheus-pods
 WINDOW_OFF=off
 WINDOW="${WINDOW:-on}"
 
@@ -52,6 +56,31 @@ spec:
   path: ./
   # A release left out of the pointer by mistake must not uninstall a service with its data; removing one is done by hand.
   prune: false
+---
+# A Role in Flux's namespace, not a ClusterRole of the chart: Prometheus reads the pods of this namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: $METRICS_READER
+  namespace: $FLUX_NAMESPACE
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: $METRICS_READER
+  namespace: $FLUX_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: $METRICS_READER
+subjects:
+  - kind: ServiceAccount
+    name: $PROMETHEUS_ACCOUNT
+    namespace: $NAMESPACE
 EOF
 
 NAMESPACE="$NAMESPACE" "$HERE/notifications.sh" | kubectl apply -f -

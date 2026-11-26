@@ -38,10 +38,6 @@ rules:
   - apiGroups: [""]
     resources: ["nodes/metrics"]
     verbs: ["get"]
-  # Flux's pods are in a namespace of their own, which a cluster without Flux lacks; a Role there could not be installed.
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -70,6 +70,7 @@ data:
             regex: container_memory_working_set_bytes
             action: keep
       # Whether a deploy is running, for the alert on one that runs late: Flux has no metric of a release's state.
+      # The right to read the pods there comes with Flux (infra/flux/install.sh), not with this chart.
       - job_name: flux
         scrape_interval: {{ .Values.exporters.scrapeInterval }}
         scrape_timeout: {{ .Values.exporters.scrapeTimeout }}
@@ -109,6 +110,7 @@ data:
   {{- end }}
   {{- $memory := .Values.alerts.memory }}
   {{- $deploy := .Values.alerts.deploy }}
+  {{- $workers := `controller_runtime_active_workers{job="helm-controller", controller="helmrelease"}` }}
   rules.yml: |
     groups:
       - name: memory
@@ -131,9 +133,15 @@ data:
       - name: deploy
         rules:
           - alert: DeployRunsLate
-            expr: minute() >= {{ include "ledger-lab.whole" (list "alerts.deploy.deadlineMinute" $deploy.deadlineMinute true) }} and on() max(avg_over_time(controller_runtime_active_workers{job="helm-controller", controller="helmrelease"}[{{ $deploy.busyWindow }}])) > {{ $deploy.busyShare }}
+            expr: minute() >= {{ include "ledger-lab.whole" (list "alerts.deploy.deadlineMinute" $deploy.deadlineMinute true) }} and on() max(avg_over_time({{ $workers }}[{{ $deploy.busyWindow }}])) > {{ $deploy.busyShare }}
             annotations:
               summary: "A deploy is still running at minute {{ int64 $deploy.deadlineMinute }} of the hour"
+          # Without the metric DeployRunsLate never fires, whatever the deploy does.
+          - alert: DeployMetricMissing
+            expr: absent({{ $workers }})
+            for: {{ .Values.alerts.heldFor }}
+            annotations:
+              summary: "Prometheus does not get helm-controller's busy workers: a deploy that runs late would not be alerted"
       {{- if .Values.certManager.enabled }}
       - name: certificates
         rules:

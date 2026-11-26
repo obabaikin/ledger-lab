@@ -2,9 +2,10 @@
 # Checks the chart with helm template: the setup Jobs' names follow their spec only, the bank's numbers have upper
 # bounds, control's pulse options are the chart's load values, the six components split the chart without a gap, and
 # only a release told so carries the release check, and the alerts: every container's memory against its own limit of
-# the values, the node's memory, a deploy that runs late, and where Alertmanager mails what.
-# The rules are run by promtool and Alertmanager's config is read by amtool: the ones on PATH, or the ones in the chart's
-# Prometheus and Alertmanager images through docker.
+# the values, the node's memory, a deploy that runs late, helm-controller's metric gone missing, where Alertmanager
+# mails what, and the subjects and texts of the mails.
+# The rules are run by promtool, Alertmanager's config is read and its mail texts are rendered by amtool: the ones on
+# PATH, or the ones in the chart's Prometheus and Alertmanager images through docker.
 set -eu
 
 CHART="$(cd "$(dirname "$0")/../helm/ledger-lab" && pwd)"
@@ -263,7 +264,7 @@ memory_test() {
       - series: 'container_memory_working_set_bytes{namespace="other", pod="ledger-0", container="ledger"}'
         values: '${above}x10'
     alert_rule_test:
-      - eval_time: 5m
+      - eval_time: ${3:-5m}
         alertname: ContainerMemoryNearLimit
         exp_alerts: $2
 EOF
@@ -278,6 +279,10 @@ check "a container above 0.9 of its limit in the values is an alert, the same by
 check "a container below 0.9 of its limit is no alert" "$(rules_give "$(memory_test "$below" '[]')")" passed
 check "the same bytes are no alert once the values give the container a higher limit" \
   "$(rules_give "$(memory_test "$above" '[]')" --set services.ledger.memory=2000Mi)" passed
+check "a container above 0.9 of its limit for less than the 2 minutes of alerts.heldFor is no alert yet" \
+  "$(rules_give "$(memory_test "$above" '[]' 1m)")" passed
+check "the time a container stays above before it is an alert is alerts.heldFor" \
+  "$(rules_give "$(memory_test "$above" '[]')" --set alerts.heldFor=10m)" passed
 check "the share of the limit is alerts.memory.limitShare" \
   "$(rules_give "$(memory_test "$below" "$(ledger_alerts 0.8 "${ledger_limit}Mi")")" --set alerts.memory.limitShare=0.8)" passed
 
@@ -321,12 +326,63 @@ check "a look at an unchanged release at :56 is no alert" \
   "$(rules_give "$(deploy_test '0x222 1 0x17' 56m '[]')")" passed
 check "the half minute between two releases of a chain at :56 leaves the alert" \
   "$(rules_give "$(deploy_test '1x220 0 0 1 1' 56m "$late_alert")")" passed
+# The last 2 minutes before :56 are the 8 samples up to the one at :56 itself.
+check "a worker busy at :56 itself, as for a look at an unchanged release, and idle for the 2 minutes before is no alert" \
+  "$(rules_give "$(deploy_test '0x223 1 0x16' 56m '[]')")" passed
+check "a worker idle at :56 itself that was busy for more than half of the 2 minutes before is an alert" \
+  "$(rules_give "$(deploy_test '1x222 0 0 1x16' 56m "$late_alert")")" passed
+check "the share of the time the worker has to be busy is alerts.deploy.busyShare" \
+  "$(rules_give "$(deploy_test '1x222 0 0 1x16' 56m '[]')" --set alerts.deploy.busyShare=0.8)" passed
+check "the time the worker is looked at is alerts.deploy.busyWindow" \
+  "$(rules_give "$(deploy_test '1x222 0 0 1x16' 56m '[]')" --set alerts.deploy.busyWindow=30s)" passed
 check "the minute a deploy is late from is alerts.deploy.deadlineMinute" \
   "$(rules_give "$(deploy_test '1x240' 54m "$(echo "$late_alert" | sed 's/55/50/')")" --set alerts.deploy.deadlineMinute=50)" \
   passed
 check "Prometheus reads helm-controller's workers in Flux's namespace" \
   "$(render --show-only templates/prometheus-config.yaml --set flux.namespace=flux-elsewhere |
     grep -A6 'job_name: flux' | grep -c 'names: \[flux-elsewhere\]')" 1
+flux_scrape=$(render --show-only templates/prometheus-config.yaml |
+  sed -n '/^      - job_name: flux$/,/^      - job_name: \|^    rule_files:/p')
+check "of Flux's pods Prometheus keeps helm-controller's metrics port, and names the job after the pod's label app" \
+  "$(echo "$flux_scrape" | sed -n '/^        relabel_configs:$/,/^        metric_relabel_configs:$/p' | sed '1d;$d;s/^ *//' |
+    tr '\n' ' ')" \
+  "- source_labels: [__meta_kubernetes_pod_label_app] regex: helm-controller action: keep \
+- source_labels: [__meta_kubernetes_pod_container_port_name] regex: http-prom action: keep \
+- source_labels: [__meta_kubernetes_pod_label_app] target_label: job \
+- source_labels: [__meta_kubernetes_pod_name] target_label: instance "
+workers_metric=$(echo "$flux_scrape" | sed -n '/^        metric_relabel_configs:$/,$p' | sed -n 's/^ *regex: //p')
+check "of helm-controller's metrics Prometheus keeps the busy workers alone" "$workers_metric" \
+  controller_runtime_active_workers
+check "the deploy's two rules read that metric of the job helm-controller" \
+  "$(rules_of | grep -c "$workers_metric{job=\"helm-controller\", controller=\"helmrelease\"}")" 2
+# The rule's samples of the worker, or none when the pattern is empty.
+missing_test() {
+  cat <<EOF
+  - interval: 15s
+    input_series: $([ -n "$1" ] || echo '[]')
+$([ -z "$1" ] || printf "      - series: 'controller_runtime_active_workers{job=\"helm-controller\", controller=\"helmrelease\"}'\n        values: '%s'" "$1")
+    alert_rule_test:
+      - eval_time: $2
+        alertname: DeployMetricMissing
+        exp_alerts: $3
+EOF
+}
+missing_alert="
+          - exp_labels: {job: helm-controller, controller: helmrelease}
+            exp_annotations:
+              summary: \"Prometheus does not get helm-controller's busy workers: a deploy that runs late would not be alerted\""
+check "helm-controller's busy workers missing for the 2 minutes of alerts.heldFor is an alert" \
+  "$(rules_give "$(missing_test '' 5m "$missing_alert")")" passed
+check "helm-controller's busy workers missing for less than that is no alert yet" \
+  "$(rules_give "$(missing_test '' 1m '[]')")" passed
+check "helm-controller's busy workers there, busy or idle, are no alert" \
+  "$(rules_give "$(missing_test '0x10 1x10' 5m '[]')")" passed
+check "helm-controller's busy workers gone after they were there are an alert" \
+  "$(rules_give "$(missing_test '0x4 stale' 10m "$missing_alert")")" passed
+check "the chart's right over the whole cluster is the nodes and their metrics; the pods of Flux are not the chart's to read" \
+  "$(render --show-only templates/prometheus.yaml | sed -n '/^kind: ClusterRole$/,/^---$/p' | sed -n 's/^ *resources: //p' |
+    tr '\n' ' ')" \
+  '["nodes"] ["nodes/metrics"] '
 check "Prometheus sends its alerts to Alertmanager" \
   "$(render --show-only templates/prometheus-config.yaml --set alertmanager.port=9999 | grep -A3 'alertmanagers:' |
     grep -c 'targets: \["alertmanager:9999"\]')" 1
@@ -381,10 +437,96 @@ for reason in InstallFailed UpgradeFailed TestFailed RollbackSucceeded RollbackF
     deploy-failed
 done
 check "an alert of Prometheus is mailed as an alert" "$(receiver_of alertname=NodeMemoryLow)" alerts
+check "helm-controller's metric gone missing is mailed as an alert" "$(receiver_of alertname=DeployMetricMissing)" alerts
+
+# What a receiver mails for a group of alerts, by its Subject or text in Alertmanager's config:
+# mail <receiver> <Subject | text> <alert> ..., an alert being "<label>=<value>,...|<its message or summary>".
+mail() {
+  receiver="$1"
+  part="$2"
+  shift 2
+  python3 -c '
+import json, sys
+alerts = []
+for minute, alert in enumerate(sys.argv[1:]):
+    labels, _, text = alert.partition("|")
+    labels = dict(pair.split("=", 1) for pair in labels.split(","))
+    alerts.append({"status": "firing", "labels": labels, "startsAt": "2026-11-26T10:%02d:00Z" % minute,
+                   "annotations": {"message" if "reason" in labels else "summary": text}})
+common = {key: value for key, value in alerts[0]["labels"].items() if all(a["labels"].get(key) == value for a in alerts)}
+json.dump({"status": "firing", "alerts": alerts, "commonLabels": common}, sys.stdout)' "$@" >"$copy/alertmanager/data.json"
+  written=$(sed -n "/^  - name: $receiver\$/,/^  - name: /p" "$copy/alertmanager/alertmanager.yml" |
+    sed -n "s/^ *$part: '\(.*\)'\$/\1/p")
+  amtool_run "$copy/alertmanager" template render --template.glob=mail.tmpl --template.data=data.json \
+    --template.text="$written" 2>&1
+}
+# A Flux event of a release: event <reason> <release> <the commit of its chart>.
+event() { echo "kind=HelmRelease,namespace=bank,name=$2,reason=$1,revision=0.1.0+$3.7|Helm ${1} said so"; }
+NEW=abcdef123456
+OLD=0123456789ab
+check "the mail of a deploy's good end names the commit and OK" \
+  "$(mail deploy-done Subject "$(event TestSucceeded control "$NEW")")" "deploy $NEW: OK"
+check "the mail of a failed release names the commit that failed and the release" \
+  "$(mail deploy-failed Subject "$(event UpgradeFailed gateway "$NEW")")" "deploy $NEW: FAILED at gateway"
+check "the mail of a failed release that was rolled back says so, with the commit that failed" \
+  "$(mail deploy-failed Subject "$(event UpgradeFailed gateway "$NEW")" "$(event RollbackSucceeded gateway "$OLD")")" \
+  "deploy $NEW: ROLLED BACK at gateway"
+check "the mail of a failed test that was rolled back says so, whichever event came first" \
+  "$(mail deploy-failed Subject "$(event RollbackSucceeded gateway "$OLD")" "$(event TestFailed gateway "$NEW")")" \
+  "deploy $NEW: ROLLED BACK at gateway"
+check "the mail of a failed release whose rollback failed says so" \
+  "$(mail deploy-failed Subject "$(event UpgradeFailed gateway "$NEW")" "$(event RollbackFailed gateway "$OLD")")" \
+  "deploy $NEW: ROLLBACK FAILED at gateway"
+check "the mail of a rollback without its failure names the commit as the one gone back to" \
+  "$(mail deploy-failed Subject "$(event RollbackSucceeded gateway "$OLD")")" \
+  "deploy: ROLLED BACK at gateway (rollback to $OLD)"
+check "the mail of a failed rollback without its failure names the commit as the one to go back to" \
+  "$(mail deploy-failed Subject "$(event RollbackFailed gateway "$OLD")")" \
+  "deploy: ROLLBACK FAILED at gateway (rollback to $OLD)"
+check "the mail of one alert names the alert" \
+  "$(mail alerts Subject 'alertname=NodeMemoryLow|The node is low')" "alert: NodeMemoryLow"
+check "the mail of an alert that holds for several names the alert and their number" \
+  "$(mail alerts Subject 'alertname=ContainerMemoryNearLimit,container=ledger|Container ledger is near' \
+    'alertname=ContainerMemoryNearLimit,container=gateway|Container gateway is near')" \
+  "alert: ContainerMemoryNearLimit (2)"
+check "the text of an alert's mail is the time and the summary of each" \
+  "$(mail alerts text 'alertname=ContainerMemoryNearLimit,container=ledger|Container ledger is near' \
+    'alertname=ContainerMemoryNearLimit,container=gateway|Container gateway is near')" \
+  "2026-11-26 10:00:00 UTC  Container ledger is near
+2026-11-26 10:01:00 UTC  Container gateway is near"
+check "the text of a good end's mail is the event, with no word of a rollback" \
+  "$(mail deploy-done text "$(event TestSucceeded control "$NEW")")" \
+  "2026-11-26 10:00:00 UTC  TestSucceeded  control
+Helm TestSucceeded said so"
+check "the text of a failed test's mail says where the release check's line is, and that the rollback's mail follows" \
+  "$(mail deploy-failed text "$(event TestFailed gateway "$NEW")")" \
+  "2026-11-26 10:00:00 UTC  TestFailed  gateway
+Helm TestFailed said so
+The event does not carry the line of the release check; it is the last line of
+  kubectl --namespace bank logs job/release-check-gateway
+
+No rollback is reported yet: a mail follows when it ends. Without one the release is stalled and is handled by hand:
+  kubectl --namespace bank get helmrelease gateway"
+check "the text of a rolled back release's mail is both events, with no word of a rollback to come" \
+  "$(mail deploy-failed text "$(event UpgradeFailed gateway "$NEW")" "$(event RollbackSucceeded gateway "$OLD")")" \
+  "2026-11-26 10:00:00 UTC  UpgradeFailed  gateway
+Helm UpgradeFailed said so
+
+2026-11-26 10:01:00 UTC  RollbackSucceeded  gateway
+Helm RollbackSucceeded said so"
+mailed | grep -o 'reason=~\?"[A-Za-z|]*"' | sed 's/^.*"\(.*\)"$/\1/' | tr '|' '\n' | sort -u >"$copy/alertmanager/routed"
+named=$(grep -o 'reason "[A-Za-z]*"' "$original/files/alertmanager-mail.tmpl" | sed 's/^reason "\(.*\)"$/\1/' | sort -u)
+check "the mail texts tell four reasons of Flux's events apart" "$(echo "$named" | wc -l)" 4
+check "every reason the mail texts tell apart is one Alertmanager mails" \
+  "$(echo "$named" | grep -vxFf "$copy/alertmanager/routed" || true)" ""
+check "Prometheus and Alertmanager are named by digest" \
+  "$(render | grep -cE '^ +image: prom/(prometheus|alertmanager):v[0-9.]+@sha256:[0-9a-f]{64}$')" 2
 K3D="$original/../../k3d"
 check "the k3d mail values mail to the cluster's mailbox" \
   "$(alertmanager -f "$K3D/mail-values.yaml" | grep -c 'smtp_smarthost: "mail-sink:1025"')" \
   "$(grep -c '^    - {name: smtp, port: 1025}$' "$K3D/mail-sink.yaml")"
+check "the cluster's mailbox is named by digest" \
+  "$(grep -cE '^ +image: axllent/mailpit:v[0-9.]+@sha256:[0-9a-f]{64}$' "$K3D/mail-sink.yaml")" 1
 renders "the k3d values that show every alert at once" -f "$K3D/mail-values.yaml" -f "$K3D/alerts-now-values.yaml"
 check "Alertmanager carries the chart's mail texts" \
   "$(alertmanager | grep -c 'mail.tmpl: .*define \\"deploy.failed.subject\\"')" 1

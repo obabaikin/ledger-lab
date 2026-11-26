@@ -1,11 +1,13 @@
 #!/bin/sh
-# Whether there is anything to deploy between two commits: a module's image tag (module-tag.sh) or the chart changed.
+# Whether there is anything to deploy between two commits: a module's image tag (module-tag.sh), the chart or the
+# script that writes the deploy pointer (the chain and the settings of the releases) changed.
 # Usage: infra/ci/changed.sh <from> <to>; prints what changed, one line each, and exits 0 if anything did, 3 if nothing
 # did ("nothing to deploy"), any other code on an error.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CHART=infra/helm
+POINTER_SCRIPT=infra/flux/release.sh
 USAGE="usage: $0 <deployed commit> <new commit>"
 # Not 1: a failure that set -e turns into an exit must never read as "nothing to deploy".
 NOTHING=3
@@ -57,6 +59,8 @@ for module in $({ modules "$from"; modules "$to"; } | sort -u); do
 done
 # shellcheck disable=SC2046
 if ! git diff --quiet "$from" "$to" -- $({ chart_paths "$from"; chart_paths "$to"; } | sort -u); then changes="$changes$CHART changed
+"; fi
+if ! git diff --quiet "$from" "$to" -- "$POINTER_SCRIPT"; then changes="$changes$POINTER_SCRIPT changed
 "; fi
 
 if [ -z "$changes" ]; then

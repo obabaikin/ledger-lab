@@ -1,5 +1,6 @@
 #!/bin/sh
-# Checks changed.sh on a scratch repository: a module, common or the chart is something to deploy, docs alone are not.
+# Checks changed.sh on a scratch repository: a module, common, the chart or the script that writes the deploy pointer
+# is something to deploy, docs alone are not.
 set -eu
 
 SCRIPT="$(cd "$(dirname "$0")" && pwd)/changed.sh"
@@ -20,7 +21,9 @@ echo 'class Gateway' >gateway/Gateway.java
 echo 'class Control' >control/Control.java
 echo 'FROM jre' >infra/docker/Dockerfile
 echo 'replicas: 1' >infra/helm/ledger-lab/values.yaml
-mkdir -p infra/kafka infra/helm/ledger-lab/files
+mkdir -p infra/kafka infra/helm/ledger-lab/files infra/flux
+echo 'CHAIN="platform gateway control"' >infra/flux/release.sh
+echo 'kubectl apply' >infra/flux/install.sh
 echo 'kafka-topics --create' >infra/kafka/create-topics.sh
 ln -s ../../../kafka/create-topics.sh infra/helm/ledger-lab/files/create-topics.sh
 echo 'include("common", "gateway", "control")' >settings.gradle.kts
@@ -70,6 +73,9 @@ something "a change to common is something to deploy" common/Message.java 'int a
 something "a change to the chart is something to deploy" infra/helm/ledger-lab/values.yaml 'replicas: 2' "infra/helm changed"
 something "a change to a file the chart links to is something to deploy" infra/kafka/create-topics.sh '# more' "infra/helm changed"
 something "a change to the Dockerfile is something to deploy" infra/docker/Dockerfile '# changed' "control: "
+something "a change to the script that writes the pointer alone is something to deploy" infra/flux/release.sh \
+  'RELEASE_TIMEOUT=11m' "infra/flux/release.sh changed"
+nothing "a change to another script of the deploy alone is nothing to deploy" infra/flux/install.sh '# more'
 
 before=$(git rev-parse HEAD)
 commit control/Control.java 'void stop() {}'

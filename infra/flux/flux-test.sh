@@ -7,7 +7,8 @@
 # do not both start after a time without the node, and end, the opening one without waiting for a reconciliation,
 # before the job of the other kind is due; and notifications.sh: every event of the releases, the good ends too, goes
 # to the chart's Alertmanager, which takes the chain's last release for a deploy's end and keeps a failure until its
-# rollback has ended.
+# rollback has ended; and install.sh, with a helm and a kubectl that only write down what they get: the chart's
+# Prometheus may read the pods of Flux's namespace and nothing else there.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -275,6 +276,13 @@ alertmanager_value() { sed -n '/^alertmanager:$/,/^[a-z]/p' "$CHART_VALUES" | se
 check "what Flux reports goes to the chart's Alertmanager, in the bank's namespace, on the chart's port" \
   "$(object_of "$notifications" deploy-mail | grep -E '^  (type|address):' | sed 's/^ *//' | tr '\n' ' ')" \
   "type: alertmanager address: http://alertmanager.ledger-lab:$(alertmanager_value port)/api/v2/alerts/ "
+sed 's/^  port: [0-9]*$/  port: 9999/' "$CHART_VALUES" >"$work/values.yaml"
+check "the port is the one of the chart's values, whatever it is" \
+  "$(CHART_VALUES="$work/values.yaml" "$HERE/notifications.sh" | sed -n 's/^  address: //p')" \
+  "http://alertmanager.ledger-lab:9999/api/v2/alerts/"
+status=0
+CHART_VALUES=/dev/null "$HERE/notifications.sh" >/dev/null 2>&1 || status=$?
+check "values without Alertmanager's port give no manifest" "$status" 1
 check "the Provider and the Alert follow the namespace of the bank" \
   "$(NAMESPACE=bank "$HERE/notifications.sh" | grep -c -e '^  namespace: bank$' -e 'http://alertmanager.bank:')" 3
 check "the Alert reports the good end of a release too, not only its errors" \
@@ -284,6 +292,41 @@ check "the Alert reports every release" "$(grep -A1 '^  eventSources:$' "$notifi
 check "the Alert sends through the Provider" "$(grep -c '^  providerRef: {name: deploy-mail}$' "$notifications")" 1
 check "install.sh applies the notifications" \
   "$(grep -cF 'notifications.sh" | kubectl apply -f -' "$HERE/install.sh")" 1
+
+installer="$work/installer"
+applied="$work/applied.yaml"
+mkdir -p "$installer"
+cat >"$installer/kubectl" <<'EOF_KUBECTL'
+#!/bin/sh
+case "$*" in
+*"apply -f -"*)
+  cat >>"$APPLIED"
+  echo --- >>"$APPLIED"
+  ;;
+esac
+EOF_KUBECTL
+printf '#!/bin/sh\n' >"$installer/helm"
+chmod +x "$installer/kubectl" "$installer/helm"
+PATH="$installer:$PATH" APPLIED="$applied" NAMESPACE=bank "$HERE/install.sh" "$URL" >/dev/null
+# The object of a kind and a name in what install.sh applied, on one line.
+applied_of() {
+  awk -v kind="$1" -v name="$2" '/^---$/ { if (on && named) print line; on = 0; named = 0; line = ""; next }
+    $0 == "kind: " kind { on = 1 } $0 == "  name: " name { named = 1 }
+    /^#/ { next } { sub(/^ +/, ""); line = line $0 " " }' "$applied"
+}
+flux_namespace=$(sed -n '/^flux:$/,/^$/s/^  namespace: //p' "$CHART_VALUES")
+check "install.sh lets the chart's Prometheus read the pods of Flux's namespace, where the chart looks for them" \
+  "$(applied_of Role prometheus-pods)" \
+  "apiVersion: rbac.authorization.k8s.io/v1 kind: Role metadata: name: prometheus-pods namespace: $flux_namespace \
+rules: - apiGroups: [\"\"] resources: [\"pods\"] verbs: [\"get\", \"list\", \"watch\"] "
+check "the right is given to the ServiceAccount of Prometheus in the bank's namespace" \
+  "$(applied_of RoleBinding prometheus-pods)" \
+  "apiVersion: rbac.authorization.k8s.io/v1 kind: RoleBinding metadata: name: prometheus-pods namespace: $flux_namespace \
+roleRef: apiGroup: rbac.authorization.k8s.io kind: Role name: prometheus-pods \
+subjects: - kind: ServiceAccount name: prometheus namespace: bank "
+check "the ServiceAccount is the one the chart's Prometheus runs as" \
+  "$(grep -c '^      serviceAccountName: prometheus$' "$HERE/../helm/ledger-lab/templates/prometheus.yaml")" 1
+check "install.sh gives no right over the whole cluster" "$(grep -c '^kind: ClusterRole' "$applied" || true)" 0
 check "the chart mails a deploy's good end at the last release of the chain" "$(alertmanager_value lastRelease)" \
   "$(grep '^kind: HelmRelease$' -A2 "$first" | sed -n 's/^  name: //p' | tail -1)"
 minutes_of() { echo "${1%m}"; }

@@ -128,7 +128,7 @@ postgres:
   logMinDuration: 1s
 
 prometheus:
-  image: prom/prometheus:v3.5.0
+  image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
   memory: 512Mi
   retention: 5d
   storage: 5Gi
@@ -138,7 +138,7 @@ prometheus:
 # Mails the operator what Prometheus' alerts say (alerts, below) and what Flux reports of the releases
 # (infra/flux/notifications.sh).
 alertmanager:
-  image: prom/alertmanager:v0.35.1
+  image: prom/alertmanager:v0.35.1@sha256:4e3d029e69c7f61dd53a2b31a3dc427a2b81736cffca185c0854075e07969e36
   port: 9093
   memory: 64Mi
   mail:
