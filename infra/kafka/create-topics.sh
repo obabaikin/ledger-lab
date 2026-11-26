@@ -15,8 +15,15 @@ RETENTION_BYTES="${KAFKA_RETENTION_BYTES:-629145600}"
 # Retention deletes whole segments only; a segment rolls this often.
 SEGMENT_MS="${KAFKA_SEGMENT_MS:-3600000}"
 KAFKA_BIN="${KAFKA_BIN:-/opt/kafka/bin}"
+# On a fresh cluster the broker's volume is provisioned first.
+WAIT_SECONDS="${KAFKA_WAIT_SECONDS:-300}"
 
+deadline=$(($(date +%s) + WAIT_SECONDS))
 until "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP" --list >/dev/null 2>&1; do
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    echo "kafka at $BOOTSTRAP did not answer within ${WAIT_SECONDS}s" >&2
+    exit 1
+  fi
   echo "waiting for kafka at $BOOTSTRAP"
   sleep 1
 done

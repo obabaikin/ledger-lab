@@ -1,0 +1,110 @@
+#!/bin/sh
+# Checks the chart with helm template: the setup Jobs' names follow their spec only, the bank's numbers have upper
+# bounds, and control's pulse options are the chart's load values.
+set -eu
+
+CHART="$(cd "$(dirname "$0")/../helm/ledger-lab" && pwd)"
+failures=0
+
+render() { helm template ledger-lab "$CHART" "$@" 2>/dev/null; }
+job_name() {
+  job="$1"
+  shift
+  render "$@" | grep -o "name: $job-[0-9a-f]*" | sed 's/name: //'
+}
+create_topics() { job_name create-topics "$@"; }
+monitor_role() { job_name monitor-role "$@"; }
+
+check() {
+  if [ "$2" = "$3" ]; then
+    echo "ok: $1"
+  else
+    echo "FAIL: $1: got '$2', expected '$3'"
+    failures=$((failures + 1))
+  fi
+}
+differs() {
+  if [ -n "$2" ] && [ "$2" != "$3" ]; then
+    echo "ok: $1"
+  else
+    echo "FAIL: $1: '$2' and '$3' should differ"
+    failures=$((failures + 1))
+  fi
+}
+refuses() {
+  description="$1"
+  expected="$2"
+  shift 2
+  if output=$(helm template ledger-lab "$CHART" "$@" 2>&1); then
+    echo "FAIL: $description: rendered"
+    failures=$((failures + 1))
+  elif echo "$output" | grep -qF "$expected"; then
+    echo "ok: $description"
+  else
+    echo "FAIL: $description: no '$expected' in: $output"
+    failures=$((failures + 1))
+  fi
+}
+renders() {
+  description="$1"
+  shift
+  if output=$(helm template ledger-lab "$CHART" "$@" 2>&1); then
+    echo "ok: $description"
+  else
+    echo "FAIL: $description: $output"
+    failures=$((failures + 1))
+  fi
+}
+
+topics=$(create_topics)
+role=$(monitor_role)
+differs "the jobs have hash names" "$topics" "create-topics-"
+check "same values, same create-topics" "$(create_topics)" "$topics"
+check "same values, same monitor-role" "$(monitor_role)" "$role"
+check "a new image tag and version leave create-topics" \
+  "$(create_topics --set services.control.tag=abc --set version=v9.9.9)" "$topics"
+check "a new image tag and version leave monitor-role" \
+  "$(monitor_role --set services.control.tag=abc --set version=v9.9.9)" "$role"
+differs "more partitions, a new create-topics" "$(create_topics --set kafka.partitions=12)" "$topics"
+differs "a longer retention, a new create-topics" "$(create_topics --set retentionHours=5)" "$topics"
+check "more partitions leave monitor-role" "$(monitor_role --set kafka.partitions=12)" "$role"
+copy=$(mktemp -d)
+trap 'rm -rf "$copy"' EXIT
+cp -RL "$CHART" "$copy/ledger-lab"
+echo "# changed" >>"$copy/ledger-lab/files/create-topics.sh"
+original="$CHART"
+CHART="$copy/ledger-lab"
+changed_topics=$(create_topics)
+changed_role=$(monitor_role)
+CHART="$original"
+differs "a changed create-topics script, a new create-topics" "$changed_topics" "$topics"
+check "a changed create-topics script leaves monitor-role" "$changed_role" "$role"
+differs "a new monitor password, a new monitor-role" "$(monitor_role --set passwords.monitor=other)" "$role"
+
+refuses "accounts.count above a Java int" "accounts.count must be at most 2147483647" --set accounts.count=2147483648
+renders "accounts.count of a Java int's highest value" --set accounts.count=2147483647
+refuses "retentionHours above a year" "retentionHours must be at most 8760" --set retentionHours=8761
+refuses "retentionHours whose milliseconds overflow int64" "retentionHours must be at most 8760" \
+  --set retentionHours=3000000000000000000
+refuses "retentionHours beyond int64" "retentionHours must be at most 8760" --set-json retentionHours=1e30
+refuses "a default pulse outside the options" "load.defaultPulseTps must be one of the options" \
+  --set load.defaultPulseTps=950
+refuses "a range that is no whole number of steps" "load.maxTps - load.minPulseTps must be a multiple" \
+  --set load.maxTps=2050
+renders "a base speed off the pulse options' steps" --set load.baseTps=450
+
+control_env() {
+  render --show-only templates/services.yaml --set load.minPulseTps=1000 --set load.maxTps=3000 \
+    --set load.tpsStep=200 --set load.defaultPulseTps=1400 | grep -F "{name: CONTROL_LOAD_$1," | sed 's/^ *//'
+}
+check "control's lowest pulse is load.minPulseTps" "$(control_env MINTPS)" '- {name: CONTROL_LOAD_MINTPS, value: "1000"}'
+check "control's highest pulse is load.maxTps" "$(control_env MAXTPS)" '- {name: CONTROL_LOAD_MAXTPS, value: "3000"}'
+check "control's step is load.tpsStep" "$(control_env TPSSTEP)" '- {name: CONTROL_LOAD_TPSSTEP, value: "200"}'
+check "control's first pulse is load.defaultPulseTps" "$(control_env DEFAULTTPS)" \
+  '- {name: CONTROL_LOAD_DEFAULTTPS, value: "1400"}'
+
+if [ "$failures" -gt 0 ]; then
+  echo "$failures failed"
+  exit 1
+fi
+echo "all passed"

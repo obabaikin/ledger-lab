@@ -11,6 +11,9 @@ version: dev
 managementPort: 9000
 chaos: true
 initMemory: 64Mi
+# A try of a setup Job (topics, the monitor role) waits this long for Kafka or Postgres to answer: on a fresh cluster
+# their volumes are provisioned first.
+setupWaitSeconds: 300
 
 # The bank's clock, the same in every service: they cut time at the same instants (ADR 0021). A changed length needs
 # empty databases: the services refuse to start beside partitions cut for another one.
@@ -64,7 +67,7 @@ slo:
     tail: {threshold: 5s, target: "0.99"}
 
 # The services' roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand
-# in Postgres. The monitor role is created or updated on every install and upgrade.
+# in Postgres. The monitor role is created or updated whenever its password or its Job changes.
 passwords:
   postgres: change-me-postgres
   ledger: change-me-ledger

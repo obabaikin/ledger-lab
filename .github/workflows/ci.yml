@@ -73,6 +73,8 @@ jobs:
       TERRAFORM_IMAGE: hashicorp/terraform:1.16.6@sha256:bfffc1ded5fbf0a17beaaf22eb4793980abdb19d0761ff6a3a0efb2ab4d9b316
       SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
       SHELLCHECK_DIRS: infra/server infra/k3d infra/terraform infra/ci
+      HELM_VERSION: v4.3.0
+      HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -103,6 +105,16 @@ jobs:
           infra/ci/missing-images-test.sh
       - name: Every ADR reference has its file
         run: infra/ci/adr-links.sh
+      - name: Install Helm
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/helm.tar.gz" "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/linux-amd64" >>"$GITHUB_PATH"
+      - name: Chart tests
+        run: |
+          helm lint infra/helm/ledger-lab
+          infra/ci/chart-test.sh
 
   images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
