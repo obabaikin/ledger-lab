@@ -369,6 +369,14 @@ class LoadTest {
     }
 
     @Test
+    @DisplayName("a stopping gateway's answers are counted from 0 at the start, by the name the release check asks")
+    void a_stopping_gateways_answers_are_counted_from_0_at_the_start_by_the_name_the_release_check_asks() {
+        load(TestData.settings("http://localhost:1"));
+
+        assertThat(registry.get("generator.responses").tag("kind", "stopping").counter().count()).isZero();
+    }
+
+    @Test
     @DisplayName("a 503 stopping on every attempt is a failure, not unknown, and is not counted as a busy refusal")
     void a_503_stopping_on_every_attempt_is_a_failure_not_unknown_and_is_not_counted_as_a_busy_refusal() throws Exception {
         try (var gateway = FakeGateway.with().stoppingAttempts(2).start()) {

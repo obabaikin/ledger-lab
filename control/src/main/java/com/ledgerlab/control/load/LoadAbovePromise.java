@@ -3,7 +3,7 @@ package com.ledgerlab.control.load;
 import com.ledgerlab.control.ControlProperties;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -15,26 +15,37 @@ import org.springframework.stereotype.Component;
 @Component
 public class LoadAbovePromise {
 
-    /** Read by the release check (infra/helm/ledger-lab/files/release_check.py), which leaves a window with it at 1 unchecked. */
+    /**
+     * Read by the release check (infra/helm/ledger-lab/files/release_check.py), which leaves a window with it at 1
+     * unchecked and does not take a window with an unknown second in it for one within the promise.
+     */
     public static final String METRIC = "control.load.above.promise";
 
-    private static final int ABOVE = 1;
-    private static final int WITHIN = 0;
+    private static final double ABOVE = 1;
+    private static final double WITHIN = 0;
+    private static final double UNKNOWN = Double.NaN;
 
     private final LoadRepository pulses;
     private final ControlProperties.Outside outside;
-    private final AtomicInteger state = new AtomicInteger(WITHIN);
+    private final AtomicReference<Double> state = new AtomicReference<>(WITHIN);
 
     public LoadAbovePromise(LoadRepository pulses, ControlProperties props, MeterRegistry registry) {
         this.pulses = pulses;
         this.outside = props.outside();
-        Gauge.builder(METRIC, state, AtomicInteger::get)
-            .description("1 from the start of a pulse above the promised speed to the end of its aftermath, else 0")
+        Gauge.builder(METRIC, state, AtomicReference::get)
+            .description("1 from the start of a pulse above the promised speed to the end of its aftermath, else 0;"
+                + " NaN while the pulses cannot be read")
             .register(registry);
     }
 
     @Scheduled(fixedDelayString = "${control.outside.load-poll-interval}")
     public void read() {
-        state.set(pulses.aboveNow(outside.guaranteedTps(), outside.loadAftermath()) ? ABOVE : WITHIN);
+        try {
+            state.set(pulses.aboveNow(outside.guaranteedTps(), outside.loadAftermath()) ? ABOVE : WITHIN);
+        } catch (RuntimeException e) {
+            // The last value would be told as this second's.
+            state.set(UNKNOWN);
+            throw e;
+        }
     }
 }

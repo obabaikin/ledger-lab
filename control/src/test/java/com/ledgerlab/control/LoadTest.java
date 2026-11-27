@@ -4,12 +4,18 @@ import static com.ledgerlab.control.Fixtures.mapOf;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.ledgerlab.control.generator.GeneratorClient;
 import com.ledgerlab.control.http.ServiceHttp;
 import com.ledgerlab.control.load.GeneratorDidNotAnswerException;
 import com.ledgerlab.control.load.LoadAbovePromise;
+import com.ledgerlab.control.load.LoadRepository;
 import com.ledgerlab.control.load.LoadService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -396,9 +403,28 @@ class LoadTest extends IntegrationTest {
     void a_pulse_above_the_promised_speed_the_generator_may_have_taken_is_told_as_above_the_promise() {
         generator.answer("POST", PULSE_PATH, 200, "not json");
 
-        load(visitor(), 2000, 10);
+        load(visitor(), props.outside().guaranteedTps() + props.load().tpsStep(), 10);
 
         assertThat(pulses()).hasSize(1);
         assertThat(abovePromise()).isOne();
+    }
+
+    @Test
+    void while_the_pulses_cannot_be_read_the_load_above_the_promise_is_told_as_unknown_not_as_the_last_value_read() {
+        var failure = new DataAccessResourceFailureException("the database is away");
+        var pulses = mock(LoadRepository.class);
+        when(pulses.aboveNow(anyInt(), any())).thenReturn(false).thenThrow(failure).thenReturn(true);
+        var registry = new SimpleMeterRegistry();
+        var told = new LoadAbovePromise(pulses, props, registry);
+        var gauge = registry.get(LoadAbovePromise.METRIC).gauge();
+
+        told.read();
+        assertThat(gauge.value()).isZero();
+
+        assertThatThrownBy(told::read).isSameAs(failure);
+        assertThat(gauge.value()).isNaN();
+
+        told.read();
+        assertThat(gauge.value()).isOne();
     }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The release check after a service's upgrade: did the guarantee hold while the new version rolled out and settled
-under load. Asks Prometheus only; prints one line and exits 0 (kept, or not checked because of chaos or of a load above the promised one) or 1 (broken, or
-not checked)."""
+under load. Asks Prometheus only; prints one line and exits 0 (kept, or not checked because of chaos or of a load above
+the promised one) or 1 (broken, or not checked)."""
 
 import json
 import math
@@ -22,21 +22,27 @@ QUERY_PATH = "/api/v1/query"
 # The gateway's latency bucket at its 3 s threshold (gateway.latency.slo-thresholds), as Micrometer spells it.
 SLOW_BUCKET = "3.0"
 ALL_BUCKET = "+Inf"
-# A stopping gateway's 503 is no answer to its client either, as the availability counts it (docs/guides/slo.md).
-REFUSED_OUTCOMES = ("refused", "stopping")
+REFUSED = 'sum(increase(gateway_transfers_total{{outcome="refused"}}[{r}s]))'
+# A stopping gateway's 503 is no answer to its client either, as the availability counts it (docs/guides/slo.md). The
+# gateway counts it while it shuts down, after its last scrape, so the count is its client's: the generator's answers
+# of that kind (Load.RESPONSES_METRIC, ResponseKind.STOPPING), retries included.
+REFUSED_AS_STOPPING = 'sum(increase(generator_responses_total{{job="generator", kind="stopping"}}[{r}s]))'
 
 # Each must stay at exactly 0 in the window. Every series here is registered when its service starts, so it exists at
 # 0 before anything happens; an empty answer therefore means the metric is not scraped, never that the count is zero.
+# A sum with an empty side is empty as well.
 GUARANTEES = (
     (">3s", 'sum(increase(gateway_transfer_latency_seconds_bucket{{le="' + ALL_BUCKET + '"}}[{r}s]))'
             ' - sum(increase(gateway_transfer_latency_seconds_bucket{{le="' + SLOW_BUCKET + '"}}[{r}s]))', 0),
-    ("503", 'sum(increase(gateway_transfers_total{{outcome=~"' + "|".join(REFUSED_OUTCOMES) + '"}}[{r}s]))', 0),
+    ("503", REFUSED + " + " + REFUSED_AS_STOPPING, 0),
     ("pool timeouts", 'sum(increase(hikaricp_connections_timeout_total{{job="gateway"}}[{r}s]))', 0),
 )
-# Control's count of chaos presses (ChaosService.METRIC), registered at its start, so the same empty-answer rule applies.
+# Control's count of chaos presses (ChaosService.METRIC), registered at its start, so the same empty-answer rule
+# applies.
 CHAOS_SERIES = 'control_chaos_events_total{job="control"}'
 # Control's gauge (LoadAbovePromise.METRIC): 1 from the start of a load above the promised speed to the end of its
-# aftermath, else 0. The speed and the aftermath are control's alone, the ones its availability is judged by.
+# aftermath, else 0, and NaN while control cannot read its pulses. The speed and the aftermath are control's alone, the
+# ones its availability is judged by.
 LOAD_SERIES = 'control_load_above_promise{job="control"}'
 
 LABEL_CHAOS = "not checked (chaos)"
@@ -50,6 +56,11 @@ def chaos_query(seconds):
 
 def load_query(seconds):
     return f"max(max_over_time({LOAD_SERIES}[{seconds}s]))"
+
+
+def load_known_query(seconds):
+    """NaN when a sample of the window is NaN: max_over_time skips a NaN beside a number, sum_over_time does not."""
+    return f"sum(sum_over_time({LOAD_SERIES}[{seconds}s]))"
 
 
 class NotChecked(Exception):
@@ -127,6 +138,7 @@ def check(env, fetch=http_fetch, sleep=time.sleep, clock=time.time):
         if query_value(fetch, prometheus_url, load_query(window), at) > 0:
             return (f"{service}: {LABEL_LOAD}: a load above the promised one was raised from the page in the last"
                     f" {window} s"), EXIT_KEPT
+        query_value(fetch, prometheus_url, load_known_query(window), at)
         broken = []
         for name, template, allowed in GUARANTEES:
             count = round(query_value(fetch, prometheus_url, template.format(r=window), at))

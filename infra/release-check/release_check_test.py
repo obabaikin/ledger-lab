@@ -21,10 +21,13 @@ SETTLE = 120
 AFTERMATH = 60
 CHAOS_FRAGMENT = "control_chaos_events_total"
 LOAD_FRAGMENT = "control_load_above_promise"
+LOAD_KNOWN_FRAGMENT = "sum_over_time(control_load_above_promise"
 TRANSFERS_FRAGMENT = "gateway_transfers_total"
+RESPONSES_FRAGMENT = "generator_responses_total"
 ACCEPTED = 500
 NOW = 1_800_000_000.0
 SCRIPT = os.path.join(CHART_FILES, "release_check.py")
+EMPTY = {"status": "success", "data": {"resultType": "vector", "result": []}}
 
 
 def vector(value):
@@ -32,33 +35,47 @@ def vector(value):
 
 
 class Prometheus:
-    """Canned answers keyed by a fragment of the query; the gateway's transfers are counted by the outcomes the query
-    selects, as Prometheus would. Records every query sent."""
+    """Canned answers keyed by a fragment of the query. The gateway's transfers and the generator's answers are counted
+    by the outcomes and the kinds the query selects, term by term of its sum, and a sum with an absent series in it is
+    empty, as Prometheus would. The gateway's own count of the transfers it refused while stopping never grows: its
+    pod is no longer scraped by then. Records every query sent."""
 
-    BY_OUTCOME = object()
+    COUNTED = object()
 
-    def __init__(self, inf=500, within=500, refused=0, stopping=0, pool_timeouts=0, chaos=0, load=0, answers=None):
+    def __init__(self, inf=500, within=500, refused=0, stopping=0, pool_timeouts=0, chaos=0, load=0, load_unknown=False,
+                 absent=(), answers=None):
         self.answers = answers or {
-            'le="+Inf"': None, TRANSFERS_FRAGMENT: self.BY_OUTCOME,
+            'le="+Inf"': None, TRANSFERS_FRAGMENT: self.COUNTED, RESPONSES_FRAGMENT: self.COUNTED,
             "hikaricp_connections_timeout_total": vector(pool_timeouts), CHAOS_FRAGMENT: vector(chaos),
-            LOAD_FRAGMENT: vector(load),
+            LOAD_KNOWN_FRAGMENT: vector("NaN" if load_unknown else load), LOAD_FRAGMENT: vector(load),
         }
-        self.outcomes = {"accepted": ACCEPTED, "refused": refused, "stopping": stopping}
+        self.counts = {
+            TRANSFERS_FRAGMENT: ("outcome", {"accepted": ACCEPTED, "refused": refused, "stopping": 0}),
+            RESPONSES_FRAGMENT: ("kind", {"accepted": ACCEPTED, "busy": refused, "stopping": stopping}),
+        }
+        self.absent = absent
         self.slow = vector(inf - within)
         self.sent = []
 
-    def selected_transfers(self, query):
-        operator, pattern = re.search(r'outcome(=~|=)"([^"]*)"', query).groups()
-        pattern = pattern if operator == "=~" else re.escape(pattern)
-        return vector(sum(count for outcome, count in self.outcomes.items() if re.fullmatch(pattern, outcome)))
+    def counted(self, query):
+        total = 0
+        for term in query.split(" + "):
+            series = next(fragment for fragment in self.counts if fragment in term)
+            if series in self.absent:
+                return EMPTY
+            label, counts = self.counts[series]
+            operator, pattern = re.search(label + r'(=~|=)"([^"]*)"', term).groups()
+            pattern = pattern if operator == "=~" else re.escape(pattern)
+            total += sum(count for value, count in counts.items() if re.fullmatch(pattern, value))
+        return vector(total)
 
     def __call__(self, url):
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["query"][0]
         self.sent.append(query)
         for fragment, answer in self.answers.items():
             if fragment in query:
-                if answer is self.BY_OUTCOME:
-                    answer = self.selected_transfers(query)
+                if answer is self.COUNTED:
+                    answer = self.counted(query)
                 return json.dumps(answer if answer is not None else self.slow).encode()
         raise AssertionError(f"unexpected query {query}")
 
@@ -99,6 +116,19 @@ class GuaranteeTest(unittest.TestCase):
         line, code, _ = run(Prometheus(stopping=1))
         self.assertEqual(code, release_check.EXIT_FAILED)
         self.assertIn("503 1", line)
+
+    def test_a_stopping_gateways_refusals_are_counted_by_its_client_which_outlives_its_pod(self):
+        prometheus = Prometheus(stopping=1)
+        run(prometheus)
+        refusals = [query for query in prometheus.sent if TRANSFERS_FRAGMENT in query]
+        self.assertEqual(refusals, [
+            f'sum(increase(gateway_transfers_total{{outcome="refused"}}[{ROLLOUT + SETTLE}s]))'
+            f' + sum(increase(generator_responses_total{{job="generator", kind="stopping"}}[{ROLLOUT + SETTLE}s]))'])
+
+    def test_no_answer_of_the_client_about_a_stopping_gateway_is_not_read_as_no_refusal(self):
+        line, code, _ = run(Prometheus(absent=(RESPONSES_FRAGMENT,)))
+        self.assertEqual(code, release_check.EXIT_FAILED)
+        self.assertIn("gateway: not checked: 0 series", line)
 
     def test_refusals_of_both_kinds_are_one_count(self):
         line, code, _ = run(Prometheus(refused=2, stopping=3))
@@ -156,11 +186,22 @@ class LoadAbovePromiseTest(unittest.TestCase):
         self.assertEqual(code, release_check.EXIT_FAILED)
         self.assertIn("gateway: not checked: 0 series", line)
 
+    def test_seconds_in_which_control_could_not_read_its_pulses_are_not_read_as_a_load_within_the_promise(self):
+        line, code, _ = run(Prometheus(load=0, load_unknown=True))
+        self.assertEqual(code, release_check.EXIT_FAILED)
+        self.assertIn("gateway: not checked: no number", line)
+
+    def test_a_load_above_the_promised_one_is_not_checked_whatever_the_seconds_control_could_not_read_held(self):
+        line, code, _ = run(Prometheus(refused=5, load=1, load_unknown=True))
+        self.assertEqual(code, release_check.EXIT_KEPT)
+        self.assertIn("not checked (load)", line)
+
     def test_the_load_is_asked_of_controls_gauge_over_the_window_with_no_speed_or_aftermath_of_the_checks_own(self):
         prometheus = Prometheus()
         run(prometheus)
         asked = [query for query in prometheus.sent if LOAD_FRAGMENT in query]
-        self.assertEqual(asked, [f'max(max_over_time(control_load_above_promise{{job="control"}}[{ROLLOUT + SETTLE}s]))'])
+        gauge = f'control_load_above_promise{{job="control"}}[{ROLLOUT + SETTLE}s]'
+        self.assertEqual(asked, [f"max(max_over_time({gauge}))", f"sum(sum_over_time({gauge}))"])
         with open(SCRIPT) as source:
             text = source.read()
         for copied in ("1300", "LOAD_AFTERMATH", "GUARANTEED"):
@@ -276,7 +317,8 @@ class WindowTest(unittest.TestCase):
         sent = "\n".join(prometheus.sent)
         self.assertIn('gateway_transfer_latency_seconds_bucket{le="3.0"}', sent)
         self.assertIn('gateway_transfer_latency_seconds_bucket{le="+Inf"}', sent)
-        self.assertIn('gateway_transfers_total{outcome=~"refused|stopping"}', sent)
+        self.assertIn('gateway_transfers_total{outcome="refused"}', sent)
+        self.assertIn('generator_responses_total{job="generator", kind="stopping"}', sent)
         self.assertIn('hikaricp_connections_timeout_total{job="gateway"}', sent)
 
 

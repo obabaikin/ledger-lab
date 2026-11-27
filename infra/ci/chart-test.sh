@@ -429,6 +429,8 @@ state_missing_test() {
 }
 check "the releases' conditions missing for the 2 minutes of alerts.heldFor are an alert" \
   "$(rules_give "$(state_missing_test 5m "$(echo "$state_missing_alert" | sed 's/exp_annotations/exp_labels: {namespace: default}\n            exp_annotations/')" 'Ready:Succeeded:1x40:other')")" passed
+check "the releases' conditions missing for less than the 2 minutes of alerts.heldFor are no alert yet" \
+  "$(rules_give "$(state_missing_test 1m '[]' 'Ready:Succeeded:1x40:other')")" passed
 check "the releases' conditions there, whatever they say, are no such alert" \
   "$(rules_give "$(state_missing_test 5m '[]' 'Ready:Succeeded:1x40')")" passed
 check "the rule and kube-state-metrics name the releases' conditions alike" \
@@ -659,6 +661,45 @@ Flux leaves the release as it is, and the releases after it wait. What it says:
 Forward, the pointer's version once more:
   at=\$(date +%s); kubectl --namespace bank annotate --overwrite helmrelease gateway reconcile.fluxcd.io/requestedAt=\$at reconcile.fluxcd.io/forceAt=\$at
 Back: move the deploy pointer to the commit before. Not helm rollback: helm-controller refuses it."
+# The Subject of every mail a receiver's route makes of alerts that fire together, a line each: Alertmanager mails as
+# one the alerts alike in the labels of the route's group_by, or of the root route's when it names none.
+TAB=$(printf '\t')
+subjects_of() {
+  route="$1"
+  shift
+  python3 -c '
+import re, sys
+lines = open(sys.argv[1]).read().split("\n")
+labels_of = lambda line: re.fullmatch(r" *(?:- )?group_by: \[(.*)\]", line).group(1).split(", ")
+grouped_by = labels_of(next(line for line in lines if re.fullmatch(r"  group_by: \[.*\]", line)))
+named = next(at for at, line in enumerate(lines) if re.fullmatch(r" *receiver: " + sys.argv[2], line))
+indent = len(lines[named]) - len(lines[named].lstrip())
+first = max((at for at in range(named + 1) if lines[at].startswith(" " * (indent - 2) + "- ")), default=None)
+if indent > 2 and first is not None:
+    for line in [lines[first].replace("- ", "  ", 1)] + lines[first + 1:]:
+        if len(line) - len(line.lstrip()) < indent:
+            break
+        if re.fullmatch(" " * indent + r"group_by: \[.*\]", line):
+            grouped_by = labels_of(line)
+mails = {}
+for alert in sys.argv[3:]:
+    labels = dict(pair.split("=", 1) for pair in alert.partition("|")[0].split(","))
+    mails.setdefault(tuple(labels.get(label, "") for label in grouped_by), []).append(alert)
+for alerts in mails.values():
+    print("\t".join(alerts))' "$copy/alertmanager/alertmanager.yml" "$route" "$@" >"$copy/alertmanager/mails"
+  while IFS= read -r alerts; do
+    (IFS="$TAB"; set -- $alerts; unset IFS; echo "$(mail "$route" Subject "$@" </dev/null)")
+  done <"$copy/alertmanager/mails"
+}
+stalled_too=$(echo "$stalled" | sed 's/name=gateway/name=ledger/;s/Release gateway/Release ledger/')
+check "two releases stalled at once are two mails, each naming its release" \
+  "$(subjects_of urgent "$stalled" "$stalled_too")" \
+  "NEEDS A HAND NOW: DeployStalled at gateway
+NEEDS A HAND NOW: DeployStalled at ledger"
+check "two alerts of one name that wait for no hand are one mail" \
+  "$(subjects_of alerts 'alertname=ContainerMemoryNearLimit,container=ledger|Container ledger is near' \
+    'alertname=ContainerMemoryNearLimit,container=gateway|Container gateway is near')" \
+  "alert: ContainerMemoryNearLimit (2)"
 check "the alert whose mail carries the release's commands is one of the rules" \
   "$(rules_of | grep -c "alert: $(sed -n 's/^.*eq .Labels.alertname "\([A-Za-z]*\)".*$/\1/p' "$original/files/alertmanager-mail.tmpl")\$")" 1
 mailed | grep -o 'reason=~\?"[A-Za-z|]*"' | sed 's/^.*"\(.*\)"$/\1/' | tr '|' '\n' | sort -u >"$copy/alertmanager/routed"

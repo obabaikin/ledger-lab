@@ -34,7 +34,10 @@ public class LoadRepository {
             .orElse(null);
     }
 
-    /** The rule of AvailabilityRepository's outside minutes for a pulse, at this instant of the database clock. */
+    /**
+     * The pulse's part of the rule of AvailabilityRepository's outside minutes, at this instant of the database clock,
+     * without its condition that no instance restarted: a rollout restarts instances by itself.
+     */
     public boolean aboveNow(int guaranteedTps, Duration aftermath) {
         return jdbc.sql("""
                 SELECT EXISTS (
