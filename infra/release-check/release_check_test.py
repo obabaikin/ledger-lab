@@ -20,6 +20,9 @@ ROLLOUT = 47
 SETTLE = 120
 AFTERMATH = 60
 CHAOS_FRAGMENT = "control_chaos_events_total"
+LOAD_FRAGMENT = "control_load_above_promise"
+TRANSFERS_FRAGMENT = "gateway_transfers_total"
+ACCEPTED = 500
 NOW = 1_800_000_000.0
 SCRIPT = os.path.join(CHART_FILES, "release_check.py")
 
@@ -29,23 +32,38 @@ def vector(value):
 
 
 class Prometheus:
-    """Canned answers keyed by a fragment of the query; records every query sent."""
+    """Canned answers keyed by a fragment of the query; the gateway's transfers are counted by the outcomes the query
+    selects, as Prometheus would. Records every query sent."""
 
-    def __init__(self, inf=500, within=500, refused=0, pool_timeouts=0, chaos=0, answers=None):
+    BY_OUTCOME = object()
+
+    def __init__(self, inf=500, within=500, refused=0, stopping=0, pool_timeouts=0, chaos=0, load=0, answers=None):
         self.answers = answers or {
-            'le="+Inf"': None, "outcome=\"refused\"": vector(refused),
-            "hikaricp_connections_timeout_total": vector(pool_timeouts), "control_chaos_events_total": vector(chaos),
+            'le="+Inf"': None, TRANSFERS_FRAGMENT: self.BY_OUTCOME,
+            "hikaricp_connections_timeout_total": vector(pool_timeouts), CHAOS_FRAGMENT: vector(chaos),
+            LOAD_FRAGMENT: vector(load),
         }
+        self.outcomes = {"accepted": ACCEPTED, "refused": refused, "stopping": stopping}
         self.slow = vector(inf - within)
         self.sent = []
+
+    def selected_transfers(self, query):
+        operator, pattern = re.search(r'outcome(=~|=)"([^"]*)"', query).groups()
+        pattern = pattern if operator == "=~" else re.escape(pattern)
+        return vector(sum(count for outcome, count in self.outcomes.items() if re.fullmatch(pattern, outcome)))
 
     def __call__(self, url):
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["query"][0]
         self.sent.append(query)
         for fragment, answer in self.answers.items():
             if fragment in query:
+                if answer is self.BY_OUTCOME:
+                    answer = self.selected_transfers(query)
                 return json.dumps(answer if answer is not None else self.slow).encode()
         raise AssertionError(f"unexpected query {query}")
+
+    def guarantee_queries(self):
+        return [query for query in self.sent if CHAOS_FRAGMENT not in query and LOAD_FRAGMENT not in query]
 
 
 def env(**overrides):
@@ -77,6 +95,20 @@ class GuaranteeTest(unittest.TestCase):
         self.assertEqual(code, release_check.EXIT_FAILED)
         self.assertIn("503 1", line)
 
+    def test_one_transfer_a_stopping_gateway_refused_breaks_it_as_a_refused_one(self):
+        line, code, _ = run(Prometheus(stopping=1))
+        self.assertEqual(code, release_check.EXIT_FAILED)
+        self.assertIn("503 1", line)
+
+    def test_refusals_of_both_kinds_are_one_count(self):
+        line, code, _ = run(Prometheus(refused=2, stopping=3))
+        self.assertEqual(code, release_check.EXIT_FAILED)
+        self.assertIn("503 5", line)
+
+    def test_accepted_transfers_are_not_refusals(self):
+        line, code, _ = run(Prometheus())
+        self.assertEqual((line, code), (f"gateway: guarantee kept in the last {ROLLOUT + SETTLE} s", 0))
+
     def test_one_pool_timeout_breaks_it_and_is_named(self):
         line, code, _ = run(Prometheus(pool_timeouts=1))
         self.assertEqual(code, release_check.EXIT_FAILED)
@@ -102,6 +134,37 @@ class ChaosTest(unittest.TestCase):
         line, code, _ = run(prometheus)
         self.assertEqual(code, release_check.EXIT_FAILED)
         self.assertIn("not checked", line)
+
+
+class LoadAbovePromiseTest(unittest.TestCase):
+    def test_a_load_above_the_promised_one_in_the_window_is_not_checked_and_does_not_fail(self):
+        line, code, _ = run(Prometheus(refused=5, within=400, load=1))
+        self.assertEqual(code, release_check.EXIT_KEPT)
+        self.assertEqual(line, f"gateway: not checked (load): a load above the promised one was raised from the page"
+                               f" in the last {ROLLOUT + SETTLE} s")
+
+    def test_a_load_up_to_the_promised_one_is_checked(self):
+        line, code, _ = run(Prometheus(refused=5, load=0))
+        self.assertEqual(code, release_check.EXIT_FAILED)
+        self.assertIn("guarantee broken", line)
+        self.assertIn("503 5", line)
+
+    def test_no_answer_about_the_load_is_not_read_as_a_load_within_the_promise(self):
+        prometheus = Prometheus()
+        prometheus.answers[LOAD_FRAGMENT] = {"status": "success", "data": {"resultType": "vector", "result": []}}
+        line, code, _ = run(prometheus)
+        self.assertEqual(code, release_check.EXIT_FAILED)
+        self.assertIn("gateway: not checked: 0 series", line)
+
+    def test_the_load_is_asked_of_controls_gauge_over_the_window_with_no_speed_or_aftermath_of_the_checks_own(self):
+        prometheus = Prometheus()
+        run(prometheus)
+        asked = [query for query in prometheus.sent if LOAD_FRAGMENT in query]
+        self.assertEqual(asked, [f'max(max_over_time(control_load_above_promise{{job="control"}}[{ROLLOUT + SETTLE}s]))'])
+        with open(SCRIPT) as source:
+            text = source.read()
+        for copied in ("1300", "LOAD_AFTERMATH", "GUARANTEED"):
+            self.assertNotIn(copied, text)
 
 
 class NotCheckedTest(unittest.TestCase):
@@ -145,7 +208,7 @@ class NotCheckedTest(unittest.TestCase):
 
     def test_an_absent_series_is_not_read_as_zero(self):
         empty = {"status": "success", "data": {"resultType": "vector", "result": []}}
-        for fragment in ('le="+Inf"', 'outcome="refused"', "hikaricp_connections_timeout_total"):
+        for fragment in ('le="+Inf"', TRANSFERS_FRAGMENT, "hikaricp_connections_timeout_total"):
             with self.subTest(fragment=fragment):
                 prometheus = Prometheus()
                 prometheus.answers[fragment] = empty
@@ -169,7 +232,7 @@ class WindowTest(unittest.TestCase):
     def test_every_query_covers_the_rollout_and_the_settle_time(self):
         prometheus = Prometheus()
         run(prometheus)
-        guarantees = [query for query in prometheus.sent if CHAOS_FRAGMENT not in query]
+        guarantees = prometheus.guarantee_queries()
         self.assertEqual(len(guarantees), 3)
         for query in guarantees:
             self.assertEqual(set(re.findall(r"\[(\d+)s\]", query)), {str(ROLLOUT + SETTLE)}, query)
@@ -192,8 +255,7 @@ class WindowTest(unittest.TestCase):
     def test_the_window_follows_the_rollout_length_not_a_fixed_one(self):
         prometheus = Prometheus()
         run(prometheus, ROLLOUT_SECONDS="300", SETTLE_SECONDS="60")
-        self.assertTrue(all("[360s]" in query for query in prometheus.sent if CHAOS_FRAGMENT not in query),
-                        prometheus.sent)
+        self.assertTrue(all("[360s]" in query for query in prometheus.guarantee_queries()), prometheus.sent)
 
     def test_it_waits_the_settle_time_before_asking(self):
         _, _, slept = run(Prometheus())
@@ -206,7 +268,7 @@ class WindowTest(unittest.TestCase):
         del values["SETTLE_SECONDS"]
         release_check.check(values, fetch=prometheus, sleep=slept.append, clock=lambda: NOW)
         self.assertEqual(slept, [120])
-        self.assertTrue(all(f"[{ROLLOUT + 120}s]" in query for query in prometheus.sent if CHAOS_FRAGMENT not in query))
+        self.assertTrue(all(f"[{ROLLOUT + 120}s]" in query for query in prometheus.guarantee_queries()))
 
     def test_the_queries_are_the_gateways_guarantee_series(self):
         prometheus = Prometheus()
@@ -214,7 +276,7 @@ class WindowTest(unittest.TestCase):
         sent = "\n".join(prometheus.sent)
         self.assertIn('gateway_transfer_latency_seconds_bucket{le="3.0"}', sent)
         self.assertIn('gateway_transfer_latency_seconds_bucket{le="+Inf"}', sent)
-        self.assertIn('gateway_transfers_total{outcome="refused"}', sent)
+        self.assertIn('gateway_transfers_total{outcome=~"refused|stopping"}', sent)
         self.assertIn('hikaricp_connections_timeout_total{job="gateway"}', sent)
 
 

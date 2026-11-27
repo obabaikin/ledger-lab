@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The release check after a service's upgrade: did the guarantee hold while the new version rolled out and settled
-under load. Asks Prometheus only; prints one line and exits 0 (kept, or not checked because of chaos) or 1 (broken, or
+under load. Asks Prometheus only; prints one line and exits 0 (kept, or not checked because of chaos or of a load above the promised one) or 1 (broken, or
 not checked)."""
 
 import json
@@ -22,24 +22,34 @@ QUERY_PATH = "/api/v1/query"
 # The gateway's latency bucket at its 3 s threshold (gateway.latency.slo-thresholds), as Micrometer spells it.
 SLOW_BUCKET = "3.0"
 ALL_BUCKET = "+Inf"
+# A stopping gateway's 503 is no answer to its client either, as the availability counts it (docs/guides/slo.md).
+REFUSED_OUTCOMES = ("refused", "stopping")
 
 # Each must stay at exactly 0 in the window. Every series here is registered when its service starts, so it exists at
 # 0 before anything happens; an empty answer therefore means the metric is not scraped, never that the count is zero.
 GUARANTEES = (
     (">3s", 'sum(increase(gateway_transfer_latency_seconds_bucket{{le="' + ALL_BUCKET + '"}}[{r}s]))'
             ' - sum(increase(gateway_transfer_latency_seconds_bucket{{le="' + SLOW_BUCKET + '"}}[{r}s]))', 0),
-    ("503", 'sum(increase(gateway_transfers_total{{outcome="refused"}}[{r}s]))', 0),
+    ("503", 'sum(increase(gateway_transfers_total{{outcome=~"' + "|".join(REFUSED_OUTCOMES) + '"}}[{r}s]))', 0),
     ("pool timeouts", 'sum(increase(hikaricp_connections_timeout_total{{job="gateway"}}[{r}s]))', 0),
 )
 # Control's count of chaos presses (ChaosService.METRIC), registered at its start, so the same empty-answer rule applies.
 CHAOS_SERIES = 'control_chaos_events_total{job="control"}'
+# Control's gauge (LoadAbovePromise.METRIC): 1 from the start of a load above the promised speed to the end of its
+# aftermath, else 0. The speed and the aftermath are control's alone, the ones its availability is judged by.
+LOAD_SERIES = 'control_load_above_promise{job="control"}'
 
 LABEL_CHAOS = "not checked (chaos)"
+LABEL_LOAD = "not checked (load)"
 LABEL_NOT_CHECKED = "not checked"
 
 
 def chaos_query(seconds):
     return f"sum(increase({CHAOS_SERIES}[{seconds}s]))"
+
+
+def load_query(seconds):
+    return f"max(max_over_time({LOAD_SERIES}[{seconds}s]))"
 
 
 class NotChecked(Exception):
@@ -114,6 +124,9 @@ def check(env, fetch=http_fetch, sleep=time.sleep, clock=time.time):
         at = clock()
         if query_value(fetch, prometheus_url, chaos_query(chaos_window), at) > 0:
             return f"{service}: {LABEL_CHAOS}: chaos was started from the page in the last {chaos_window} s", EXIT_KEPT
+        if query_value(fetch, prometheus_url, load_query(window), at) > 0:
+            return (f"{service}: {LABEL_LOAD}: a load above the promised one was raised from the page in the last"
+                    f" {window} s"), EXIT_KEPT
         broken = []
         for name, template, allowed in GUARANTEES:
             count = round(query_value(fetch, prometheus_url, template.format(r=window), at))

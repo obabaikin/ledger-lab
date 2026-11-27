@@ -34,6 +34,19 @@ public class LoadRepository {
             .orElse(null);
     }
 
+    /** The rule of AvailabilityRepository's outside minutes for a pulse, at this instant of the database clock. */
+    public boolean aboveNow(int guaranteedTps, Duration aftermath) {
+        return jdbc.sql("""
+                SELECT EXISTS (
+                    SELECT 1 FROM load_pulses
+                    WHERE tps > :guaranteedTps AND at <= clock_timestamp()
+                      AND clock_timestamp() < until + CAST(:aftermathMillis AS bigint) * interval '1 millisecond')""")
+            .param("guaranteedTps", guaranteedTps)
+            .param("aftermathMillis", aftermath.toMillis())
+            .query(Boolean.class)
+            .single();
+    }
+
     public void insert(LoadPulse pulse) {
         jdbc.sql("INSERT INTO load_pulses (at, tps, seconds, until) VALUES (:at, :tps, :seconds, :until)")
             .param("at", Timestamp.from(pulse.at()))

@@ -8,6 +8,9 @@ control:
     tick-interval: 1h
     # Above services.request-timeout, so a count slower than an ordinary call still counts.
     count-timeout: 2s
+  outside:
+    # Tests read the load above the promise themselves.
+    load-poll-interval: 1h
   availability:
     poll-interval: 1h
   series:

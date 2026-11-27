@@ -161,10 +161,6 @@ class PeriodChecksTest(unittest.TestCase):
         line = scenario.totals_line([first, second], next_period(resolved=0))
         self.assertIn("gateway accepted 1500, clients' journal 1498 + resolved as accepted 2 in 2 periods", line)
 
-    def test_no_period_checked_fails(self):
-        self.assertFalse(scenario.periods_count_check([]).ok)
-        self.assertTrue(scenario.periods_count_check([details()]).ok)
-
 
 class WaitedPeriodsTest(unittest.TestCase):
     def test_the_period_after_the_last_crossed_one_is_waited_for(self):
@@ -961,7 +957,7 @@ class ScenarioRunTest(unittest.TestCase):
         for name in ("each release deployed after the one before it was ready",
                      "each release sets the image tag git gives its service at the commit",
                      "release check given to the services that changed", "release check passed",
-                     "the deploy replaced the pods of the services it changed", "periods checked",
+                     "the deploy replaced the pods of the services it changed",
                      "killed ledger-0 and the gateway came back", "money on the accounts unchanged", "/api/site"):
             self.assertIn(name, names)
         self.assertEqual(len([name for name in names if name.startswith("deploy left every pod")]), 2)

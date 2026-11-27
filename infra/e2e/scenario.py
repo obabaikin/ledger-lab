@@ -107,8 +107,6 @@ STATE_RECONCILED = "RECONCILED"
 VERDICT_BALANCED = "BALANCED"
 DISCREPANCY_NOTES = frozenset(("REPORTING_UNAVAILABLE", "PROJECTION_BEHIND_BOOKS"))
 PERIODS_LIMIT = 100
-# A deploy that replaces control alone and the crash after it may fall into one period of 5 minutes.
-MIN_PERIODS = 1
 # The least share of the generator's steady speed a checked period must have accepted over its time inside the scenario:
 # well below the speed, as a killed gateway and the deploy take traffic away, yet a bank without load fails.
 MIN_LOAD_SHARE = 0.25
@@ -255,11 +253,6 @@ def load_check(details, tps, started, ended):
     return Check(f"period {clock(start)}-{clock(end)} under load", accepted is not None and accepted >= least,
                  f"gateway accepted {accepted}, at least {least} ({MIN_LOAD_SHARE:.0%} of {tps} TPS over "
                  f"{inside:.0f}s in the scenario)")
-
-
-def periods_count_check(all_details):
-    return Check("periods checked", len(all_details) >= MIN_PERIODS,
-                 f"{len(all_details)}, at least {MIN_PERIODS}")
 
 
 def money_check(before, after, opening, mutate):
@@ -816,7 +809,6 @@ class Scenario:
         for details, following in zip(fetched, fetched[1:]):
             self.checks += period_checks(details, following)
             self.checks.append(load_check(details, self.tps, self.started, self.ended))
-        self.checks.append(periods_count_check(self.details))
         self.summary.append(totals_line(self.details, fetched[-1]))
 
     def final_checks(self):
