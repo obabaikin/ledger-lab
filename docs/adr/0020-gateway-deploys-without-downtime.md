@@ -1,6 +1,7 @@
 # ADR 0020: The gateway deploys without downtime
 
-Status: accepted · Date: 2026-11-08
+Status: accepted · Date: 2026-11-08 · Partly superseded by [ADR 0024](0024-deploys-without-a-maintenance-window.md):
+the other services no longer stop on a deploy
 
 ## Context
 

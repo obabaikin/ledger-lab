@@ -1,6 +1,6 @@
 #!/bin/sh
 # The deploy pointer's content for a commit: the chart's source at that commit and one HelmRelease per part of the bank,
-# each waiting for the one before it, so a deploy replaces one service at a time in a fixed order.
+# each waiting for the one before it, so a deploy replaces one service at a time in a fixed order (ADR 0024).
 # Usage: infra/flux/release.sh <commit> <git URL of the repository> [<values file> ...]; values files are paths in the
 # repository at that commit, applied after the chart's own. Prints release.yaml.
 # PREVIOUS_RELEASE names the release.yaml of the last pointer whose whole chain was deployed (deployed-release.sh finds

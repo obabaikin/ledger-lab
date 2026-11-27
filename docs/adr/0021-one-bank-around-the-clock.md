@@ -1,6 +1,6 @@
 # ADR 0021: One bank around the clock
 
-Status: accepted · Date: 2026-11-15 · Supersedes [ADR 0004](0004-run-isolation.md), [ADR 0007](0007-stopping-a-run.md), [ADR 0012](0012-invites-quota-and-the-run-queue.md), [ADR 0013](0013-orchestrating-a-run-and-the-verdict.md)
+Status: accepted · Date: 2026-11-15 · Supersedes [ADR 0004](0004-run-isolation.md), [ADR 0007](0007-stopping-a-run.md), [ADR 0012](0012-invites-quota-and-the-run-queue.md), [ADR 0013](0013-orchestrating-a-run-and-the-verdict.md) · Partly superseded by [ADR 0024](0024-deploys-without-a-maintenance-window.md): how a deploy reaches the server and what stops for it
 
 ## Context
 

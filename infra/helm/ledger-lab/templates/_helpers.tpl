@@ -111,7 +111,7 @@ spec: {{- .spec | nindent 2 }}
 
 {{- /*
 Whether a template's objects belong to the release being rendered: each service is a release of its own, so a deploy
-replaces one service at a time; "platform" holds what they share. An empty component renders all of it, as
+replaces one service at a time (ADR 0024); "platform" holds what they share. An empty component renders all of it, as
 one release. Takes (list $root "platform" | "<service>"); "true" or "".
 */}}
 {{- define "ledger-lab.renders" -}}
