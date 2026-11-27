@@ -410,6 +410,20 @@ class LoadTest extends IntegrationTest {
     }
 
     @Test
+    void until_the_pulses_are_first_read_the_load_above_the_promise_is_told_as_unknown_not_as_within_it() {
+        var pulses = mock(LoadRepository.class);
+        when(pulses.aboveNow(anyInt(), any())).thenReturn(false);
+        var registry = new SimpleMeterRegistry();
+        var told = new LoadAbovePromise(pulses, props, registry);
+        var gauge = registry.get(LoadAbovePromise.METRIC).gauge();
+
+        assertThat(gauge.value()).isNaN();
+
+        told.read();
+        assertThat(gauge.value()).isZero();
+    }
+
+    @Test
     void while_the_pulses_cannot_be_read_the_load_above_the_promise_is_told_as_unknown_not_as_the_last_value_read() {
         var failure = new DataAccessResourceFailureException("the database is away");
         var pulses = mock(LoadRepository.class);

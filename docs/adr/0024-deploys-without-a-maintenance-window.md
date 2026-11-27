@@ -114,6 +114,9 @@ kustomize 96 MiB (peak 76), helm 68 (54), source 64 (48), notification 56 (43). 
   so a refusal before the pod's first scrape, a second, is missed.
 - **A new metric of the check comes one commit before the check reads it.** The check asks the control that is still
   running; a metric it does not publish yet is an empty answer, and the first checked service is rolled back.
+- **The load gauge has no samples while control restarts.** Between the old pod's last scrape and the new pod's
+  first read of its pulses the check judges the window by its other samples; accepted, as a control that is back
+  tells a pulse from the pulses kept, to the end of its aftermath.
 - **What the cluster's Secret changes is not checked**, and a changed database password restarts no pod.
 - **Drift is corrected at the release's interval of an hour**, and a field added by hand that the chart does not set
   is not removed.

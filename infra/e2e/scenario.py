@@ -17,17 +17,19 @@ next period's reconciliation must resolve exactly those as accepted; reporting m
 the accounts must be what it was, and the page must answer with the commit's version.
 
 Usage: infra/e2e/scenario.py run|steady|collect [--base <commit>] [--commit <commit, default HEAD>]
-         [--cluster ledger-lab] [--namespace ledger-lab] [--control-url http://localhost:8083] [--artifacts <dir>]
+         [--mode transition|install] [--cluster ledger-lab] [--namespace ledger-lab]
+         [--control-url http://localhost:8083] [--artifacts <dir>]
        infra/e2e/scenario.py mode --event <GitHub event> --changed <exit of changed.sh> --base-flux yes|no
   run      the scenario; one PASS or FAIL line per check, exit 1 if any failed (the cluster's state then goes to
-           --artifacts)
+           --artifacts). --mode is what the caller decided (mode): a transition without --base, or an install with
+           one, is refused before anything is touched
   steady   waits until the bank has kept its guarantee under its steady load for a release check's window
   mode     how CI tests a commit against its parent: skip, transition or install
   collect  the cluster's state into --artifacts: logs of every pod (and its previous container), get, describe, events,
            Flux's objects, control's periods
 E2E_MUTATE_SUM=1 expects the money on the accounts one cent higher at the end, so a run must fail.
-E2E_DEADLINE=<seconds of the epoch> ends every wait at that moment at the latest, so a run in CI still prints its
-report before the job is cut.
+E2E_DEADLINE=<seconds of the epoch> ends every wait and every call of infra/k3d/flux.sh at that moment at the latest, so
+a run in CI still prints its report before the job is cut.
 """
 
 import argparse
@@ -98,6 +100,8 @@ REVISION_COMMIT_LENGTH = 12
 # wait at once.
 CHAIN_TIMEOUT_SECONDS = 2400
 ONLY_IMAGES_ENV = "ONLY_IMAGES"
+# A flux.sh that outlives its end by this long is killed.
+FLUX_KILL_AFTER_SECONDS = 10
 IMAGES_SOURCE_ENV = "IMAGES_SOURCE"
 IMAGES_ANY = "any"
 
@@ -307,6 +311,14 @@ def choose_mode(event, changed, base_has_flux):
     return MODE_TRANSITION if base_has_flux else MODE_INSTALL
 
 
+def require_mode(mode, base):
+    # A run that lost its base on the way would pass as an install: no step between two commits, no release check.
+    if mode == MODE_TRANSITION and not base:
+        raise ScenarioError(f"mode {MODE_TRANSITION} needs --base, the commit the bank runs")
+    if mode == MODE_INSTALL and base:
+        raise ScenarioError(f"mode {MODE_INSTALL} takes no --base: the commit itself is the one installed")
+
+
 def condition(release, kind):
     for each in (release.get("status") or {}).get("conditions") or []:
         if each.get("type") == kind:
@@ -468,11 +480,14 @@ def chart_changed(base, commit, root=ROOT):
 
 def module_tags(commit, root=ROOT):
     # By the commit's own rule, as its images were tagged (infra/k3d/images.sh, CI's images job) and its pointer
-    # written: the rule may differ between the base and the commit.
-    with tempfile.TemporaryDirectory() as own:
-        rule = Path(own) / Path(MODULE_TAG).name
-        rule.write_text(output(["git", "-C", str(root), "show", f"{commit}:{MODULE_TAG}"]), encoding="utf-8")
-        return {service: output(["sh", str(rule), module, commit], cwd=str(root)).strip()
+    # written: the rule may differ between the base and the commit. Laid out as in the repository, as infra/k3d/flux.sh
+    # and infra/ci/move-pointer.sh run it.
+    with tempfile.TemporaryDirectory() as temp:
+        archive, own = Path(temp) / "rule.tar", Path(temp) / "own"
+        own.mkdir()
+        output(["git", "-C", str(root), "archive", f"--output={archive}", commit, "--", MODULE_TAG])
+        output(["tar", "-x", "-f", str(archive), "-C", str(own)])
+        return {service: output(["sh", str(own / MODULE_TAG), module, commit], cwd=str(root)).strip()
                 for service, module in MODULES.items()}
 
 
@@ -670,14 +685,25 @@ class Scenario:
             time.sleep(POLL_SECONDS)
 
     def flux(self, name, env):
-        with open(self.artifacts / f"flux-{name}.log", "w", encoding="utf-8") as log:
-            process = subprocess.Popen([str(FLUX), self.commit], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                       text=True, env=dict(os.environ, CLUSTER=self.args.cluster,
-                                                           NAMESPACE=self.args.namespace, **env))
+        argv = [str(FLUX), self.commit]
+        if self.run_ends is not None:
+            left = math.ceil(self.run_ends - time.time())
+            if left <= 0:
+                raise ScenarioError(f"flux.sh ({name}): not started, the run's time ran out ({DEADLINE_ENV})")
+            # timeout puts flux.sh and all it starts (the build, the waits) into a process group of their own and ends
+            # the whole group: a child left alive would keep the pipe read below open.
+            argv = ["timeout", f"--kill-after={FLUX_KILL_AFTER_SECONDS}", str(left)] + argv
+        environment = dict(os.environ, CLUSTER=self.args.cluster, NAMESPACE=self.args.namespace, **env)
+        with open(self.artifacts / f"flux-{name}.log", "w", encoding="utf-8") as log, \
+                subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                 env=environment) as process:
             for line in process.stdout:
                 print(f"  {line}", end="", flush=True)
                 log.write(line)
             code = process.wait()
+        if code != 0 and self.run_ends is not None and time.time() >= self.run_ends:
+            raise ScenarioError(f"flux.sh ({name}): stopped after {left}s, not done before the run's time ran out "
+                                f"({DEADLINE_ENV})")
         if code != 0:
             raise ScenarioError(f"flux.sh ({name}): exit {code}")
 
@@ -879,6 +905,8 @@ def main(argv=None):
     parser.add_argument("--base", metavar="COMMIT",
                         help="the commit the bank runs (infra/e2e/install-base.sh); without it --commit is the one installed")
     parser.add_argument("--commit", default="HEAD", help="the commit tested")
+    parser.add_argument("--mode", choices=(MODE_TRANSITION, MODE_INSTALL),
+                        help="run: what the mode command printed; a transition needs --base, an install takes none")
     parser.add_argument("--event", help="mode: the GitHub event")
     parser.add_argument("--changed", type=int, help="mode: the exit code of infra/ci/changed.sh <parent> <commit>")
     parser.add_argument("--base-flux", choices=("yes", "no"), help="mode: whether the parent has infra/flux/release.sh")
@@ -905,6 +933,7 @@ def main(argv=None):
             scenario.setup()
             scenario.steady()
             return 0
+        require_mode(args.mode, args.base)
         return Scenario(args).run()
     except ScenarioError as error:
         print(f"e2e: {error}", file=sys.stderr)

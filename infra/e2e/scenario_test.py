@@ -316,6 +316,47 @@ class ModeTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(scenario.main(["mode", "--event", "push", "--changed", "2", "--base-flux", "yes"]), 1)
 
+    def refused(self, *argv):
+        started = []
+        saved, scenario.Scenario = scenario.Scenario, lambda args: started.append(args)
+        errors = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(errors):
+                code = scenario.main(["run", *argv])
+        finally:
+            scenario.Scenario = saved
+        return code, started, errors.getvalue()
+
+    def test_a_run_told_it_is_a_transition_without_a_base_fails_before_anything_is_touched(self):
+        code, started, said = self.refused("--mode", scenario.MODE_TRANSITION)
+        self.assertEqual((code, started), (1, []))
+        self.assertIn("mode transition needs --base", said)
+
+    def test_a_run_told_it_is_an_install_with_a_base_fails_before_anything_is_touched(self):
+        code, started, said = self.refused("--mode", scenario.MODE_INSTALL, "--base", "HEAD^")
+        self.assertEqual((code, started), (1, []))
+        self.assertIn("mode install takes no --base", said)
+
+    def test_a_run_whose_mode_and_base_agree_starts(self):
+        class Started:
+            def __init__(self, args):
+                self.args = args
+
+            def run(self):
+                return (self.args.mode, self.args.base)
+        saved, scenario.Scenario = scenario.Scenario, Started
+        try:
+            self.assertEqual(scenario.main(["run", "--mode", scenario.MODE_TRANSITION, "--base", "b"]),
+                             (scenario.MODE_TRANSITION, "b"))
+            self.assertEqual(scenario.main(["run", "--mode", scenario.MODE_INSTALL]), (scenario.MODE_INSTALL, None))
+            self.assertEqual(scenario.main(["run", "--base", "b"]), (None, "b"))
+        finally:
+            scenario.Scenario = saved
+
+    def test_a_skipped_commit_is_no_mode_to_run_the_scenario_in(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            scenario.main(["run", "--mode", scenario.MODE_SKIP])
+
 
 class ChartChangedTest(unittest.TestCase):
     def setUp(self):
@@ -386,6 +427,11 @@ class CommitsOwnTest(unittest.TestCase):
         head = self.commit("rule")
         self.assertEqual(set(scenario.module_tags(head, self.root).values()), {"later-rule"})
         self.assertNotIn("later-rule", scenario.module_tags(self.base, self.root).values())
+
+    def test_a_commit_s_rule_runs_laid_out_as_in_the_repository(self):
+        (self.root / scenario.MODULE_TAG).write_text('#!/bin/sh\ncd "$(dirname "$0")/../.." && ls -d infra/ci/*\n')
+        head = self.commit("rule that looks around itself")
+        self.assertEqual(set(scenario.module_tags(head, self.root).values()), {scenario.MODULE_TAG})
 
     def test_a_commit_without_the_rule_is_an_error_of_the_scenario(self):
         self.git("rm", "-q", scenario.MODULE_TAG)
@@ -851,6 +897,12 @@ class FakeProcess:
     def __init__(self, lines):
         self.stdout = iter(lines)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
     def wait(self):
         return 0
 
@@ -867,6 +919,7 @@ class FakeSubprocess:
         self.cluster, self.clock, self.head = cluster, clock, head
         self.chart_differs = False
         self.flux_calls = []
+        self.flux_limits = []
         self.git_tags = {BASE_COMMIT: BASE_TAGS, COMMIT: head}
         self.pointer_tags = head
         self.chart_values = CHECK_VALUES
@@ -877,7 +930,9 @@ class FakeSubprocess:
             return Result(stdout=(COMMIT if name == "HEAD" else name) + "\n")
         if argv[0] == "git" and "show" in argv:
             return Result(stdout="the file at the commit\n")
-        if argv[0] == "sh" and argv[1].endswith(Path(scenario.MODULE_TAG).name):
+        if (argv[0] == "git" and "archive" in argv) or argv[0] == "tar":
+            return Result()
+        if argv[0] == "sh" and argv[1].endswith(scenario.MODULE_TAG):
             service = [name for name, module in scenario.MODULES.items() if module == argv[2]][0]
             return Result(stdout=self.git_tags[argv[3]][service] + "\n")
         if argv[:2] == ["helm", "template"]:
@@ -889,8 +944,9 @@ class FakeSubprocess:
         raise AssertionError(f"unexpected command {argv}")
 
     def Popen(self, argv, env, **_):
-        if argv != [str(scenario.FLUX), COMMIT]:
+        if argv[-2:] != [str(scenario.FLUX), COMMIT]:
             raise AssertionError(f"unexpected command {argv}")
+        self.flux_limits.append(argv[:-2])
         only_images = env.get(scenario.ONLY_IMAGES_ENV) == "1"
         self.flux_calls.append(("images" if only_images else "pointer", env.get(scenario.IMAGES_SOURCE_ENV)))
         if only_images:
@@ -1184,6 +1240,35 @@ class ScenarioRunTest(unittest.TestCase):
         self.assertIn("no verdict before the run's time ran out", self.detail(checks, "verdicts"))
         self.assertLess(self.clock.now, START + 500 + 2 * scenario.VERDICT_POLL_SECONDS)
 
+    def test_a_wait_still_waiting_when_the_run_s_time_ends_fails_then_and_says_so(self):
+        self.deadline(20)
+        run = scenario.Scenario(argparse.Namespace(cluster="ledger-lab", namespace="ledger-lab",
+                                                   control_url="http://control", artifacts=self.temp.name))
+        with self.assertRaisesRegex(scenario.ScenarioError, "the pods back: not before the run's time ran out"):
+            run.wait("the pods back", lambda: False, scenario.READY_TIMEOUT_SECONDS)
+        self.assertLess(self.clock.now, START + 20 + 2 * scenario.POLL_SECONDS)
+
+    def test_without_a_run_s_time_flux_sh_is_given_no_time_to_end_by(self):
+        self.run_scenario()
+        self.assertEqual(self.fake_subprocess.flux_limits, [[], []])
+
+    def test_flux_sh_is_given_the_time_the_run_has_left(self):
+        self.deadline(3600)
+        self.run_scenario()
+        kill = f"--kill-after={scenario.FLUX_KILL_AFTER_SECONDS}"
+        images, pointer = self.fake_subprocess.flux_limits
+        self.assertEqual(images, ["timeout", kill, "3600"])
+        self.assertEqual(pointer[:2], ["timeout", kill])
+        self.assertLessEqual(int(pointer[2]), 3600 - FakeSubprocess.IMAGES_SECONDS)
+
+    def test_flux_sh_is_not_started_once_the_run_s_time_has_ended(self):
+        self.deadline(0)
+        code, checks = self.run_scenario()
+        self.assertEqual(code, 1)
+        self.assertIn(f"flux.sh (images): not started, the run's time ran out ({scenario.DEADLINE_ENV})",
+                      self.detail(checks, "scenario"))
+        self.assertEqual(self.fake_subprocess.flux_calls, [])
+
     def test_a_run_s_time_that_is_long_enough_changes_nothing(self):
         self.deadline(3600)
         code, checks = self.run_scenario()
@@ -1260,6 +1345,63 @@ class ScenarioRunTest(unittest.TestCase):
         self.assertIn(f"before {MONEY} cents, after {MONEY + 100}", self.detail(checks, "money on the accounts unchanged"))
 
 
+class FluxDeadlineTest(unittest.TestCase):
+    """Scenario.flux against a flux.sh that never ends by itself, nor does what it started."""
+
+    HANGS_SECONDS = 60
+    LEFT_SECONDS = 2
+    # Far below HANGS_SECONDS: the call returned because it was ended, not because flux.sh was done.
+    ENDED_WITHIN_SECONDS = 20
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.started = Path(self.temp.name) / "started"
+        stub = Path(self.temp.name) / "flux.sh"
+        stub.write_text(f"#!/bin/sh\nsleep {self.HANGS_SECONDS} &\necho $! >{self.started}\necho building\nwait\n")
+        stub.chmod(0o755)
+        self.saved = scenario.FLUX, dict(os.environ)
+        scenario.FLUX = stub
+
+    def tearDown(self):
+        scenario.FLUX, environment = self.saved
+        os.environ.clear()
+        os.environ.update(environment)
+        for pid in self.started.read_text().split() if self.started.exists() else []:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(pid), 9)
+        self.temp.cleanup()
+
+    def alive(self, pid):
+        # A killed process that nobody has waited for yet is still there, as a zombie.
+        try:
+            return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        except FileNotFoundError:
+            return False
+
+    def test_flux_sh_and_what_it_started_are_ended_when_the_run_s_time_ends_and_the_run_says_so(self):
+        os.environ[scenario.DEADLINE_ENV] = str(time.time() + self.LEFT_SECONDS)
+        run = scenario.Scenario(argparse.Namespace(cluster="ledger-lab", namespace="ledger-lab",
+                                                   control_url="http://control", artifacts=self.temp.name))
+        run.commit = COMMIT
+        began = time.time()
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(scenario.ScenarioError, r"flux\.sh \(images\): stopped after \d+s, not done "
+                                        rf"before the run's time ran out \({scenario.DEADLINE_ENV}\)"):
+                run.flux("images", {})
+        self.assertLess(time.time() - began, self.ENDED_WITHIN_SECONDS)
+        self.assertFalse(self.alive(int(self.started.read_text())))
+        self.assertEqual((Path(self.temp.name) / "flux-images.log").read_text(), "building\n")
+
+    def test_a_flux_sh_that_fails_within_the_run_s_time_is_told_by_its_exit_code(self):
+        scenario.FLUX.write_text("#!/bin/sh\nexit 3\n")
+        os.environ[scenario.DEADLINE_ENV] = str(time.time() + self.HANGS_SECONDS)
+        run = scenario.Scenario(argparse.Namespace(cluster="ledger-lab", namespace="ledger-lab",
+                                                   control_url="http://control", artifacts=self.temp.name))
+        run.commit = COMMIT
+        with self.assertRaisesRegex(scenario.ScenarioError, r"flux\.sh \(pointer\): exit 3$"):
+            run.flux("pointer", {})
+
+
 class ClusterTest(unittest.TestCase):
     def cluster(self, context):
         args = argparse.Namespace(cluster="ledger-lab", namespace="ledger-lab", control_url="http://control")
@@ -1318,6 +1460,39 @@ class WorkflowTest(unittest.TestCase):
         self.assertNotIn("CHANGED_NOTHING", self.text)
         self.assertNotRegex(self.text, rf"\b{scenario.CHANGED_NOTHING}\)")
         self.one(r"^      NOTHING_TO_DEPLOY: \$\{\{ needs\.images-ready\.outputs\.mode == 'skip' \}\}$")
+
+    SKIPPED = r"env\.NOTHING_TO_DEPLOY != 'true' && steps\.mode\.outputs\.mode != 'skip'"
+    BASE_OF_MODE = r"^          BASE: \$\{\{ steps\.mode\.outputs\.base \}\}$"
+
+    def step(self, name):
+        return self.one(rf"^      - name: {re.escape(name)}\n((?:(?!      - |      # ).*\n)+)", self.job)
+
+    def test_the_base_of_a_transition_is_handed_to_the_steps_after_and_of_no_other_mode(self):
+        decided = self.step("How this commit is tested against its parent")
+        self.one(r"^        id: mode$", decided)
+        self.one(r'^          echo "mode=\$mode" >>"\$GITHUB_OUTPUT"$', decided)
+        self.one(rf'^          if \[ "\$mode" = {scenario.MODE_TRANSITION} \]; '
+                 r'then echo "base=\$base" >>"\$GITHUB_OUTPUT"; fi$', decided)
+
+    def test_a_transition_s_bank_is_started_on_the_base_and_any_other_on_the_commit(self):
+        start = self.step("Start the bank in k3d through Flux")
+        self.one(self.BASE_OF_MODE, start)
+        self.one(r'^          if \[ -n "\$BASE" \]; then\n'
+                 r'            infra/e2e/install-base\.sh "\$BASE"\n'
+                 r'          else\n'
+                 r'            IMAGES_SOURCE="\$COMMIT_IMAGES_SOURCE" infra/e2e/install-base\.sh HEAD\n'
+                 r'          fi$', start)
+
+    def test_the_scenario_is_told_the_mode_and_the_base_so_a_transition_that_lost_its_base_fails(self):
+        run = self.step("Run the scenario")
+        self.one(self.BASE_OF_MODE, run)
+        self.one(r"^          MODE: \$\{\{ steps\.mode\.outputs\.mode \}\}$", run)
+        self.one(r'^        run: infra/e2e/scenario\.py run --mode "\$MODE" \$\{BASE:\+--base "\$BASE"\} --artifacts ',
+                 run)
+
+    def test_a_skipped_commit_starts_no_bank_and_runs_no_scenario(self):
+        for name in ("Start the bank in k3d through Flux", "Run the scenario"):
+            self.one(rf"^        if: {self.SKIPPED}$", self.step(name))
 
     def test_a_run_started_by_hand_may_name_the_base_to_install_instead_of_the_parent(self):
         self.one(r"^  workflow_dispatch:\n    inputs:\n      base:\n")

@@ -195,9 +195,10 @@ jobs:
       - name: Run the scenario
         if: env.NOTHING_TO_DEPLOY != 'true' && steps.mode.outputs.mode != 'skip'
         env:
+          MODE: ${{ steps.mode.outputs.mode }}
           BASE: ${{ steps.mode.outputs.base }}
           IMAGES_SOURCE: ${{ env.COMMIT_IMAGES_SOURCE }}
-        run: infra/e2e/scenario.py run ${BASE:+--base "$BASE"} --artifacts "$RUNNER_TEMP/e2e-artifacts"
+        run: infra/e2e/scenario.py run --mode "$MODE" ${BASE:+--base "$BASE"} --artifacts "$RUNNER_TEMP/e2e-artifacts"
       # Also after the scenario's own collection (in cluster/, taken when it failed): a failed start or the time limit
       # leave none.
       - name: Collect the cluster's state

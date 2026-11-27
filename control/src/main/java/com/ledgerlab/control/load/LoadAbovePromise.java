@@ -27,14 +27,14 @@ public class LoadAbovePromise {
 
     private final LoadRepository pulses;
     private final ControlProperties.Outside outside;
-    private final AtomicReference<Double> state = new AtomicReference<>(WITHIN);
+    private final AtomicReference<Double> state = new AtomicReference<>(UNKNOWN);
 
     public LoadAbovePromise(LoadRepository pulses, ControlProperties props, MeterRegistry registry) {
         this.pulses = pulses;
         this.outside = props.outside();
         Gauge.builder(METRIC, state, AtomicReference::get)
             .description("1 from the start of a pulse above the promised speed to the end of its aftermath, else 0;"
-                + " NaN while the pulses cannot be read")
+                + " NaN until the pulses are first read and while they cannot be read")
             .register(registry);
     }
 

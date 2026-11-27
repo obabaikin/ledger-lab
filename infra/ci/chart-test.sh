@@ -661,32 +661,52 @@ Flux leaves the release as it is, and the releases after it wait. What it says:
 Forward, the pointer's version once more:
   at=\$(date +%s); kubectl --namespace bank annotate --overwrite helmrelease gateway reconcile.fluxcd.io/requestedAt=\$at reconcile.fluxcd.io/forceAt=\$at
 Back: move the deploy pointer to the commit before. Not helm rollback: helm-controller refuses it."
+# The labels by which the route of a receiver groups its alerts, in a config written as the chart writes it: the route's
+# own group_by, or that of the nearest route above it that names one.
+# Not amtool: its config routes test gives the receiver of a set of labels only, not the grouping.
+grouped_by() {
+  python3 -c '
+import re, sys
+lines = open(sys.argv[1]).read().split("\n")
+def group_by_of(at, indent):
+    if indent > 2:
+        first = max(n for n in range(at + 1) if lines[n].startswith(" " * (indent - 2) + "- "))
+        route = [lines[first].replace("- ", "  ", 1)] + lines[first + 1:]
+    else:
+        route = lines[lines.index("route:") + 1:]
+    for line in route:
+        if len(line) - len(line.lstrip()) < indent:
+            break
+        if re.fullmatch(" " * indent + r"group_by: \[.*\]", line):
+            return line.strip()[len("group_by: ["):-1].split(", ")
+    # A sub-route is a list item under routes: its fields are 4 columns right of its parent route.
+    return group_by_of(at, indent - 4)
+named = next(at for at, line in enumerate(lines) if re.fullmatch(r" *(?:- )?receiver: " + sys.argv[2], line))
+print("\n".join(group_by_of(named, len(lines[named]) - len(lines[named].lstrip(" -")))))' "$1" "$2"
+}
+printf '%s\n' 'route:' '  receiver: root' '  group_by: [alertname]' '  routes:' \
+  '    - receiver: parent' '      group_by: [name, reason]' '      routes:' \
+  '        - receiver: child' '        - receiver: named' '          group_by: [revision]' \
+  '    - receiver: sibling' 'receivers:' '  - name: root' >"$copy/alertmanager/nested.yml"
+check "a route that names no group_by groups as the route above it does, the root only when none between names one" \
+  "$(for route in root parent child named sibling; do grouped_by "$copy/alertmanager/nested.yml" "$route" | tr '\n' ' '; done)" \
+  "alertname name reason name reason revision alertname "
 # The Subject of every mail a receiver's route makes of alerts that fire together, a line each: Alertmanager mails as
-# one the alerts alike in the labels of the route's group_by, or of the root route's when it names none.
+# one the alerts alike in the labels its route groups by.
 TAB=$(printf '\t')
 subjects_of() {
   route="$1"
   shift
+  grouped_by "$copy/alertmanager/alertmanager.yml" "$route" >"$copy/alertmanager/grouped-by"
   python3 -c '
-import re, sys
-lines = open(sys.argv[1]).read().split("\n")
-labels_of = lambda line: re.fullmatch(r" *(?:- )?group_by: \[(.*)\]", line).group(1).split(", ")
-grouped_by = labels_of(next(line for line in lines if re.fullmatch(r"  group_by: \[.*\]", line)))
-named = next(at for at, line in enumerate(lines) if re.fullmatch(r" *receiver: " + sys.argv[2], line))
-indent = len(lines[named]) - len(lines[named].lstrip())
-first = max((at for at in range(named + 1) if lines[at].startswith(" " * (indent - 2) + "- ")), default=None)
-if indent > 2 and first is not None:
-    for line in [lines[first].replace("- ", "  ", 1)] + lines[first + 1:]:
-        if len(line) - len(line.lstrip()) < indent:
-            break
-        if re.fullmatch(" " * indent + r"group_by: \[.*\]", line):
-            grouped_by = labels_of(line)
+import sys
+grouped_by = open(sys.argv[1]).read().split()
 mails = {}
-for alert in sys.argv[3:]:
+for alert in sys.argv[2:]:
     labels = dict(pair.split("=", 1) for pair in alert.partition("|")[0].split(","))
     mails.setdefault(tuple(labels.get(label, "") for label in grouped_by), []).append(alert)
 for alerts in mails.values():
-    print("\t".join(alerts))' "$copy/alertmanager/alertmanager.yml" "$route" "$@" >"$copy/alertmanager/mails"
+    print("\t".join(alerts))' "$copy/alertmanager/grouped-by" "$@" >"$copy/alertmanager/mails"
   while IFS= read -r alerts; do
     # The line is split at its tabs on purpose, and echo ends a subject with one newline.
     # shellcheck disable=SC2086,SC2005

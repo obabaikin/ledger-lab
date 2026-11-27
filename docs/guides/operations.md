@@ -135,8 +135,10 @@ The hour of a deploy (UTC):
 
 A chain replaces one service at a time and only the services whose image changed; control restarts every time, as it
 shows the version. A changed service is checked 2 minutes after its new pods are ready: no transfer over 3 s, no `503`
-and no pool timeout while it was replaced and since, or it is rolled back and the chain stops. On k3d a chain with all
-five services checked took 13 to 19 minutes, with two about 7, with none 2 to 3.
+and no pool timeout while it was replaced and since, or it is rolled back and the chain stops. The `503`s of a
+stopping gateway are counted by the generator's answers: a generator Prometheus does not read leaves the check
+`not checked`, and the service is rolled back. On k3d a chain with all five services checked took 13 to 19 minutes,
+with two about 7, with none 2 to 3.
 
 ### Installing Flux
 

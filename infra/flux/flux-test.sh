@@ -10,7 +10,8 @@
 # rollback has ended; and install.sh, with a helm and a kubectl that only write down what they get: the chart's
 # Prometheus may read the pods of Flux's namespace and its kube-state-metrics the Jobs and HelmReleases there, and
 # nothing else; and infra/k3d/flux.sh, in a repository of its own beside scripts and tools that only write down their
-# calls: a commit's pointer is written by that commit's own scripts, and ONLY_IMAGES=1 moves nothing.
+# calls: a commit's pointer is written by that commit's own scripts, over a bank deployed in full with the pointer that
+# bank runs to compare with, and ONLY_IMAGES=1 moves nothing.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -382,14 +383,13 @@ printf '#!/bin/sh\nexit 1\n' >"$k3d_repo/bin/helm"
 printf '#!/bin/sh\necho 192.0.2.1\n' >"$k3d_repo/bin/docker"
 printf '#!/bin/sh\nexit 0\n' >"$k3d_repo/bin/kubectl"
 chmod +x "$k3d_repo/bin/helm" "$k3d_repo/bin/docker" "$k3d_repo/bin/kubectl"
-# A commit's rule for its tags and its pointer, which names the rule that wrote it.
+# A commit's rule for its tags and its pointer, which names the rule that wrote it and the pointer it was compared with.
 rules_of_commit() {
   printf '#!/bin/sh\necho "%s"\n' "$1-tag" >"$k3d_repo/infra/ci/module-tag.sh"
   # shellcheck disable=SC2016
-  printf '#!/bin/sh\necho "pointer by %s for $1, tagged $("$(dirname "$0")/../ci/module-tag.sh")"\n' "$1" \
-    >"$k3d_repo/infra/flux/release.sh"
-  printf '#!/bin/sh\n' >"$k3d_repo/infra/ci/changed.sh"
-  chmod +x "$k3d_repo/infra/ci/module-tag.sh" "$k3d_repo/infra/flux/release.sh" "$k3d_repo/infra/ci/changed.sh"
+  printf '#!/bin/sh\necho "pointer by %s for $1, tagged $("$(dirname "$0")/../ci/module-tag.sh")%s"\n' "$1" \
+    '${PREVIOUS_RELEASE:+, compared with $(cat "$PREVIOUS_RELEASE")}' >"$k3d_repo/infra/flux/release.sh"
+  chmod +x "$k3d_repo/infra/ci/module-tag.sh" "$k3d_repo/infra/flux/release.sh"
 }
 k3d_git() { git -C "$k3d_repo" -c user.name=test -c user.email=test@example.invalid "$@"; }
 k3d_git init -q -b main
@@ -404,6 +404,9 @@ k3d_base=$(k3d_git rev-parse HEAD)
 rules_of_commit tree
 k3d_git add -A
 k3d_git commit -q -m tree
+k3d_tree=$(k3d_git rev-parse HEAD)
+# Left uncommitted: the working tree's rules are no commit's.
+rules_of_commit working-tree
 flux_sh() { (cd "$work" && PATH="$k3d_repo/bin:$PATH" CALLS="$k3d_calls" "$k3d_repo/infra/k3d/flux.sh" "$@" 2>&1); }
 k3d_pointer() { git -C "$k3d_bare" show deploy:release.yaml 2>/dev/null || echo "no pointer"; }
 
@@ -418,8 +421,22 @@ check "a commit's pointer is written by that commit's own release.sh and module-
 status=0
 refused=$(flux_sh "$before_flux") || status=$?
 check "a commit from before the pointer's scripts is refused, and the pointer stays" \
-  "$status, $(echo "$refused" | grep -c 'lacks infra/ci/changed.sh'), $(k3d_pointer)" \
+  "$status, $(echo "$refused" | grep -c 'lacks infra/ci/module-tag.sh'), $(k3d_pointer)" \
   "2, 1, pointer by base for $k3d_base, tagged base-tag"
+# The bank runs the base in full: control answers with its version, and the pointer that holds it is found.
+# shellcheck disable=SC2016
+printf '#!/bin/sh\necho "curl $*" >>"$CALLS"\necho %s\n' "'{\"version\": \"v-base\"}'" >"$k3d_repo/bin/curl"
+# shellcheck disable=SC2016
+printf '#!/bin/sh\necho "deployed-release $* in $GIT_DIR" >>"$CALLS"\necho "the pointer of $1"\n' \
+  >"$k3d_repo/infra/flux/deployed-release.sh"
+chmod +x "$k3d_repo/bin/curl" "$k3d_repo/infra/flux/deployed-release.sh"
+: >"$k3d_calls"
+flux_sh "$k3d_tree" >/dev/null
+check "over a bank deployed in full the pointer that holds the version control reports is asked for" \
+  "$(grep -v '^curl ' "$k3d_calls" | tr '\n' ' '), $(grep -c '^curl .*/api/site$' "$k3d_calls")" \
+  "cluster images deployed-release v-base deploy in $k3d_bare install , 1"
+check "and the commit's own release.sh writes the pointer, given that pointer to compare with" \
+  "$(k3d_pointer)" "pointer by tree for $k3d_tree, tagged tree-tag, compared with the pointer of v-base"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed"
