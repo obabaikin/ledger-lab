@@ -27,8 +27,9 @@ releases from a Secret in the cluster, never from git.
 **Six releases in a chain, one service at a time.** `platform` (Kafka, Postgres, monitoring, what the services share),
 then `reporting`, `ledger`, `gateway`, `generator`, `control`; each depends on the one before, and the chart renders
 only the objects of its release. A release starts once the one before is ready on the new revision and has passed its
-check: on k3d, with a commit that changed only the ledger, the gateway's release started 34 s after the ledger's second
-new pod was ready, not before. So at most one extra pod exists at any moment, and a failure names its service.
+check. Measured on k3d before the check existed, with a commit that changed only the ledger: the gateway's release
+started 34 s after the ledger's second new pod was ready, not before. So at most one extra pod of a service exists at
+any moment, and a failure names its service.
 
 - **Only what changed.** A service's image tag is a hash of what its image is built from (its module, `common` for
   the bank's services, the Dockerfile, the build files). A service whose tag stays keeps its pods; the end-to-end test
@@ -90,16 +91,16 @@ new version with a failed check and nothing to roll back to (`Stalled`, `Missing
 nothing more. No automatic way out is built: the operator decides, forward (one forced reconciliation) or back (the
 pointer), and `helm rollback` by hand is not a way, as helm-controller owns the release's fields and refuses it.
 kube-state-metrics publishes the releases' conditions, and a stalled release that was not rolled back is mailed as
-`NEEDS A HAND NOW` with the highest importance and both commands in its text.
+`NEEDS A HAND NOW` with the highest importance and both ways on in its text.
 
-**Memory.** Each Flux controller is limited to 1.25 × its peak over seven chains in five hours on k3d: 96, 68, 64 and
-56 MiB. Alertmanager and kube-state-metrics get 64 MiB each (13 and 19 MiB measured). The generator was cut from 1280
-to 1080 MiB to make room.
+**Memory.** Each Flux controller is limited to at least 1.25 × its peak over seven chains in five hours on k3d:
+kustomize 96 MiB (peak 76), helm 68 (54), source 64 (48), notification 56 (43). Alertmanager and kube-state-metrics get
+64 MiB each (13 and 19 MiB measured). The generator was cut from 1280 to 1080 MiB to make room.
 
 ## Known trade-offs
 
 - **The memory limits exceed the server while the gateway is replaced.** With the second gateway pod the limits of
-  all pods, plus k3s and containerd as measured, come to about 0.2 GB above the node's memory, before the OS's own
+  all pods, plus k3s and containerd as measured, come to about 0.3 GB above the node's memory, before the OS's own
   processes ([the sum](../guides/operations.md#memory)). Limits are ceilings, not use, so this is watched instead of
   fixed: the alerts on the node's available memory and on a container near its limit. The first such alert or a kill
   by the kernel means finding the memory or a larger server.
@@ -116,8 +117,9 @@ to 1080 MiB to make room.
 - **What the cluster's Secret changes is not checked**, and a changed database password restarts no pod.
 - **Drift is corrected at the release's interval of an hour**, and a field added by hand that the chart does not set
   is not removed.
-- **The version on the page is ahead of control's own check** by its 2 minutes. The hourly job runs long after; a job
-  started by hand in the middle of a chain can take the chain for done.
+- **The version on the page is ahead of control's own check** by its 2 minutes. The hourly job is scheduled long
+  after; a job started by hand in the middle of a chain, or a scheduled one that GitHub starts late, can take the chain
+  for done.
 - **One node, no canary.** A new version takes all the traffic at once and is judged afterwards.
 
 ## Considered
@@ -126,10 +128,11 @@ to 1080 MiB to make room.
   Its reviews found about 124 defects, most in shell paths taken rarely (a stop mid-step, a resume). Dropped for the
   standard tool; the queries of its check and the end-to-end checks of money were kept.
 - **Argo CD with Argo Rollouts.** Measured on k3d: 348 MiB in 8 pods and 0.4–0.5 GiB more in k3s itself, against
-  127 MiB in 5 pods and 63 MiB more for Flux. The server has no room for it.
+  127 MiB in 5 pods and 63 MiB more for Flux with Flagger. The server has no room for it.
 - **Flagger.** Without a service mesh or an ingress in front of the gateway its canary gets no share of the traffic,
   and it runs up to three gateway pods (its documentation). A thin check under `helm test` took its place; the
-  queries are knowledge of the bank in any tool.
+  queries are knowledge of the bank in any tool. To revisit with a mesh or an ingress in front of the gateway, or a
+  second node.
 - **One Helm release under Flux.** Every changed JVM starts at once, and a rollback takes them all back.
 - **Always the newest commit**, as Flux and Argo CD do by default: it skips commits, which the two-commit change of a
   contract does not survive without a schema registry.
@@ -140,7 +143,8 @@ to 1080 MiB to make room.
   kept outside it, or a runner's memory and jobs on the bank's one node. Flux pulls and needs neither.
 - **GitHub as Flux's source in the end-to-end test.** A pull request's merge commit is on no branch there, and the
   test must not write a pointer to GitHub. Flux reads a bare repository on the runner instead, served over HTTP by a
-  small wrapper around `git http-backend` (`infra/k3d/git-http.py`), as Flux takes no `git://` URL.
+  small wrapper around `git http-backend` (`infra/k3d/git-http.py`), as Flux takes no `git://` URL. To revisit
+  if Flux reads a local repository or `git://`.
 - **Delaying the failure's mail instead of kube-state-metrics.** helm-controller sends no event and has no metric for
   a stalled release; a delay would still not tell stalled from slow.
 - **Kafka's CLI for the move away from static membership.** Kafka 4.2.1 has no command that removes static members;
@@ -154,9 +158,9 @@ to 1080 MiB to make room.
   merges are deployed one an hour.
 - A change of a contract between the services is made as two commits, each compatible with the one before.
 - A chain with every service checked took 13 to 19 minutes on k3d, with two about 7, with none 2 to 3.
-- The server is moved to Flux once, by hand; the rehearsal on k3d kept every pod (same uids) and the hour of the move
-  ended `BALANCED`. Until then it is deployed with `deploy.sh` as before.
+- The server is moved to Flux once, by hand; in the rehearsal on k3d Flux took the running bank over with every pod
+  kept (same uids), and the hour of the move ended `BALANCED`. Until then it is deployed with `deploy.sh` as before.
 - Of [ADR 0020](0020-gateway-deploys-without-downtime.md), "the other services still stop on a deploy" no longer
-  holds; of [ADR 0021](0021-one-bank-around-the-clock.md), that they stop briefly and that a deploy is by hand.
+  holds; of [ADR 0021](0021-one-bank-around-the-clock.md), that the other services stop briefly.
 - What production would add: several nodes, a canary with a share of the traffic, and a schema registry in place of
   the order of commits.

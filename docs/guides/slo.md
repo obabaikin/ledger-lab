@@ -88,8 +88,8 @@ The minutes left out:
 - A minute that is both in a maintenance window and outside the bounds counts as planned.
 - Deploys and the bank's own failures are judged. A deploy is also checked on its own, per service and against a
   stricter rule: no transfer over 3 s, no `503` and no pool timeout while a service is replaced, or the service is
-  rolled back ([ADR 0024](../adr/0024-deploys-without-a-maintenance-window.md)). That check leaves out the same crashes and
-  loads, without the rule on restarts: a rollout restarts instances itself.
+  rolled back ([ADR 0024](../adr/0024-deploys-without-a-maintenance-window.md)). That check leaves out the same crashes
+  and loads, without the rule on restarts: a rollout restarts instances itself.
 
 ## Known limits
 
@@ -101,9 +101,10 @@ The minutes left out:
   minute's transfers only on the replicas that publish both buckets, so the old replica's transfers are left out of
   both the judged transfers and those within the thresholds, rather than read as slow.
 - A deploy of the ledger moves a stopping instance's partitions to the other one in about a second (measured on k3d):
-  the instance leaves its Kafka group, and only its own partitions move ([ADR 0024](../adr/0024-deploys-without-a-maintenance-window.md)).
-  A crashed instance does not leave the group: its partitions are given out again once Kafka's session timeout of 10 s
-  notices it, so the transfers of those seconds can take over 3 s; a crash from the page is left out of the budgets.
+  the instance leaves its Kafka group, and only its own partitions move
+  ([ADR 0024](../adr/0024-deploys-without-a-maintenance-window.md)). A crashed instance does not leave the group: its
+  partitions are given out again once Kafka's session timeout of 10 s notices it, so the transfers of those seconds can
+  take over 3 s; a crash from the page is left out of the budgets.
 - One node. In production a crashed pod would sit inside the objectives, with replicas across zones absorbing it. Here
   a crash stops the whole ledger for a while, so the crash button is left out of the budgets, and correctness under it
   is an objective of its own.

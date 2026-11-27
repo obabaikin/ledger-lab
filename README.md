@@ -119,7 +119,8 @@ the limit and watch the bank fall behind and catch up; one raise at a time for a
 ## Stack
 
 Java 25 · Spring Boot 4 · Apache Kafka · PostgreSQL · Flyway · Testcontainers ·
-Micrometer / Prometheus · Alertmanager · Helm · Flux · k3s · cert-manager · Terraform (firewall, DNS); planned: Grafana
+Micrometer / Prometheus · Alertmanager · Helm · Flux · k3s · cert-manager · Terraform (firewall, DNS);
+planned: Grafana
 
 Ported from Kotlin in v0.9.0 with the behaviour unchanged; the two versions
 [measured side by side](docs/results/2026-11-10-kotlin-vs-java.md).
@@ -190,20 +191,20 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
   size of the server, and on the server's single-node k3s. The ledger runs two instances and the gateway one;
   a deploy replaces the gateway without downtime ([ADR 0020](docs/adr/0020-gateway-deploys-without-downtime.md)).
   A crashed pod restarts within a second. Every pod of the chart has a memory limit; the bank, the load generator,
-  monitoring, k3s and the OS fit in the server's 12 GB together, except for about 0.2 GB of limits, not of use, while
+  monitoring, k3s and the OS fit in the server's 12 GB together, except for about 0.3 GB of limits, not of use, while
   the gateway is replaced, which two alerts watch.
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
 - **Delivery:** every push to `main` builds the images whose module changed and publishes them to GHCR, each tagged
   with a hash of what it is built from, so an unchanged service keeps its image and its pods.
-- **Deploys without a maintenance window** ([ADR 0024](docs/adr/0024-deploys-without-a-maintenance-window.md)): Flux in the
-  cluster follows a branch that names the commit to run; nothing outside holds a key to the cluster. Once an hour CI
+- **Deploys without a maintenance window** ([ADR 0024](docs/adr/0024-deploys-without-a-maintenance-window.md)): Flux in
+  the cluster follows a branch that names the commit to run; nothing outside holds a key to the cluster. Once an hour CI
   moves that pointer to the next commit of `main`, if the last deploy is through and the commit's end-to-end run is
   green: every commit is deployed, in order, over the one before it. Flux replaces one service at a time, platform,
   reporting, ledger, gateway, generator, control, and only those that changed. Two minutes after a service's new pods
   are ready a check asks Prometheus: a transfer over 3 s, a `503` or a pool timeout rolls that service back, stops the
-  chain and mails the operator. Verified in k3d and by the end-to-end test; the server moves to it in the next step
-  and is deployed by hand from a release tag until then (`deploy.sh v1.0.0`).
+  chain and mails the operator. Verified in k3d and by the end-to-end test; the server moves to it in the next step and
+  is deployed by hand from a release tag until then (`deploy.sh v1.0.0`).
 - **Monitoring:** Prometheus scrapes the services every second, and the node, Postgres (with the statements that take
   the most time) and every container's memory every 5 s. Alertmanager mails how a deploy ended and the alerts: a
   deploy that runs late or is stalled, memory near a limit, a certificate about to expire.

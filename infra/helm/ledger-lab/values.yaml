@@ -218,7 +218,8 @@ exporters:
     port: 8080
     telemetryPort: 8081
     # It holds every CustomResourceDefinition of the cluster to find the HelmRelease's; the Jobs and the releases are
-    # few. It took 23 MiB with the 48 definitions of k3d, started outside a cluster; not yet measured in one.
+    # few. It took 23 MiB with the 48 definitions of k3d when started outside a cluster, and 19 MiB in k3d, after
+    # chains of releases and a restart of the node.
     memory: 64Mi
 
 # Off in k3d: the server sets a host, a Let's Encrypt issuer, security headers and the rate limit (infra/server/values.yaml).

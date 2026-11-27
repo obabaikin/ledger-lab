@@ -7,7 +7,8 @@ For the services on the host with Docker Compose, see the [README](../../README.
 ## Running in local Kubernetes
 
 The same system on k3s in Docker ([k3d](https://k3d.io)), on one node the size of the target server
-(12 GB: the bank, the generator, monitoring, k3s and the OS fit in it together). Requirements: JDK 25, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
+(12 GB: the bank, the generator, monitoring, k3s and the OS fit in it together, but for the limits while the gateway
+is replaced, [below](#memory)). Requirements: JDK 25, Docker and, on `PATH`, k3d 5.9.0, kubectl 1.36.4 and Helm 4.3.0.
 
 ```bash
 infra/k3d/up.sh     # cluster, the five images, the chart (infra/helm/ledger-lab); safe to run again
@@ -21,9 +22,9 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 
 - **The ledger runs two instances.** One that stops leaves its Kafka group and hands over only its own partitions,
   while the other keeps reading; a new one is ready once it holds partitions.
-- **The gateway is replaced without downtime**: the new pod becomes ready before the old one stops; the old one
-  answers what it holds within 40 s. Reporting and the generator are replaced the same way; control stops first. Postgres takes 150 connections so both pools fit during the swap
-  ([ADR 0020](../adr/0020-gateway-deploys-without-downtime.md)).
+- **The gateway is replaced without downtime**: the new pod becomes ready before the old one stops; the old one answers
+  what it holds within 40 s. Reporting and the generator are replaced the same way; control stops first. Postgres takes
+  150 connections so both pools fit during the swap ([ADR 0020](../adr/0020-gateway-deploys-without-downtime.md)).
 - **Readiness** is HTTP only, so a rebalance never takes the ledger out of its Service.
 - **Periods** are an hour; to see closings sooner, `up.sh --set periodMinutes=10` with control's closing times
   shortened to fit (`closing.*` in the chart's values; the verdict deadline must stay under the period plus a minute).
@@ -38,7 +39,8 @@ Control answers on `localhost:8083` (an invite is created as below); nothing els
 
 ## Running on a server
 
-One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the bank, the generator, monitoring, k3s and the OS fit in its 12 GB together.
+One Contabo Cloud VPS 6 NVMe (6 vCPU, 12 GB) with k3s; the bank, the generator, monitoring, k3s and the OS fit in its
+12 GB together, but for the limits while the gateway is replaced ([Memory](#memory)).
 The server is ordered by hand, and Terraform does not manage it: there is one server, and a
 configuration that can buy one should not exist. Terraform (`infra/terraform`) only reads it and
 manages its firewall (inbound SSH, HTTP and HTTPS only) and the domain's DNS: the A record and the mail
@@ -200,7 +202,8 @@ Then commit the file as `release.yaml` on top of `deploy` and push, without forc
 - **A pointer pushed outside the window waits** for minute 10.
 - **CI's job** (`.github/workflows/deploy-pointer.yml`) runs only when the repository variable `DEPLOY_SITE_URL` is
   set. It can be started by hand, but not while a chain runs: control shows the new version 2 minutes before its own
-  check ends, and the job would take the chain for done.
+  check ends, and the job would take the chain for done. So would a scheduled run that GitHub starts late, into the
+  next hour's chain.
 - **Every completed e2e run of a commit counts**, pushed, nightly or by hand: a red nightly run after a green one holds
   the queue until a rerun is green.
 
@@ -221,7 +224,9 @@ A chain that has started is not stopped by this. The same two with `false` let d
 | `deploy <commit>: ROLLED BACK at <service>` | the service was not ready within 10 minutes or failed its check, and is back on its last revision |
 | `deploy <commit>: FAILED at <service>` | the same, with no rollback reported within 2 minutes; `ROLLED BACK` follows as a second mail when it ends |
 | `deploy <commit>: ROLLBACK FAILED at <service>` | the rollback itself failed |
+| `deploy: ROLLED BACK at <service> (rollback to <commit>)` | a rollback whose failure Alertmanager no longer holds (the failure is older than 15 minutes, or Alertmanager restarted); the commit is the one gone back to |
 | `NEEDS A HAND NOW: DeployStalled at <service>` | the release is stalled and was not rolled back; sent with the highest importance, the two ways on in its text |
+| `alert: <name> (N)` | N alerts of that name hold at once, as for several containers |
 | `alert: DeployRunsLate` | a chain still runs at minute 55 |
 | `alert: DeployWindowJobFailed` | a job of the window failed: the window may be left open or closed |
 | `alert: NodeMemoryLow` | the node has less than 300 MiB available |
@@ -271,37 +276,46 @@ Limits in MiB while the gateway is replaced, the moment with the most:
 | Flux's four controllers: 96, 68, 64, 56 | 284 |
 | Traefik 256, cert-manager's three pods 320 | 576 |
 | CoreDNS, k3s's own limit | 170 |
+| The gateway's release check, whose Job can start while the old pod still takes its last 40 s | 64 |
 | k3s 772 and containerd 204, measured, not limits | 976 |
-| Together, against the node's 11,406 | 11,630 |
+| Together, against the node's 11,406 | 11,694 |
 
-So the limits exceed the node by 224 MiB for the seconds of the gateway's swap, before the OS's own processes; at any
-other time 1,394 MiB are left, and 314 while the generator is replaced. The release check's Job (64 MiB) runs after the
-swap, the window's jobs (64 MiB) for seconds. Measured use is far below the limits: Flux's controllers took 63, 44, 27
+So the limits exceed the node by 288 MiB for the seconds of the gateway's swap, before the OS's own processes. With
+neither a second pod nor a check 1,394 MiB are left, and 250 while the generator is replaced and checked. The window's
+jobs (64 MiB) run for seconds. Measured use is far below the limits: Flux's controllers took 63, 44, 27
 and 24 MiB after four chains, Alertmanager 13, kube-state-metrics 19. `NodeMemoryLow` and `ContainerMemoryNearLimit`
 watch it; the first of them, or a kill by the kernel, means finding the memory or a larger server.
 
 ### Moving the server to Flux
 
 Once, by hand, in three steps; rehearsed on k3d from `v1.2.1` at 400 TPS, where every pod kept its uid through steps 2
-and 3 and the hour of the move ended `BALANCED`.
+and 3 and the hour of the move ended `BALANCED`. Whether the pods are kept on the server too is to be checked there:
+its step 1 goes through `deploy.sh`, the rehearsal's went through `up.sh`.
 
 1. **The last deploy as one release, with the ledger leaving Kafka's static membership.** The ledger up to `v1.2.1`
    joins its group as a static member: a pod that stops holds its partitions until its session times out. Start a pod
-   of the new ledger image beside the bank and run in it
+   of the new ledger image beside the bank, with a memory limit, and run the tool in it with its input kept open:
 
    ```bash
-   java -cp '/app/BOOT-INF/classes:/app/BOOT-INF/lib/*' com.ledgerlab.ledger.kafka.StaticMemberRemoval kafka:9092 ledger
+   kubectl -n ledger-lab run ledger-transition --restart=Never --image=<new ledger image> --overrides='{"spec": {
+     "automountServiceAccountToken": false, "containers": [{"name": "ledger-transition", "image": "<new ledger image>",
+     "command": ["sleep", "infinity"],
+     "resources": {"requests": {"memory": "320Mi"}, "limits": {"memory": "320Mi"}}}]}}'
+   kubectl -n ledger-lab exec -i ledger-transition -- java -cp '/app/BOOT-INF/classes:/app/BOOT-INF/lib/*' \
+     com.ledgerlab.ledger.kafka.StaticMemberRemoval kafka:9092 ledger
    ```
 
-   then upgrade the release `ledger-lab` to the new version (`deploy.sh`) and write `ledger-1-` and `ledger-0-` to the
-   tool's input, each as soon as that old pod is gone. It answers `ledger-1-: removed [...]` per line. It always exits 0: a line with
-   `failed` means the members are still there, and the prefix is sent again. In the rehearsal the upgrade took 34 s,
-   each prefix removed 3 members, and of 31,908 transfers in the 4 minutes around it 106 took over 3 s, none was
-   refused. Every changed service restarts at once in this step, for the last time.
+   Its first line names the static members it sees, `static members: [...]`, six in the rehearsal. Then upgrade the
+   release `ledger-lab` to the new version (`deploy.sh`) and write `ledger-1-` and `ledger-0-` to the tool's input,
+   each as soon as that old pod is gone. It answers `ledger-1-: removed [...]` per line. It always exits 0: a line with
+   `failed` means the members are still there, and the prefix is sent again. Delete the pod afterwards. In the
+   rehearsal the upgrade took 34 s, each prefix removed 3 members, and of 31,908 transfers in the 4 minutes around it
+   106 took over 3 s, none was refused. Every changed service restarts at once in this step, for the last time.
 
-   To keep the pods in step 3, the upgrade sets each service's image tag as the pointer will,
-   `--set services.<service>.tag=$(infra/ci/module-tag.sh <module> <commit>)`, not the release tag alone: a pod whose
-   image name changes is replaced. The rehearsal did so; `deploy.sh` with a release tag alone does not.
+   To keep the pods in step 3, the upgrade sets what the pointer will set: each service's image tag,
+   `--set services.<service>.tag=$(infra/ci/module-tag.sh <module> <commit>)`, and the version,
+   `--set version=$(git describe --tags --match 'v[0-9]*' --long --always <commit>)`. `deploy.sh` with a release tag
+   alone sets neither: a pod whose image name changes is replaced, and control is recreated when its version does.
 2. **The objects go from the one release to the six**, without `helm uninstall`, which would delete the bank. Every
    object of a component, hooks left out, gets that release's name; then the old release's history is deleted:
 
@@ -319,8 +333,8 @@ and 3 and the hour of the move ended `BALANCED`.
 3. **Flux takes them.** Create the Secret `ledger-lab-values` with exactly the values the release ran with, install
    Flux, and push the first pointer, at the commit the cluster runs and without `PREVIOUS_RELEASE`. In the rehearsal
    the six releases were installed over the running objects in about 2.5 minutes. Then set `DEPLOY_SITE_URL`, and the
-   next merge is deployed by CI and Flux. From here on `deploy.sh` is not used: its one release would claim the objects
-   of the six. cert-manager stays the release it installed.
+   next merge is deployed by CI and Flux. From here on `deploy.sh` is not used: Helm refuses its one release on
+   objects that belong to the six (invalid ownership metadata). cert-manager stays the release it installed.
 
 Still to check on the server, as k3d cannot: `NodeMemoryLow` (a k3d node reports no available memory),
 `DeployWindowJobFailed` on a real failed job, kube-state-metrics' memory with the server's resource definitions, and
@@ -332,7 +346,7 @@ count. `StaticMemberRemoval` is deleted from the ledger after the move.
 ```bash
 infra/k3d/flux.sh [<commit>] [<values file in the repository> ...]   # HEAD by default; WAIT=1 waits for the chain
 infra/e2e/install-base.sh <base commit>                              # the end-to-end test's bank at a commit
-infra/e2e/scenario.py run --base <base commit>                       # deploys HEAD over it, crashes, checks the verdicts
+infra/e2e/scenario.py run --base <base commit>                       # deploys HEAD over it, crashes, checks verdicts
 ```
 
 - **A cluster is deployed either by `up.sh`** (one release, the working tree) **or by `flux.sh`** (six releases, a
