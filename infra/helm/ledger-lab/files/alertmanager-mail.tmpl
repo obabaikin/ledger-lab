@@ -46,3 +46,22 @@ No rollback is reported yet: a mail follows when it ends. Without one the releas
 {{ .StartsAt.UTC.Format "2006-01-02 15:04:05 UTC" }}  {{ .Annotations.summary }}
 {{ end -}}
 {{- end }}
+
+{{- /*
+An alert that waits for a hand. For a release, the way on: forward is one forced reconciliation, its two marks equal;
+back is the pointer. helm rollback is not a way: helm-controller owns the release's fields and refuses it.
+*/ -}}
+{{ define "urgent.subject" }}NEEDS A HAND NOW: {{ .CommonLabels.alertname }}{{ with .CommonLabels.name }} at {{ . }}{{ end }}{{ end }}
+
+{{ define "urgent.text" -}}
+{{ range .Alerts.Firing -}}
+{{ .StartsAt.UTC.Format "2006-01-02 15:04:05 UTC" }}  {{ .Annotations.summary }}
+{{ if eq .Labels.alertname "DeployStalled" -}}
+Flux leaves the release as it is, and the releases after it wait. What it says:
+  kubectl --namespace {{ .Labels.namespace }} get helmrelease {{ .Labels.name }}
+Forward, the pointer's version once more:
+  at=$(date +%s); kubectl --namespace {{ .Labels.namespace }} annotate --overwrite helmrelease {{ .Labels.name }} reconcile.fluxcd.io/requestedAt=$at reconcile.fluxcd.io/forceAt=$at
+Back: move the deploy pointer to the commit before. Not helm rollback: helm-controller refuses it.
+{{ end -}}
+{{ end -}}
+{{- end }}

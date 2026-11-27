@@ -104,13 +104,15 @@ data:
       alertmanagers:
         - static_configs:
             - targets: ["alertmanager:{{ .Values.alertmanager.port }}"]
-  {{- $limits := dict "kafka" .Values.kafka.memory "postgres" .Values.postgres.memory "prometheus" .Values.prometheus.memory "alertmanager" .Values.alertmanager.memory "node-exporter" .Values.exporters.node.memory "postgres-exporter" .Values.exporters.postgres.memory }}
+  {{- $limits := dict "kafka" .Values.kafka.memory "postgres" .Values.postgres.memory "prometheus" .Values.prometheus.memory "alertmanager" .Values.alertmanager.memory "node-exporter" .Values.exporters.node.memory "postgres-exporter" .Values.exporters.postgres.memory "kube-state-metrics" .Values.exporters.kubeState.memory }}
   {{- range $name, $service := .Values.services }}
   {{- $_ := set $limits $name $service.memory }}
   {{- end }}
   {{- $memory := .Values.alerts.memory }}
   {{- $deploy := .Values.alerts.deploy }}
   {{- $workers := `controller_runtime_active_workers{job="helm-controller", controller="helmrelease"}` }}
+  {{- $condition := printf "%s{namespace=%s" (include "ledger-lab.releaseCondition" .) (.Release.Namespace | quote) }}
+  {{- $windowJob := printf "namespace=%s, job_name=~%s" (.Values.flux.namespace | quote) ($deploy.windowJobs | quote) }}
   rules.yml: |
     groups:
       - name: memory
@@ -142,6 +144,26 @@ data:
             for: {{ .Values.alerts.heldFor }}
             annotations:
               summary: "Prometheus does not get helm-controller's busy workers: a deploy that runs late would not be alerted"
+          # Flux leaves such a release as it is and the releases after it wait: nothing goes on until someone acts. A
+          # release that was rolled back is stalled too, with its rollback said (Remediated); that one is mailed by
+          # Flux's events and runs its old version.
+          - alert: DeployStalled
+            expr: max by (namespace, name, reason) ({{ $condition }}, type="Stalled"}) == 1 unless on (namespace, name) {{ $condition }}, type="Remediated"} == 1
+            for: {{ .Values.alerts.heldFor }}
+            labels:
+              severity: {{ include "ledger-lab.urgentSeverity" . }}
+            annotations:
+              summary: "Release {{ "{{" }} $labels.name {{ "}}" }} is stalled ({{ "{{" }} $labels.reason {{ "}}" }}) and was not rolled back: the deploy waits for a hand"
+          # Without the metric DeployStalled never fires, whatever the releases say.
+          - alert: DeployStateMissing
+            expr: absent({{ $condition }}})
+            for: {{ .Values.alerts.heldFor }}
+            annotations:
+              summary: "Prometheus does not get the conditions of the releases from kube-state-metrics: a stalled deploy would not be alerted"
+          - alert: DeployWindowJobFailed
+            expr: kube_job_failed{ {{- $windowJob }}, condition="true"} == 1 and on (namespace, job_name) time() - kube_job_status_start_time{ {{- $windowJob }}} < {{ include "ledger-lab.whole" (list "alerts.deploy.windowJobAlertSeconds" $deploy.windowJobAlertSeconds false) }}
+            annotations:
+              summary: "Job {{ "{{" }} $labels.job_name {{ "}}" }} of the deploy window failed: the window may be left as it was, open or closed"
       {{- if .Values.certManager.enabled }}
       - name: certificates
         rules:

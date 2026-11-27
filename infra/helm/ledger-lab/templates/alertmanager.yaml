@@ -8,6 +8,12 @@
 {{- /* helm-controller's reasons of the events that end a release: its test passed, it failed, its rollback ended. */}}
 {{- $passed := "TestSucceeded" }}
 {{- $failed := list "InstallFailed" "UpgradeFailed" "TestFailed" "RollbackSucceeded" "RollbackFailed" }}
+{{- $urgent := "urgent" }}
+{{- $receivers := list
+  (dict "name" "alerts" "subject" "alert.subject" "text" "alert.text")
+  (dict "name" $urgent "subject" "urgent.subject" "text" "urgent.text" "urgent" true)
+  (dict "name" "deploy-done" "subject" "deploy.done.subject" "text" "deploy.text")
+  (dict "name" "deploy-failed" "subject" "deploy.failed.subject" "text" "deploy.text") }}
 # A Secret, not a ConfigMap: the config holds the SMTP login.
 apiVersion: v1
 kind: Secret
@@ -35,6 +41,10 @@ stringData:
       group_interval: {{ $alertmanager.groupInterval }}
       repeat_interval: {{ $alertmanager.repeatInterval }}
       routes:
+        # Nothing goes on until someone acts: one mail per release, marked as of the highest importance.
+        - matchers: ['severity="{{ include "ledger-lab.urgentSeverity" . }}"']
+          receiver: {{ $urgent }}
+          group_by: [alertname, name]
         # Flux reports every step of every release (infra/flux/notifications.sh); only the ends of a deploy are mailed.
         - matchers: ['kind="HelmRelease"']
           receiver: unmailed
@@ -49,16 +59,21 @@ stringData:
               group_interval: {{ $alertmanager.deploy.rollbackInterval }}
     receivers:
       - name: unmailed
-      {{- range $receiver, $subject := dict "alerts" "alert.subject" "deploy-done" "deploy.done.subject" "deploy-failed" "deploy.failed.subject" }}
-      - name: {{ $receiver }}
+      {{- range $receiver := $receivers }}
+      - name: {{ $receiver.name }}
         {{- if $mail.to }}
         email_configs:
           - to: {{ $mail.to | quote }}
             headers:
-              Subject: '{{ "{{" }} template "{{ $subject }}" . {{ "}}" }}'
+              Subject: '{{ "{{" }} template "{{ $receiver.subject }}" . {{ "}}" }}'
+              {{- if $receiver.urgent }}
+              # Both: mail programs differ in which of the two they show as the highest importance.
+              Importance: high
+              X-Priority: "1"
+              {{- end }}
             # Plain text only; the default is an HTML page.
             html: ""
-            text: '{{ "{{" }} template "{{ hasPrefix "deploy" $receiver | ternary "deploy.text" "alert.text" }}" . {{ "}}" }}'
+            text: '{{ "{{" }} template "{{ $receiver.text }}" . {{ "}}" }}'
         {{- end }}
       {{- end }}
   mail.tmpl: {{ $templates | quote }}

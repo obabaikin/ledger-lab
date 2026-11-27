@@ -16,6 +16,16 @@ prometheus.io/path: /actuator/prometheus
 http://prometheus:9090
 {{- end }}
 
+{{- /* The metric kube-state-metrics gives every condition of a HelmRelease, and the rules read. */}}
+{{- define "ledger-lab.releaseCondition" -}}
+flux_helmrelease_condition
+{{- end }}
+
+{{- /* The label of the alerts that wait for a hand, mailed with the highest importance. */}}
+{{- define "ledger-lab.urgentSeverity" -}}
+critical
+{{- end }}
+
 {{- /*
 A memory size of the values file in bytes, for a rule that compares it with a measured one. Takes "<n>Mi" or "<n>Gi".
 */}}

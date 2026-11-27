@@ -3,7 +3,9 @@
 # bounds, control's pulse options are the chart's load values, the six components split the chart without a gap, and
 # only a release told so carries the release check, and the alerts: every container's memory against its own limit of
 # the values, the node's memory, a deploy that runs late, helm-controller's metric gone missing, where Alertmanager
-# mails what, and the subjects and texts of the mails.
+# mails what, and the subjects and texts of the mails; kube-state-metrics reads the Jobs and the HelmReleases of two
+# namespaces alone, a stalled release that was not rolled back is an alert mailed with the highest importance, a failed
+# job of the deploy window an alert.
 # The rules are run by promtool, Alertmanager's config is read and its mail texts are rendered by amtool: the ones on
 # PATH, or the ones in the chart's Prometheus and Alertmanager images through docker.
 set -eu
@@ -241,7 +243,9 @@ for document in sys.stdin.read().split("\n---\n"):
             found[part.split("\n", 1)[0]] = int(number) * units[unit]
 print(sorted(found.items()))' "$which"
 }
-check "the chart's workloads have eleven containers" "$(memory_limits set | grep -o "('" | wc -l)" 11
+check "the chart's workloads have twelve containers" "$(memory_limits set | grep -o "('" | wc -l)" 12
+check "kube-state-metrics is one of them, with the memory limit of the values" \
+  "$(memory_limits set --set exporters.kubeState.memory=77Mi | grep -c "('kube-state-metrics', $((77 * MEBIBYTE)))")" 1
 check "every container's memory rule compares with that container's own limit" "$(memory_limits ruled)" \
   "$(memory_limits set)"
 check "the rules follow limits changed in the values" \
@@ -379,6 +383,121 @@ check "helm-controller's busy workers there, busy or idle, are no alert" \
   "$(rules_give "$(missing_test '0x10 1x10' 5m '[]')")" passed
 check "helm-controller's busy workers gone after they were there are an alert" \
   "$(rules_give "$(missing_test '0x4 stale' 10m "$missing_alert")")" passed
+
+# The conditions of the release gateway as kube-state-metrics gives them: "<type>:<reason>:<values>" each.
+stalled_test() {
+  eval_time="$1"
+  expected="$2"
+  shift 2
+  echo "  - interval: 15s"
+  echo "    input_series:"
+  for condition in "$@"; do
+    echo "$condition" | awk -F: '{ printf "      - series: %sflux_helmrelease_condition{namespace=\"%s\", name=\"gateway\", type=\"%s\", reason=\"%s\"}%s\n        values: %s%s%s\n", q, ($4 == "" ? "default" : $4), $1, $2, q, q, $3, q }' q="'"
+  done
+  cat <<EOF
+    alert_rule_test:
+      - eval_time: $eval_time
+        alertname: DeployStalled
+        exp_alerts: $expected
+EOF
+}
+stalled_alert() {
+  echo "
+          - exp_labels: {severity: critical, namespace: default, name: gateway, reason: $1}
+            exp_annotations:
+              summary: \"Release gateway is stalled ($1) and was not rolled back: the deploy waits for a hand\""
+}
+check "a release stalled without a rollback, as after a node restart in a rollout, is an alert of the highest importance" \
+  "$(rules_give "$(stalled_test 5m "$(stalled_alert MissingRollbackTarget)" 'Stalled:MissingRollbackTarget:1x40' \
+    'Ready:MissingRollbackTarget:0x40')")" passed
+check "a release stalled after its rollback is no such alert: it runs its old version and Flux's events mailed it" \
+  "$(rules_give "$(stalled_test 5m '[]' 'Stalled:RetriesExceeded:1x40' 'Remediated:RollbackSucceeded:1x40')")" passed
+check "a release stalled after its rollback failed is an alert" \
+  "$(rules_give "$(stalled_test 5m "$(stalled_alert RetriesExceeded)" 'Stalled:RetriesExceeded:1x40' \
+    'Remediated:RollbackFailed:0x40')")" passed
+check "a release that is not stalled is no alert, not ready as it may be" \
+  "$(rules_give "$(stalled_test 5m '[]' 'Stalled:Progressing:0x40' 'Ready:DependencyNotReady:0x40')")" passed
+check "a release stalled for less than the 2 minutes of alerts.heldFor is no alert yet" \
+  "$(rules_give "$(stalled_test 1m '[]' 'Stalled:MissingRollbackTarget:1x40')")" passed
+check "a stalled release of another namespace is not this bank's alert" \
+  "$(rules_give "$(stalled_test 5m '[]' 'Stalled:MissingRollbackTarget:1x40:other' 'Ready:Succeeded:1x40')")" passed
+state_missing_alert="
+          - exp_annotations:
+              summary: \"Prometheus does not get the conditions of the releases from kube-state-metrics: a stalled deploy would not be alerted\""
+state_missing_test() {
+  stalled_test "$1" "$2" "$3" | sed 's/alertname: DeployStalled/alertname: DeployStateMissing/'
+}
+check "the releases' conditions missing for the 2 minutes of alerts.heldFor are an alert" \
+  "$(rules_give "$(state_missing_test 5m "$(echo "$state_missing_alert" | sed 's/exp_annotations/exp_labels: {namespace: default}\n            exp_annotations/')" 'Ready:Succeeded:1x40:other')")" passed
+check "the releases' conditions there, whatever they say, are no such alert" \
+  "$(rules_give "$(state_missing_test 5m '[]' 'Ready:Succeeded:1x40')")" passed
+check "the rule and kube-state-metrics name the releases' conditions alike" \
+  "$(render --show-only templates/kube-state-metrics.yaml | grep -A3 '^          metricNamePrefix: ""$' >/dev/null &&
+    render --show-only templates/kube-state-metrics.yaml | sed -n 's/^            - name: //p')" \
+  "$(rules_of | sed -n 's/^ *expr: absent(\([a-z_]*\){namespace="default"})$/\1/p')"
+
+# A job of the window: window_test <eval time> <expected> <job> <its Failed condition true> <... false> [<namespace>].
+window_test() {
+  cat <<EOF
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="${6:-flux-system}", job_name="$3", condition="true"}'
+        values: '$4x200'
+      - series: 'kube_job_failed{namespace="${6:-flux-system}", job_name="$3", condition="false"}'
+        values: '$5x200'
+      - series: 'kube_job_status_start_time{namespace="${6:-flux-system}", job_name="$3"}'
+        values: '600x200'
+    alert_rule_test:
+      - eval_time: $1
+        alertname: DeployWindowJobFailed
+        exp_alerts: $2
+EOF
+}
+window_alert='
+          - exp_labels: {namespace: flux-system, job_name: deploy-window-close-29384756, condition: "true"}
+            exp_annotations:
+              summary: "Job deploy-window-close-29384756 of the deploy window failed: the window may be left as it was, open or closed"'
+check "a failed job of the deploy window is an alert" \
+  "$(rules_give "$(window_test 30m "$window_alert" deploy-window-close-29384756 1 0)")" passed
+check "a job of the window that did not fail is no alert" \
+  "$(rules_give "$(window_test 30m '[]' deploy-window-close-29384756 0 1)")" passed
+check "a failed job of the window is no alert an hour after it started: the next run of its kind is due" \
+  "$(rules_give "$(window_test 71m '[]' deploy-window-close-29384756 1 0)")" passed
+check "the time a failed job of the window stays an alert is alerts.deploy.windowJobAlertSeconds" \
+  "$(rules_give "$(window_test 30m '[]' deploy-window-close-29384756 1 0)" --set alerts.deploy.windowJobAlertSeconds=600)" passed
+check "another failed job of Flux's namespace is not the window's alert" \
+  "$(rules_give "$(window_test 30m '[]' some-other-job 1 0)")" passed
+check "a failed job of that name in another namespace is not the window's alert" \
+  "$(rules_give "$(window_test 30m '[]' deploy-window-close-29384756 1 0 default)")" passed
+check "the window's jobs are looked for in Flux's namespace of the values" \
+  "$(rules_give "$(window_test 30m "$(echo "$window_alert" | sed 's/flux-system/flux-elsewhere/')" deploy-window-close-29384756 1 0 \
+    flux-elsewhere)" --set flux.namespace=flux-elsewhere)" passed
+
+kube_state() { render --show-only templates/kube-state-metrics.yaml "$@"; }
+check "kube-state-metrics is the ready-made one, named by digest" \
+  "$(kube_state | grep -cE '^ +image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v[0-9.]+@sha256:[0-9a-f]{64}$')" 1
+check "of its own kinds kube-state-metrics reads the Jobs alone" "$(kube_state | grep -c '^ *- --resources=jobs$')" 1
+check "kube-state-metrics reads the bank's namespace and Flux's, no other" \
+  "$(kube_state --namespace bank --set flux.namespace=flux-elsewhere | sed -n 's/^ *- --namespaces=//p')" "bank,flux-elsewhere"
+check "of the custom kinds kube-state-metrics reads the HelmRelease alone, each condition with its type and reason" \
+  "$(kube_state | sed -n '/^kind: ConfigMap$/,/^---$/p' | grep -E 'groupVersionKind|path:|type:|reason:|valueFrom:' |
+    sed 's/^ *//' | tr '\n' ' ')" \
+  "- groupVersionKind: {group: helm.toolkit.fluxcd.io, version: v2, kind: HelmRelease} type: Gauge \
+path: [status, conditions] type: [type] reason: [reason] valueFrom: [status] "
+check "in the bank's namespace kube-state-metrics may list and watch the Jobs and the HelmReleases, and nothing else" \
+  "$(kube_state | sed -n '/^kind: Role$/,/^---$/p' | sed -n '/^rules:$/,$p' | grep -v '^$\|^---$' | sed 's/^ *//' | tr '\n' ' ')" \
+  "rules: - apiGroups: [\"batch\"] resources: [\"jobs\"] verbs: [\"list\", \"watch\"] \
+- apiGroups: [\"helm.toolkit.fluxcd.io\"] resources: [\"helmreleases\"] verbs: [\"list\", \"watch\"] "
+check "over the whole cluster kube-state-metrics may list and watch the CustomResourceDefinitions, and nothing else" \
+  "$(kube_state | sed -n '/^kind: ClusterRole$/,/^---$/p' | sed -n '/^rules:$/,$p' | grep -v '^$\|^---$' | sed 's/^ *//' |
+    tr '\n' ' ')" \
+  'rules: - apiGroups: ["apiextensions.k8s.io"] resources: ["customresourcedefinitions"] verbs: ["list", "watch"] '
+check "the chart gives kube-state-metrics no other right" "$(kube_state | grep -c '^kind: \(Cluster\)\?Role$')" 2
+check "Prometheus scrapes kube-state-metrics as it does the exporters: by the annotation and the port named metrics" \
+  "$(kube_state | grep -c -e '^        prometheus.io/scrape: "true"$' -e '^            - {name: metrics, containerPort: 8080}$')" 2
+check "kube-state-metrics belongs to the platform's release alone" \
+  "$(for part in platform gateway; do kube_state --set component=$part | grep -c '^kind: Deployment$' || true; done | tr '\n' ' ')" \
+  "1 0 "
 check "the chart's right over the whole cluster is the nodes and their metrics; the pods of Flux are not the chart's to read" \
   "$(render --show-only templates/prometheus.yaml | sed -n '/^kind: ClusterRole$/,/^---$/p' | sed -n 's/^ *resources: //p' |
     tr '\n' ' ')" \
@@ -397,8 +516,8 @@ mailed() {
 check "Alertmanager has a memory limit" \
   "$(alertmanager --set alertmanager.memory=48Mi | grep -c 'limits: {memory: 48Mi}')" 1
 check "without an address nothing is mailed" "$(alertmanager | grep -c 'email_configs\|smtp_' || true)" 0
-check "with an address the alerts, a deploy's good end and its failure are mailed there" \
-  "$(mailed | grep -c 'to: "deploy@example.invalid"')" 3
+check "with an address the alerts, the ones that wait for a hand, a deploy's good end and its failure are mailed there" \
+  "$(mailed | grep -c 'to: "deploy@example.invalid"')" 4
 refuses "an address to mail without a server" "alertmanager.mail.smarthost is needed" \
   --set alertmanager.mail.to=deploy@example.invalid --set alertmanager.mail.from=no-reply@example.invalid
 check "the SMTP login is the invites' Mailjet keys unless the values name another" \
@@ -438,6 +557,21 @@ for reason in InstallFailed UpgradeFailed TestFailed RollbackSucceeded RollbackF
 done
 check "an alert of Prometheus is mailed as an alert" "$(receiver_of alertname=NodeMemoryLow)" alerts
 check "helm-controller's metric gone missing is mailed as an alert" "$(receiver_of alertname=DeployMetricMissing)" alerts
+urgent_severity=$(rules_of | sed -n '/alert: DeployStalled$/,/alert: /s/^ *severity: //p')
+check "a stalled release is mailed as one that waits for a hand" \
+  "$(receiver_of alertname=DeployStalled "severity=$urgent_severity" name=gateway)" urgent
+check "the releases' conditions gone missing are mailed as an alert" "$(receiver_of alertname=DeployStateMissing)" alerts
+check "a failed job of the window is mailed as an alert" "$(receiver_of alertname=DeployWindowJobFailed)" alerts
+# The headers a receiver's mails carry besides the Subject.
+headers_of() {
+  sed -n "/^  - name: $1\$/,/^  - name: /p" "$copy/alertmanager/alertmanager.yml" | sed -n '/^ *headers:$/,/^ *html:/p' |
+    grep -v '^ *#\|headers:\|Subject:\|html:' | sed 's/^ *//' | tr '\n' ' '
+}
+check "a mail that waits for a hand is marked as of the highest importance for the mail programs" \
+  "$(headers_of urgent)" 'Importance: high X-Priority: "1" '
+for receiver in alerts deploy-done deploy-failed; do
+  check "a mail of $receiver is not marked as of the highest importance" "$(headers_of "$receiver")" ""
+done
 
 # What a receiver mails for a group of alerts, by its Subject or text in Alertmanager's config:
 # mail <receiver> <Subject | text> <alert> ..., an alert being "<label>=<value>,...|<its message or summary>".
@@ -452,7 +586,7 @@ for minute, alert in enumerate(sys.argv[1:]):
     labels, _, text = alert.partition("|")
     labels = dict(pair.split("=", 1) for pair in labels.split(","))
     alerts.append({"status": "firing", "labels": labels, "startsAt": "2026-11-26T10:%02d:00Z" % minute,
-                   "annotations": {"message" if "reason" in labels else "summary": text}})
+                   "annotations": {"message" if "kind" in labels else "summary": text}})
 common = {key: value for key, value in alerts[0]["labels"].items() if all(a["labels"].get(key) == value for a in alerts)}
 json.dump({"status": "firing", "alerts": alerts, "commonLabels": common}, sys.stdout)' "$@" >"$copy/alertmanager/data.json"
   written=$(sed -n "/^  - name: $receiver\$/,/^  - name: /p" "$copy/alertmanager/alertmanager.yml" |
@@ -514,6 +648,19 @@ Helm UpgradeFailed said so
 
 2026-11-26 10:01:00 UTC  RollbackSucceeded  gateway
 Helm RollbackSucceeded said so"
+stalled='alertname=DeployStalled,severity=critical,namespace=bank,name=gateway,reason=MissingRollbackTarget|Release gateway is stalled'
+check "the subject of a stalled release's mail says that it needs a hand now, and where" \
+  "$(mail urgent Subject "$stalled")" "NEEDS A HAND NOW: DeployStalled at gateway"
+check "the text of a stalled release's mail gives the command that goes forward and the way back" \
+  "$(mail urgent text "$stalled")" \
+  "2026-11-26 10:00:00 UTC  Release gateway is stalled
+Flux leaves the release as it is, and the releases after it wait. What it says:
+  kubectl --namespace bank get helmrelease gateway
+Forward, the pointer's version once more:
+  at=\$(date +%s); kubectl --namespace bank annotate --overwrite helmrelease gateway reconcile.fluxcd.io/requestedAt=\$at reconcile.fluxcd.io/forceAt=\$at
+Back: move the deploy pointer to the commit before. Not helm rollback: helm-controller refuses it."
+check "the alert whose mail carries the release's commands is one of the rules" \
+  "$(rules_of | grep -c "alert: $(sed -n 's/^.*eq .Labels.alertname "\([A-Za-z]*\)".*$/\1/p' "$original/files/alertmanager-mail.tmpl")\$")" 1
 mailed | grep -o 'reason=~\?"[A-Za-z|]*"' | sed 's/^.*"\(.*\)"$/\1/' | tr '|' '\n' | sort -u >"$copy/alertmanager/routed"
 named=$(grep -o 'reason "[A-Za-z]*"' "$original/files/alertmanager-mail.tmpl" | sed 's/^reason "\(.*\)"$/\1/' | sort -u)
 check "the mail texts tell four reasons of Flux's events apart" "$(echo "$named" | wc -l)" 4

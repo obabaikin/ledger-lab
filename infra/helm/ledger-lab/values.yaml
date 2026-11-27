@@ -186,6 +186,11 @@ alerts:
     # between two releases of a chain it is idle for about half a minute.
     busyWindow: 2m
     busyShare: 0.5
+    # The Jobs of the deploy window in Flux's namespace, by the name their CronJobs give them (infra/flux/window.sh).
+    windowJobs: deploy-window-.+
+    # A failed Job of the window stays in the cluster until the next one of its CronJob fails; it is an alert for this
+    # long after it started, the hour until the next run of its kind.
+    windowJobAlertSeconds: 3600
 
 # Flux as infra/flux/install.sh installs it; Prometheus reads helm-controller's metrics there.
 flux:
@@ -205,6 +210,16 @@ exporters:
     memory: 64Mi
     # The statements with the most time, each a series per metric; the text is a label, cut to its start.
     statementsLimit: 100
+  # kube-state-metrics, for what the cluster's objects say and no metric of Flux or the kubelet does: the conditions
+  # of the HelmReleases (a release that is stalled and waits for a hand) and the Jobs of the deploy window
+  # (templates/kube-state-metrics.yaml). It reads the release's and Flux's namespaces only.
+  kubeState:
+    image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b
+    port: 8080
+    telemetryPort: 8081
+    # It holds every CustomResourceDefinition of the cluster to find the HelmRelease's; the Jobs and the releases are
+    # few. It took 23 MiB with the 48 definitions of k3d, started outside a cluster; not yet measured in one.
+    memory: 64Mi
 
 # Off in k3d: the server sets a host, a Let's Encrypt issuer, security headers and the rate limit (infra/server/values.yaml).
 ingress:

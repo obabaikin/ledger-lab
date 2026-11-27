@@ -8,9 +8,9 @@
 # before the job of the other kind is due; and notifications.sh: every event of the releases, the good ends too, goes
 # to the chart's Alertmanager, which takes the chain's last release for a deploy's end and keeps a failure until its
 # rollback has ended; and install.sh, with a helm and a kubectl that only write down what they get: the chart's
-# Prometheus may read the pods of Flux's namespace and nothing else there; and infra/k3d/flux.sh, in a repository of its
-# own beside scripts and tools that only write down their calls: a commit's pointer is written by that commit's own
-# scripts, and ONLY_IMAGES=1 moves nothing.
+# Prometheus may read the pods of Flux's namespace and its kube-state-metrics the Jobs and HelmReleases there, and
+# nothing else; and infra/k3d/flux.sh, in a repository of its own beside scripts and tools that only write down their
+# calls: a commit's pointer is written by that commit's own scripts, and ONLY_IMAGES=1 moves nothing.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -335,6 +335,25 @@ roleRef: apiGroup: rbac.authorization.k8s.io kind: Role name: prometheus-pods \
 subjects: - kind: ServiceAccount name: prometheus namespace: bank "
 check "the ServiceAccount is the one the chart's Prometheus runs as" \
   "$(grep -c '^      serviceAccountName: prometheus$' "$HERE/../helm/ledger-lab/templates/prometheus.yaml")" 1
+check "install.sh lets the chart's kube-state-metrics list and watch the Jobs and the HelmReleases of Flux's namespace, and nothing else" \
+  "$(applied_of Role kube-state-metrics)" \
+  "apiVersion: rbac.authorization.k8s.io/v1 kind: Role metadata: name: kube-state-metrics namespace: $flux_namespace \
+rules: - apiGroups: [\"batch\"] resources: [\"jobs\"] verbs: [\"list\", \"watch\"] \
+- apiGroups: [\"helm.toolkit.fluxcd.io\"] resources: [\"helmreleases\"] verbs: [\"list\", \"watch\"] "
+check "that right is given to the ServiceAccount of kube-state-metrics in the bank's namespace" \
+  "$(applied_of RoleBinding kube-state-metrics)" \
+  "apiVersion: rbac.authorization.k8s.io/v1 kind: RoleBinding metadata: name: kube-state-metrics namespace: $flux_namespace \
+roleRef: apiGroup: rbac.authorization.k8s.io kind: Role name: kube-state-metrics \
+subjects: - kind: ServiceAccount name: kube-state-metrics namespace: bank "
+STATE_TEMPLATE="$HERE/../helm/ledger-lab/templates/kube-state-metrics.yaml"
+# shellcheck disable=SC2016
+check "the ServiceAccount is the one the chart's kube-state-metrics runs as" \
+  "$(grep -c -e '^{{- $name := "kube-state-metrics" }}$' -e '^      serviceAccountName: {{ $name }}$' "$STATE_TEMPLATE")" 2
+window_jobs=$(sed -n '/^alerts:$/,/^[a-z]/s/^    windowJobs: //p' "$CHART_VALUES")
+check "the chart's alert on a failed job of the window takes both of the window's jobs by their names" \
+  "$(sed -n 's/^  name: \(deploy-window-.*\)$/\1-29384756/p' "$window" | grep -cxE "$window_jobs")" 2
+check "the window's jobs run in the namespace where the chart looks for them" \
+  "$(grep -c "^  namespace: $flux_namespace\$" "$window")" 5
 check "install.sh gives no right over the whole cluster" "$(grep -c '^kind: ClusterRole' "$applied" || true)" 0
 check "the chart mails a deploy's good end at the last release of the chain" "$(alertmanager_value lastRelease)" \
   "$(grep '^kind: HelmRelease$' -A2 "$first" | sed -n 's/^  name: //p' | tail -1)"
