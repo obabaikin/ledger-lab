@@ -688,6 +688,8 @@ for alert in sys.argv[3:]:
 for alerts in mails.values():
     print("\t".join(alerts))' "$copy/alertmanager/alertmanager.yml" "$route" "$@" >"$copy/alertmanager/mails"
   while IFS= read -r alerts; do
+    # The line is split at its tabs on purpose, and echo ends a subject with one newline.
+    # shellcheck disable=SC2086,SC2005
     (IFS="$TAB"; set -- $alerts; unset IFS; echo "$(mail "$route" Subject "$@" </dev/null)")
   done <"$copy/alertmanager/mails"
 }
