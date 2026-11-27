@@ -1,3 +1,4 @@
+{{- if include "ledger-lab.renders" (list . "platform") -}}
 {{- $middlewares := list }}
 {{- if .Values.ingress.tls.issuer }}
 {{- $middlewares = append $middlewares (printf "%s-redirect-to-https@kubernetescrd" .Release.Namespace) }}
@@ -78,4 +79,5 @@ spec:
   rateLimit:
     average: {{ .Values.ingress.rateLimit.average }}
     burst: {{ .Values.ingress.rateLimit.burst }}
+{{- end }}
 {{- end }}

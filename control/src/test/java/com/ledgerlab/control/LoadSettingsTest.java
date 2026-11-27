@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,7 +12,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySource;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 /** Control binds its load settings at start; settings it cannot offer stop it there. */
 class LoadSettingsTest {
@@ -62,6 +67,28 @@ class LoadSettingsTest {
                 .isInstanceOf(BindException.class)
                 .hasRootCauseInstanceOf(IllegalArgumentException.class);
         });
+    }
+
+    @Test
+    @DisplayName("the chart's variables (templates/services.yaml) set the pulse options")
+    void the_charts_variables_set_the_pulse_options() {
+        var settings = settings();
+        List.of("min-tps", "max-tps", "tps-step", "default-tps").forEach(name -> settings.remove("control.load." + name));
+        var chart = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.of(
+            "CONTROL_LOAD_MINTPS", "1000",
+            "CONTROL_LOAD_MAXTPS", "3000",
+            "CONTROL_LOAD_TPSSTEP", "200",
+            "CONTROL_LOAD_DEFAULTTPS", "1400"));
+        var sources = new ArrayList<ConfigurationPropertySource>();
+        ConfigurationPropertySources.from(chart).forEach(sources::add);
+        sources.add(new MapConfigurationPropertySource(settings));
+
+        var load = new Binder(sources).bindOrCreate("control.load", ControlProperties.Load.class);
+
+        assertThat(load.minTps()).isEqualTo(1000);
+        assertThat(load.maxTps()).isEqualTo(3000);
+        assertThat(load.tpsStep()).isEqualTo(200);
+        assertThat(load.defaultTps()).isEqualTo(1400);
     }
 
     @Test

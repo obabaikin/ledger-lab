@@ -20,6 +20,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +33,7 @@ class LoadTest {
 
     private final RecordingJournal journal = new RecordingJournal();
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final MemoryMinuteStore minuteStore = new MemoryMinuteStore();
     private Load load;
 
     private Load load(TestData.Settings settings) {
@@ -43,9 +45,13 @@ class LoadTest {
     }
 
     private Load load(TestData.Settings settings, Duration stopGrace, Clock clock) {
+        return load(settings, stopGrace, clock, SendPermission.ALWAYS);
+    }
+
+    private Load load(TestData.Settings settings, Duration stopGrace, Clock clock, SendPermission permission) {
         var props = settings.build();
         var schedule = new BaseSchedule(props);
-        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props, schedule), schedule, clock, registry, stopGrace);
+        load = new Load(props, new GatewayClient(props, new ObjectMapper(), registry), journal, new ResponseMinutes(clock, props, schedule, minuteStore), schedule, permission, clock, registry, stopGrace);
         return load;
     }
 
@@ -89,6 +95,35 @@ class LoadTest {
         assertThat(journal.outcomes.values().stream().filter(it -> it.bankStatus() == TransferStatus.POSTED).count()).isEqualTo(status.posted());
         assertThat(journal.outcomes.values().stream().filter(it -> it.bankStatus() == TransferStatus.REJECTED).count()).isEqualTo(status.rejected());
         assertThat(status.rejectedByReason().values().stream().mapToLong(Long::longValue).sum()).isEqualTo(status.rejected());
+    }
+
+    @Test
+    void sends_nothing_while_another_instance_holds_the_lease_and_starts_at_the_pace_without_catching_up_once_it_holds_it() throws Exception {
+        try (var gateway = new FakeGateway()) {
+            var granted = new AtomicBoolean(false);
+            var load = load(TestData.settings(gateway.url()).tps(200), DEFAULT_GRACE, Clock.systemUTC(), granted::get);
+
+            load.begin();
+            Thread.sleep(1_000);
+            assertThat(load.status().requested()).isZero();
+            granted.set(true);
+            Thread.sleep(1_000);
+            load.stop();
+
+            assertThat(load.status().requested()).isBetween(150L, 220L);
+            assertThat(gateway.attemptsById).hasSize((int) load.status().requested());
+        }
+    }
+
+    @Test
+    void a_stop_adds_the_answers_still_counted_in_memory_to_the_minutes() throws Exception {
+        try (var gateway = new FakeGateway()) {
+            var load = load(TestData.settings(gateway.url()).tps(200));
+            runFor(load, Duration.ofSeconds(1));
+
+            var counted = minuteStore.between(Instant.EPOCH, Instant.now()).stream().mapToLong(MinuteCounts::total).sum();
+            assertThat(counted).isPositive().isEqualTo(responses(ResponseKind.ACCEPTED));
+        }
     }
 
     @Test
@@ -331,6 +366,14 @@ class LoadTest {
             assertThat(sentTimes(gateway, 2)).isGreaterThan(status.requested() / 2);
             assertJournalMatches(status);
         }
+    }
+
+    @Test
+    @DisplayName("a stopping gateway's answers are counted from 0 at the start, by the name the release check asks")
+    void a_stopping_gateways_answers_are_counted_from_0_at_the_start_by_the_name_the_release_check_asks() {
+        load(TestData.settings("http://localhost:1"));
+
+        assertThat(registry.get("generator.responses").tag("kind", "stopping").counter().count()).isZero();
     }
 
     @Test

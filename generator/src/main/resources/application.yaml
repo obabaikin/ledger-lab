@@ -86,6 +86,17 @@ generator:
     read-interval: 1s
     # Up to 50 increments a second wait for the fold: about 3,000 rows to sum on a read.
     rollup-interval: 1m
+  lease:
+    # The pod's name, unique in the cluster.
+    owner: ${HOSTNAME:generator}
+    duration: 5s
+    renew-every: 1s
+    # How soon a new pod takes over once the old one let go.
+    acquire-every: 100ms
+    send-window: 3s
+  minutes:
+    flush-interval: 1s
+    settle: 10s
   profile:
     duplicate-share: 0.02
     # 0: both inserts race on the key; 50ms: accepted, no result yet; 1s: the result is in.

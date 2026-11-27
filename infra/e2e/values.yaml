@@ -1,0 +1,15 @@
+# The end-to-end test's bank (infra/e2e/scenario.py, .github/workflows/e2e.yml): periods of 5 minutes, so a run of half
+# an hour gets several verdicts, and a smaller bank. infra/e2e/install-base.sh gives it to the cluster as the Secret the
+# releases read their values from, so the commit installed first and the one deployed over it run the same bank.
+periodMinutes: 5
+closing:
+  settleDelay: 2m
+  checkWait: 1m
+  retryWait: 30s
+  # Spring reads one number and one unit: 5m30s is refused.
+  verdictDeadline: 330s
+retentionHours: 1
+accounts:
+  count: 10000
+load:
+  baseTps: 300

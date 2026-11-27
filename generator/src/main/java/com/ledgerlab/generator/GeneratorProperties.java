@@ -25,6 +25,8 @@ public record GeneratorProperties(
     Periods periods,
     Reconciliation reconciliation,
     Totals totals,
+    Lease lease,
+    Minutes minutes,
     ProfileProperties profile
 ) {
     /**
@@ -120,6 +122,38 @@ public record GeneratorProperties(
 
     /** The clients' totals are read every {@link #readInterval} and their increments folded every {@link #rollupInterval}. */
     public record Totals(Duration readInterval, Duration rollupInterval) {
+    }
+
+    /**
+     * One instance sends at a time. {@link #owner} names this instance in the lease, which lasts {@link #duration}; the holder
+     * renews it every {@link #renewEvery}, the others try to take it every {@link #acquireEvery}. The holder sends only until
+     * {@link #sendWindow} after it sent its last successful renewal: shorter than the lease, so a holder cut off from the
+     * database is silent before another may take over.
+     */
+    public record Lease(String owner, Duration duration, Duration renewEvery, Duration acquireEvery, Duration sendWindow) {
+        public Lease {
+            if (owner.isBlank()) {
+                throw new IllegalArgumentException("generator.lease.owner must not be blank");
+            }
+            if (sendWindow.compareTo(duration) >= 0) {
+                throw new IllegalArgumentException("generator.lease.send-window must be shorter than generator.lease.duration");
+            }
+            if (renewEvery.compareTo(sendWindow) >= 0) {
+                throw new IllegalArgumentException("generator.lease.renew-every must be shorter than generator.lease.send-window");
+            }
+        }
+    }
+
+    /**
+     * The answers counted by minute are added to the database every {@link #flushInterval}; a minute is given out
+     * {@link #settle} after its end, longer than a flush, so the last counts of a pod that stopped in it are in.
+     */
+    public record Minutes(Duration flushInterval, Duration settle) {
+        public Minutes {
+            if (settle.compareTo(flushInterval) <= 0) {
+                throw new IllegalArgumentException("generator.minutes.settle must be longer than generator.minutes.flush-interval");
+            }
+        }
     }
 
     /**

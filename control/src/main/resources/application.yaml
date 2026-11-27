@@ -70,8 +70,11 @@ control:
   outside:
     # Pulses up to this speed are promised and judged; above it the clients test the bank past its limits (docs/guides/slo.md).
     guaranteed-tps: 1300
+    # In the cluster the chart's chaosAftermathSeconds takes its place, the same for the release check.
     chaos-aftermath: 60s
     load-aftermath: 30s
+    # How often control reads whether such a pulse or its aftermath lasts, for its metric; the shortest lasts 40 s.
+    load-poll-interval: 1s
     restart-margin: 60s
   maintenance:
     notice: 3h

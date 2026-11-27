@@ -1,3 +1,4 @@
+{{- if include "ledger-lab.renders" (list . "platform") -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -82,49 +83,57 @@ spec:
         resources:
           requests: {storage: {{ .Values.postgres.storage }}}
 ---
-# A new name per release revision, as create-topics: the init script above runs only on an empty volume, so a role
-# added later is created here, on the database that already exists. The extension lands in public, closed to the
-# services' roles; the exporter's role may only see into it.
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: monitor-role-{{ .Release.Revision }}
-spec:
-  backoffLimit: 10
-  ttlSecondsAfterFinished: 3600
-  template:
-    spec:
-      restartPolicy: OnFailure
-      automountServiceAccountToken: false
-      securityContext:
-        runAsNonRoot: true
-        # The postgres user of the Alpine image.
-        runAsUser: 70
-        seccompProfile: {type: RuntimeDefault}
-      containers:
-        - name: monitor-role
-          image: {{ .Values.postgres.image }}
-          command:
-            - sh
-            - -c
-            - |
-              set -eu
-              psql -v ON_ERROR_STOP=1 -h postgres -U admin -d ledgerlab -v password="$(cat /run/db-passwords/monitor)" <<'SQL'
-              SELECT 'CREATE ROLE monitor' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'monitor') \gexec
-              ALTER ROLE monitor WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'password';
-              GRANT pg_monitor TO monitor;
-              CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-              GRANT USAGE ON SCHEMA public TO monitor;
-              SQL
-          env:
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef: {name: db-passwords, key: postgres}
-          securityContext: {{- include "ledger-lab.restricted" . | nindent 12 }}
-          resources:
-            limits: {memory: {{ .Values.initMemory }}}
-          volumeMounts:
-            - {name: passwords, mountPath: /run/db-passwords, readOnly: true}
-      volumes:
-        - name: passwords
-          secret: {secretName: db-passwords, items: [{key: monitor, path: monitor}]}
+# Created again only when its spec or the monitor's password change, as create-topics: the init script above runs only
+# on an empty volume, so a role added later is created here, on the database that already exists. The extension lands
+# in public, closed to the services' roles; the exporter's role may only see into it.
+{{ include "ledger-lab.setupJob" (dict "name" "monitor-role" "spec" (include "ledger-lab.monitorRoleSpec" .) "inputs" .Values.passwords.monitor) }}
+{{- end }}
+{{- define "ledger-lab.monitorRoleSpec" -}}
+backoffLimit: 10
+template:
+  spec:
+    restartPolicy: OnFailure
+    automountServiceAccountToken: false
+    securityContext:
+      runAsNonRoot: true
+      # The postgres user of the Alpine image.
+      runAsUser: 70
+      seccompProfile: {type: RuntimeDefault}
+    containers:
+      - name: monitor-role
+        image: {{ .Values.postgres.image }}
+        command:
+          - sh
+          - -c
+          - |
+            set -eu
+            deadline=$(($(date +%s) + WAIT_SECONDS))
+            until pg_isready -q -h postgres -U admin -d ledgerlab; do
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "postgres did not answer within ${WAIT_SECONDS}s" >&2
+                exit 1
+              fi
+              echo "waiting for postgres"
+              sleep 1
+            done
+            psql -v ON_ERROR_STOP=1 -h postgres -U admin -d ledgerlab -v password="$(cat /run/db-passwords/monitor)" <<'SQL'
+            SELECT 'CREATE ROLE monitor' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'monitor') \gexec
+            ALTER ROLE monitor WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'password';
+            GRANT pg_monitor TO monitor;
+            CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+            GRANT USAGE ON SCHEMA public TO monitor;
+            SQL
+        env:
+          - {name: WAIT_SECONDS, value: {{ include "ledger-lab.whole" (list "setupWaitSeconds" .Values.setupWaitSeconds false) | quote }}}
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef: {name: db-passwords, key: postgres}
+        securityContext: {{- include "ledger-lab.restricted" . | nindent 10 }}
+        resources:
+          limits: {memory: {{ .Values.initMemory }}}
+        volumeMounts:
+          - {name: passwords, mountPath: /run/db-passwords, readOnly: true}
+    volumes:
+      - name: passwords
+        secret: {secretName: db-passwords, items: [{key: monitor, path: monitor}]}
+{{- end }}

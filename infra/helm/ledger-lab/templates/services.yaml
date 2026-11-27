@@ -3,6 +3,7 @@
 {{- $periodLength := printf "%dm" (int .Values.periodMinutes) }}
 {{- $retention := printf "%dh" (int .Values.retentionHours) }}
 {{- range $name, $service := .Values.services }}
+{{- if include "ledger-lab.renders" (list $root $name) }}
 {{- $usesKafka := has $name (list "ledger" "gateway" "reporting") }}
 ---
 apiVersion: v1
@@ -24,7 +25,8 @@ metadata:
 spec:
   {{- if eq $name "ledger" }}
   serviceName: {{ $name }}
-  # Instances start and stop together; each one's partitions wait for it under its name (static membership).
+  # Instances start together on install; the policy covers scaling only, so an update still replaces them one at a
+  # time, highest first.
   podManagementPolicy: Parallel
   {{- else if $service.rollingUpdate }}
   # The new pod takes requests once it is ready; only then the old one stops.
@@ -42,7 +44,7 @@ spec:
       annotations: {{- include "ledger-lab.scrape" $root | nindent 8 }}
         {{- if eq $name "control" }}
         # The keys reach control as env, read at start: a changed key restarts it.
-        checksum/keys: {{ include (print $root.Template.BasePath "/secret.yaml") $root | sha256sum }}
+        checksum/keys: {{ $root.Values.keys | toJson | sha256sum }}
         {{- end }}
     spec:
       # The services never call the Kubernetes API.
@@ -114,11 +116,8 @@ spec:
             {{- if mod $root.Values.kafka.partitions $service.replicas }}
             {{- fail "kafka.partitions must divide evenly among the ledger's replicas" }}
             {{- end }}
-            # Consumers beyond one per partition get none, and the assignor gives them to the first instances by name.
+            # Consumers beyond one per partition would get none.
             - {name: SPRING_KAFKA_LISTENER_CONCURRENCY, value: {{ div $root.Values.kafka.partitions $service.replicas | quote }}}
-            - name: LEDGER_INSTANCE_ID
-              valueFrom:
-                fieldRef: {fieldPath: metadata.name}
             - {name: LEDGER_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
             - {name: LEDGER_ACCOUNTS_COUNT, value: {{ int64 $root.Values.accounts.count | quote }}}
             # The hot accounts' surplus goes to the pool once a period.
@@ -149,7 +148,8 @@ spec:
             {{- range $other := list "ledger" "gateway" "generator" "reporting" }}
             - {name: CONTROL_{{ upper $other }}_BASEURL, value: "http://{{ $other }}:{{ (get $root.Values.services $other).port }}"}
             {{- end }}
-            - {name: CONTROL_PROMETHEUS_BASEURL, value: "http://prometheus:9090"}
+            - {name: CONTROL_PROMETHEUS_BASEURL, value: {{ include "ledger-lab.prometheusUrl" $root | quote }}}
+            - {name: CONTROL_OUTSIDE_CHAOSAFTERMATH, value: "{{ include "ledger-lab.whole" (list "chaosAftermathSeconds" $root.Values.chaosAftermathSeconds true) }}s"}
             - {name: CONTROL_CHAOS_ENABLED, value: {{ $root.Values.chaos | quote }}}
             - {name: CONTROL_LOAD_MINTPS, value: {{ int64 $root.Values.load.minPulseTps | quote }}}
             - {name: CONTROL_LOAD_MAXTPS, value: {{ int64 $root.Values.load.maxTps | quote }}}
@@ -225,4 +225,5 @@ spec:
         - name: dumps
           emptyDir: {sizeLimit: {{ . }}}
           {{- end }}
+{{- end }}
 {{- end }}

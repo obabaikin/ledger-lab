@@ -2,6 +2,8 @@ package com.ledgerlab.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ledgerlab.control.chaos.ChaosService;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.TestPropertySource;
@@ -21,6 +24,12 @@ import org.springframework.test.context.TestPropertySource;
 class ChaosTest extends IntegrationTest {
 
     private static final String CRASH_PATH = "/actuator/crash";
+
+    @Autowired MeterRegistry registry;
+
+    private double presses() {
+        return registry.get(ChaosService.METRIC).counter().count();
+    }
 
     private ResponseEntity<Map<String, Object>> chaos(Object sessionId) {
         return post("/api/sessions/" + sessionId + "/chaos", null);
@@ -55,6 +64,19 @@ class ChaosTest extends IntegrationTest {
         assertThat(answer.getBody().get("at")).isNotNull();
         assertThat(crashCalls()).containsExactly(1, 1, 1);
         assertThat(single(events()).get("instances")).isEqualTo("ledger-0,ledger-1,ledger-2");
+    }
+
+    @Test
+    @DisplayName("a press that sent a crash counts on the chaos metric, an answered one and an unanswered one alike")
+    void a_press_that_sent_a_crash_counts_on_the_chaos_metric() {
+        var before = presses();
+        chaos(visitor());
+        backdateChaos(Duration.ofHours(1));
+        ledgerInstances.forEach(it -> it.status = 503);
+
+        chaos(visitor());
+
+        assertThat(presses()).isEqualTo(before + 2);
     }
 
     @Test

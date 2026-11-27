@@ -2,9 +2,20 @@ package com.ledgerlab.control;
 
 import static com.ledgerlab.control.Fixtures.mapOf;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.ledgerlab.control.generator.GeneratorClient;
 import com.ledgerlab.control.http.ServiceHttp;
+import com.ledgerlab.control.load.GeneratorDidNotAnswerException;
+import com.ledgerlab.control.load.LoadAbovePromise;
+import com.ledgerlab.control.load.LoadRepository;
+import com.ledgerlab.control.load.LoadService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -20,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -33,6 +46,8 @@ class LoadTest extends IntegrationTest {
 
     @Autowired Cleanup cleanup;
     @Autowired GeneratorClient generatorClient;
+    @Autowired LoadService loadService;
+    @Autowired LoadAbovePromise loadAbovePromise;
 
     @BeforeEach
     void generatorTakesPulses() {
@@ -280,6 +295,29 @@ class LoadTest extends IntegrationTest {
     }
 
     @Test
+    @DisplayName("a press interrupted while it calls the generator keeps the pulse as unanswered and leaves the thread interrupted")
+    void a_press_interrupted_while_it_calls_the_generator_keeps_the_pulse_as_unanswered_and_leaves_the_thread_interrupted() throws Exception {
+        generator.answer("POST", PULSE_PATH, 200, Fixtures.load(), Duration.ofSeconds(2));
+        var sessionId = visitor();
+        var pressing = new CompletableFuture<Thread>();
+        var stillInterrupted = new CompletableFuture<Boolean>();
+
+        var press = new Thread(() -> {
+            pressing.complete(Thread.currentThread());
+            assertThatThrownBy(() -> loadService.raise(sessionId, 1000, 10)).isInstanceOf(GeneratorDidNotAnswerException.class);
+            stillInterrupted.complete(Thread.currentThread().isInterrupted());
+        });
+        press.start();
+        await().atMost(Duration.ofSeconds(5)).pollInterval(Duration.ofMillis(10)).until(() -> !pulseCalls().isEmpty());
+        pressing.get().interrupt();
+        press.join(Duration.ofSeconds(5).toMillis());
+
+        assertThat(stillInterrupted.get()).isTrue();
+        assertThat(pulses()).hasSize(1);
+        assertThat(load(sessionId, 1000, 10).getBody().get("error")).isEqualTo("load-running");
+    }
+
+    @Test
     @DisplayName("a pulse that never reached the generator is 503 and not kept, so the next press raises the load")
     void a_pulse_that_never_reached_the_generator_is_503_and_not_kept_so_the_next_press_raises_the_load() {
         var reachable = ReflectionTestUtils.getField(generatorClient, "http");
@@ -326,5 +364,81 @@ class LoadTest extends IntegrationTest {
         cleanup.purge();
 
         assertThat(pulses()).hasSize(1);
+    }
+
+    private double abovePromise() {
+        loadAbovePromise.read();
+        return meters.get(LoadAbovePromise.METRIC).gauge().value();
+    }
+
+    @Test
+    void without_a_pulse_the_load_above_the_promise_is_told_as_0() {
+        assertThat(abovePromise()).isZero();
+    }
+
+    @Test
+    void a_pulse_at_the_promised_speed_is_not_told_as_above_the_promise() {
+        load(visitor(), props.outside().guaranteedTps(), 30);
+
+        assertThat(abovePromise()).isZero();
+    }
+
+    @Test
+    void a_pulse_above_the_promised_speed_is_told_as_above_the_promise_from_its_start_until_its_aftermath_is_over() {
+        var seconds = 10;
+        var aftermath = props.outside().loadAftermath();
+        var margin = Duration.ofSeconds(5);
+
+        load(visitor(), props.outside().guaranteedTps() + props.load().tpsStep(), seconds);
+        assertThat(abovePromise()).isOne();
+
+        backdatePulses(Duration.ofSeconds(seconds).plus(aftermath).minus(margin));
+        assertThat(abovePromise()).isOne();
+
+        backdatePulses(margin.multipliedBy(2));
+        assertThat(abovePromise()).isZero();
+    }
+
+    @Test
+    void a_pulse_above_the_promised_speed_the_generator_may_have_taken_is_told_as_above_the_promise() {
+        generator.answer("POST", PULSE_PATH, 200, "not json");
+
+        load(visitor(), props.outside().guaranteedTps() + props.load().tpsStep(), 10);
+
+        assertThat(pulses()).hasSize(1);
+        assertThat(abovePromise()).isOne();
+    }
+
+    @Test
+    void until_the_pulses_are_first_read_the_load_above_the_promise_is_told_as_unknown_not_as_within_it() {
+        var pulses = mock(LoadRepository.class);
+        when(pulses.aboveNow(anyInt(), any())).thenReturn(false);
+        var registry = new SimpleMeterRegistry();
+        var told = new LoadAbovePromise(pulses, props, registry);
+        var gauge = registry.get(LoadAbovePromise.METRIC).gauge();
+
+        assertThat(gauge.value()).isNaN();
+
+        told.read();
+        assertThat(gauge.value()).isZero();
+    }
+
+    @Test
+    void while_the_pulses_cannot_be_read_the_load_above_the_promise_is_told_as_unknown_not_as_the_last_value_read() {
+        var failure = new DataAccessResourceFailureException("the database is away");
+        var pulses = mock(LoadRepository.class);
+        when(pulses.aboveNow(anyInt(), any())).thenReturn(false).thenThrow(failure).thenReturn(true);
+        var registry = new SimpleMeterRegistry();
+        var told = new LoadAbovePromise(pulses, props, registry);
+        var gauge = registry.get(LoadAbovePromise.METRIC).gauge();
+
+        told.read();
+        assertThat(gauge.value()).isZero();
+
+        assertThatThrownBy(told::read).isSameAs(failure);
+        assertThat(gauge.value()).isNaN();
+
+        told.read();
+        assertThat(gauge.value()).isOne();
     }
 }

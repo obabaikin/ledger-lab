@@ -119,7 +119,8 @@ the limit and watch the bank fall behind and catch up; one raise at a time for a
 ## Stack
 
 Java 25 · Spring Boot 4 · Apache Kafka · PostgreSQL · Flyway · Testcontainers ·
-Micrometer / Prometheus · Helm · k3s · cert-manager · Terraform (firewall, DNS); planned: Grafana
+Micrometer / Prometheus · Alertmanager · Helm · Flux · k3s · cert-manager · Terraform (firewall, DNS);
+planned: Grafana
 
 Ported from Kotlin in v0.9.0 with the behaviour unchanged; the two versions
 [measured side by side](docs/results/2026-11-10-kotlin-vs-java.md).
@@ -175,25 +176,38 @@ Local Kubernetes, the server, invites and work on the page: [docs/guides/operati
   services they call ([ADR 0011](docs/adr/0011-contract-boundaries.md)).
 - **The page** has its own tests (Vitest).
 - **CI on every pull request:** the tests, dead-code and null checks (Error Prone, NullAway, knip), compiler warnings as
-  errors, a secret scan of the whole history, Terraform validation and shellcheck. `main` only takes
-  pull requests with green tests and a clean secret scan.
+  errors, a secret scan of the whole history, Terraform validation, shellcheck, and the tests of the chart and of the
+  deploy scripts. `main` only takes pull requests with green tests and a clean secret scan.
+- **End to end, the step a deploy makes.** For every commit of `main`, nightly, and on a labelled pull request: the
+  commit's parent is installed in k3d through Flux, the commit is deployed over it under 300 transfers per second, then
+  a ledger pod and the gateway are killed. The releases must come one after another, only the changed services may get
+  new pods, the release check must pass, every period crossed must end `BALANCED`, and the money on the accounts must
+  be what it was. A commit is deployed only after this run is green.
 - **The system as a whole** is checked by its own reconciliation: every hour, crashes included, ends with a verdict.
 
 ## Deployment
 
 - **Kubernetes:** one Helm chart (`infra/helm/ledger-lab`) runs in k3d on a laptop, on one node the
   size of the server, and on the server's single-node k3s. The ledger runs two instances and the gateway one;
-  a deploy replaces the gateway without downtime ([ADR 0020](docs/adr/0020-gateway-deploys-without-downtime.md)),
-  the other services stop before their new version starts. A crashed pod restarts within a second. Every pod of the
-  chart has a memory limit; the bank, the load generator, monitoring, k3s and the OS fit in the server's 12 GB together.
+  a deploy replaces the gateway without downtime ([ADR 0020](docs/adr/0020-gateway-deploys-without-downtime.md)).
+  A crashed pod restarts within a second. Every pod of the chart has a memory limit; the bank, the load generator,
+  monitoring, k3s and the OS fit in the server's 12 GB together, except for about 0.3 GB of limits, not of use, while
+  the gateway is replaced, which two alerts watch.
 - **Server:** one VPS (6 vCPU, 12 GB), ordered by hand. Terraform manages only its firewall and the
   DNS record, so no configuration can buy a server.
-- **Delivery:** every push to `main` builds the five images in CI and publishes them to GHCR, once;
-  a release, a SemVer tag, only adds its name to them, and only a release reaches the server: `deploy.sh v1.0.0`
-  deploys it by hand while the clients keep sending and names the version the page shows. A change of a contract
-  between the services deploys only within a declared maintenance window.
+- **Delivery:** every push to `main` builds the images whose module changed and publishes them to GHCR, each tagged
+  with a hash of what it is built from, so an unchanged service keeps its image and its pods.
+- **Deploys without a maintenance window** ([ADR 0024](docs/adr/0024-deploys-without-a-maintenance-window.md)): Flux in
+  the cluster follows a branch that names the commit to run; nothing outside holds a key to the cluster. Once an hour CI
+  moves that pointer to the next commit of `main`, if the last deploy is through and the commit's end-to-end run is
+  green: every commit is deployed, in order, over the one before it. Flux replaces one service at a time, platform,
+  reporting, ledger, gateway, generator, control, and only those that changed. Two minutes after a service's new pods
+  are ready a check asks Prometheus: a transfer over 3 s, a `503` or a pool timeout rolls that service back, stops the
+  chain and mails the operator. Verified in k3d and by the end-to-end test; the server moves to it in the next step and
+  is deployed by hand from a release tag until then (`deploy.sh v1.0.0`).
 - **Monitoring:** Prometheus scrapes the services every second, and the node, Postgres (with the statements that take
-  the most time) and every container's memory every 5 s.
+  the most time) and every container's memory every 5 s. Alertmanager mails how a deploy ended and the alerts: a
+  deploy that runs late or is stalled, memory near a limit, a certificate about to expire.
 - **Security:** HTTPS from Let's Encrypt through cert-manager, requests limited per client address,
   a host firewall under the provider's, SSH with a key only, services without root or capabilities.
   Only the page is published.
@@ -230,9 +244,10 @@ What is deliberately left out, and what production would add:
   status or reason it does not know yet keeps what it can apply, and logs and counts the rest. Production would add a schema
   registry for the Kafka messages, a contract broker for clients and a dead-letter topic.
 - **One node, no failover.** The server is a single k3s node; if it goes down, so does the system.
-- **No continuous deployment.** One server: a release is chosen and deployed by hand. The gateway is replaced without
-  downtime; the other services stop for the deploy, and those minutes count against the budget unless announced.
-  Production would deploy on merge, roll every service and run several instances.
+- **No canary.** A deploy replaces one service at a time and judges the new version after two minutes under the whole
+  load; one that broke the guarantee is rolled back, and those minutes count against the budget. Production would give
+  a new version a share of the traffic first, across several nodes. Kafka and Postgres are single instances and still
+  stop for their own upgrade.
 - **No database backups.** The money is test money; a fresh install starts the books again, and invites are re-issued.
 - **No push notifications.** Clients learn outcomes by retrying with the same key or asking for
   the status. Production would add signed webhooks with retried delivery.
@@ -254,6 +269,7 @@ Each goal names how it is checked; a goal is done when the check holds.
 | Writes in batches, overload shed at the edge | 1000–1600 TPS on the server in steps of 30 s without a refusal in two staircases of three, every run `BALANCED` ([optimizations](docs/results/2026-11-06-optimizations.md)); load above the limit refused at once with `503 busy`, no restart | done |
 | The bottleneck, found and explained | measured, with the fix or the reason not to: commits per transfer, then lock waits, then the gateway's memory ([optimizations](docs/results/2026-11-06-optimizations.md)), then a key cleanup that held up the outbox publisher on a shared scheduler thread ([p99 analysis](docs/results/2026-11-14-p99-analysis.md)) | done |
 | Gateway deploys without downtime | replaced during a 400 TPS run: no transfer lost or duplicated, the run `BALANCED` | done |
+| Deploys without a maintenance window | a real merge reaches the server by itself: the end-to-end run, the pointer, Flux's chain one service at a time with no transfer over 3 s, no `503` and no pool timeout, the mail `OK`; so far in k3d and in the end-to-end test ([ADR 0024](docs/adr/0024-deploys-without-a-maintenance-window.md)) | next |
 | No refusals right after a deploy | the top offered rate right after a deploy: 0 refused | planned |
 | Money is never created or lost, in any order of events | property-based tests in CI: random sequences of transfers, duplicates, redeliveries and failures, every invariant checked after each step | planned |
 | Nothing received goes unaccounted | every message a service took is booked or reported | planned |
@@ -283,6 +299,9 @@ Decisions with their trade-offs are recorded in [docs/adr](docs/adr). The ones t
   [ADR 0019](docs/adr/0019-batched-writes-one-result-writer-load-shedding.md)).
 - **Overload is shed at the edge.** Past a limit of open submissions the gateway answers `503 busy`
   at once instead of filling its heap ([ADR 0019](docs/adr/0019-batched-writes-one-result-writer-load-shedding.md)).
+- **Deploys are pulled, queued and checked.** Flux pulls a pointer that CI moves one commit an hour; a release per
+  service, in a chain, each checked against the guarantee and rolled back alone
+  ([ADR 0024](docs/adr/0024-deploys-without-a-maintenance-window.md)).
 - **Hand-written SQL, no ORM**, so every lock and query of the ledger is visible ([ADR 0001](docs/adr/0001-jdbc-instead-of-jpa.md)).
 
 ## Version 1: runs

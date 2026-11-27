@@ -1,18 +1,44 @@
 # Local k3d defaults. Real passwords come from --set or a values file outside the repository.
 image:
   repository: ledger-lab
+  # A service's own tag (services.<name>.tag, from infra/ci/module-tag.sh) takes the place of this one.
   tag: dev
   pullPolicy: IfNotPresent
+
+# The part of the bank this release holds: platform or a service's name (Flux deploys each as a release of its own,
+# infra/flux/release.sh); empty holds all of it.
+component: ""
 
 # Shown on the page; the deploy scripts set it, the image carries none (built once, deployed under any tag).
 version: dev
 
 managementPort: 9000
 chaos: true
+# Slow transfers follow a crash of the ledger for this long: control leaves the minutes after a chaos press out of the
+# bounds it promises, and the release check leaves a time this long after one unchecked.
+chaosAftermathSeconds: 60
 initMemory: 64Mi
+# A try of a setup Job (topics, the monitor role) waits this long for Kafka or Postgres to answer: on a fresh cluster
+# their volumes are provisioned first.
+setupWaitSeconds: 300
+
+# The check after a service's upgrade (templates/release-check.yaml): no transfer slower than 3 s, none refused and no
+# pool timeout while the service was replaced and for settleSeconds after, read from Prometheus.
+releaseCheck:
+  # infra/flux/release.sh turns it on for the services whose image tag differs from the one in the last pointer
+  # deployed in full, and for every service when the chart differs from that pointer's; a release without it does not
+  # wait.
+  enabled: false
+  image: python:3.14.10-alpine3.24@sha256:5862d971d1f0ae26b258cefa4e893556b1d3aba81bd2ff30888704ad378bab67
+  memory: 64Mi
+  # The image's default user is root.
+  runAsUser: 65534
+  # The new version under load before it is judged.
+  settleSeconds: 120
 
 # The bank's clock, the same in every service: they cut time at the same instants (ADR 0021). A changed length needs
-# empty databases: the services refuse to start beside partitions cut for another one.
+# empty databases: the services refuse to start beside partitions cut for another one. Emptied volumes need the setup
+# Jobs deleted too, or the topics and the monitor role are not created again (templates/_helpers.tpl).
 periodMinutes: 60
 # Control's closing of a period, counted from its end: the bank's counts are read once at settleDelay; the ledger's
 # check and the clients' reconciliation are asked about checkWait after they were started, then every retryWait; a
@@ -63,7 +89,7 @@ slo:
     tail: {threshold: 5s, target: "0.99"}
 
 # The services' roles are created only on an empty volume: a password changed here later also needs ALTER ROLE by hand
-# in Postgres. The monitor role is created or updated on every install and upgrade.
+# in Postgres. The monitor role is created or updated whenever its password or its Job changes.
 passwords:
   postgres: change-me-postgres
   ledger: change-me-ledger
@@ -102,12 +128,73 @@ postgres:
   logMinDuration: 1s
 
 prometheus:
-  image: prom/prometheus:v3.5.0
+  image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
   memory: 512Mi
   retention: 5d
   storage: 5Gi
   # Below the volume: the oldest blocks go first when the series outgrow it.
   retentionSize: 4GB
+
+# Mails the operator what Prometheus' alerts say (alerts, below) and what Flux reports of the releases
+# (infra/flux/notifications.sh).
+alertmanager:
+  image: prom/alertmanager:v0.35.1@sha256:4e3d029e69c7f61dd53a2b31a3dc427a2b81736cffca185c0854075e07969e36
+  port: 9093
+  memory: 64Mi
+  mail:
+    # Empty in k3d: nothing is mailed, the alerts show on Alertmanager's own page.
+    to: ""
+    from: ""
+    # host:port of the SMTP server.
+    smarthost: ""
+    # Empty takes the Mailjet keys of the invites (keys.mailjetApiKey and keys.mailjetApiSecret), which are that
+    # account's SMTP login.
+    username: ""
+    password: ""
+    requireTls: true
+  # The first mail about a group of alerts waits this long for the rest of the group, a group that grew is mailed again
+  # after groupInterval, one that stays as it is after repeatInterval.
+  groupWait: 30s
+  groupInterval: 5m
+  repeatInterval: 12h
+  deploy:
+    # The release whose passed test ends a deploy: the last of the chain in infra/flux/release.sh.
+    lastRelease: control
+    # A Flux event has no end; it counts as over this long after it came. Above the timeout of a release
+    # (infra/flux/release.sh), within which its rollback ends, so the failure is still there for the rollback's mail.
+    eventLifetime: 15m
+    # A rollback reported this soon after the failure shares the failure's mail; a later one gets a mail of its own
+    # within rollbackInterval.
+    failureWait: 2m
+    rollbackInterval: 1m
+
+# What Prometheus alerts on (templates/prometheus-config.yaml).
+alerts:
+  # A condition holds this long before it is an alert.
+  heldFor: 2m
+  memory:
+    # Of a container's limit; the limits are the ones of this file.
+    limitShare: 0.9
+    # MemAvailable of the node: the limits together exceed the server while the gateway is replaced.
+    nodeAvailableMiB: 300
+  deploy:
+    # A deploy starts in the window from :10 to :20 (infra/flux/window.sh); one still running from this minute of the
+    # hour on is an alert.
+    deadlineMinute: 55
+    # A deploy is running while helm-controller's worker was busy for more than busyShare of the last busyWindow: an
+    # upgrade and its test hold the worker for minutes, a look at an unchanged release for a second or two, and
+    # between two releases of a chain it is idle for about half a minute.
+    busyWindow: 2m
+    busyShare: 0.5
+    # The Jobs of the deploy window in Flux's namespace, by the name their CronJobs give them (infra/flux/window.sh).
+    windowJobs: deploy-window-.+
+    # A failed Job of the window stays in the cluster until the next one of its CronJob fails; it is an alert for this
+    # long after it started, the hour until the next run of its kind.
+    windowJobAlertSeconds: 3600
+
+# Flux as infra/flux/install.sh installs it; Prometheus reads helm-controller's metrics there.
+flux:
+  namespace: flux-system
 
 # Outside the bank's work path: they only feed Prometheus, and nothing waits for them.
 exporters:
@@ -123,6 +210,17 @@ exporters:
     memory: 64Mi
     # The statements with the most time, each a series per metric; the text is a label, cut to its start.
     statementsLimit: 100
+  # kube-state-metrics, for what the cluster's objects say and no metric of Flux or the kubelet does: the conditions
+  # of the HelmReleases (a release that is stalled and waits for a hand) and the Jobs of the deploy window
+  # (templates/kube-state-metrics.yaml). It reads the release's and Flux's namespaces only.
+  kubeState:
+    image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b
+    port: 8080
+    telemetryPort: 8081
+    # It holds every CustomResourceDefinition of the cluster to find the HelmRelease's; the Jobs and the releases are
+    # few. It took 23 MiB with the 48 definitions of k3d when started outside a cluster, and 19 MiB in k3d, after
+    # chains of releases and a restart of the node.
+    memory: 64Mi
 
 # Off in k3d: the server sets a host, a Let's Encrypt issuer, security headers and the rate limit (infra/server/values.yaml).
 ingress:
@@ -151,6 +249,11 @@ services:
     # Two: a third added no throughput, the ledger waits on row locks in Postgres, not on its own CPU (about
     # 120m per pod at 1300 TPS, measured on the server), and its memory is needed while the gateway is replaced.
     replicas: 2
+    # How far back from its end the release check looks, besides its settle time: the time an upgrade takes to replace
+    # the service's pods. Measured on k3d at 400 TPS: a release of all five services at once was replaced in 34 s,
+    # the ledger's pods 23 s after each other; the values leave room for a slower server. A longer one only reaches
+    # into the time checked for the release before.
+    rolloutSeconds: 120
     # A batch of 100 transfers per consumer, three consumers per pod. Its peak on the server was 392Mi.
     memory: 700Mi
   gateway:
@@ -160,6 +263,7 @@ services:
     # (docs/adr/0020-gateway-deploys-without-downtime.md). A deploy starts the new pod before the old one stops.
     replicas: 1
     rollingUpdate: true
+    rolloutSeconds: 120
     # The pause (5 s), the web server's drain (at most 15 s; the longest wait is 10 s) and the Kafka listeners' stop
     # (at most 10 s), with room left.
     terminationGraceSeconds: 40
@@ -190,21 +294,27 @@ services:
     module: generator
     port: 8082
     replicas: 1
-    # The clients go on sending while the new pod warms up; two at once share the journal's totals.
+    rolloutSeconds: 90
+    # The new pod starts beside the old one and stays silent until the old one lets go of the sender lease.
     rollingUpdate: true
     # The bank's clients. Sized when the journals of a run stayed on the heap (at most 179 MiB live at 279,000 entries,
-    # measured on the server); the journal is in Postgres now, and the heap holds the requests in flight.
-    memory: 1280Mi
+    # measured on the server); the journal is in Postgres now, and the heap holds the requests in flight. Cut from
+    # 1280Mi to make room for Flux beside the bank in the 12 GB node.
+    memory: 1080Mi
     # As the gateway's: about 330 MiB outside the heap (measured), the heap fixed from the start, malloc's arenas
     # limited the same way.
     nativeReserve: 450Mi
-    jvmOptions: -Xlog:gc,gc+cpu:stdout:time,level,tags
+    # A crash of the JVM leaves its error log here (a SIGSEGV on 2026-11-17 took it away with the pod); it lives as long
+    # as the pod. A JVM out of heap would go on holding the sender lease, so it stops.
+    jvmOptions: -XX:ErrorFile=/dumps/hs_err_pid%p.log -XX:+ExitOnOutOfMemoryError -Xlog:gc,gc+cpu:stdout:time,level,tags
+    dumps: 256Mi
     env:
       MALLOC_ARENA_MAX: "2"
   control:
     module: control
     port: 8083
     replicas: 1
+    rolloutSeconds: 90
     # The kernel killed a 448Mi pod after 9 hours with a heap of half of it, so at least 224 MiB was outside the
     # heap then; the heap is fixed and the rest left to the JVM, its threads and malloc.
     memory: 512Mi
@@ -218,6 +328,7 @@ services:
     module: reporting
     port: 8084
     replicas: 1
+    rolloutSeconds: 90
     # The page's numbers go on while the new pod catches up.
     rollingUpdate: true
     memory: 448Mi

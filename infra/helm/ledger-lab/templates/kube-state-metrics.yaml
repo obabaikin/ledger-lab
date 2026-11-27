@@ -1,0 +1,141 @@
+{{- define "ledger-lab.kubeStateConfig" -}}
+kind: CustomResourceStateMetrics
+spec:
+  resources:
+    - groupVersionKind: {group: helm.toolkit.fluxcd.io, version: v2, kind: HelmRelease}
+      # No prefix: the metric's name is the one the rules read.
+      metricNamePrefix: ""
+      labelsFromPath:
+        namespace: [metadata, namespace]
+        name: [metadata, name]
+      metrics:
+        - name: {{ include "ledger-lab.releaseCondition" . }}
+          help: "A condition of a HelmRelease: 1 when its status is True, else 0"
+          each:
+            type: Gauge
+            gauge:
+              path: [status, conditions]
+              labelsFromPath:
+                type: [type]
+                reason: [reason]
+              valueFrom: [status]
+{{- end }}
+{{- if include "ledger-lab.renders" (list . "platform") -}}
+{{- $kubeState := .Values.exporters.kubeState }}
+{{- $name := "kube-state-metrics" }}
+{{- $configPath := "/etc/kube-state-metrics" }}
+{{- $configFile := "helmrelease.yaml" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+---
+# In this namespace the releases and their Jobs. The same rights in Flux's namespace, for the window's Jobs, come with
+# Flux (infra/flux/install.sh): it asks for every kind it reads in every namespace it is given.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# It finds the HelmRelease's kind by watching the cluster's CustomResourceDefinitions, which have no namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ $name }}-definitions
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ $name }}-definitions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ $name }}-definitions
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  {{ $configFile }}: |
+    {{- include "ledger-lab.kubeStateConfig" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ledger-lab.labels" (dict "name" $name) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        checksum/config: {{ include "ledger-lab.kubeStateConfig" . | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: {{ $name }}
+          image: {{ $kubeState.image }}
+          args:
+            - --port={{ $kubeState.port }}
+            - --telemetry-port={{ $kubeState.telemetryPort }}
+            # Of its own kinds the Jobs alone; the HelmRelease is added by the file.
+            - --resources=jobs
+            - --namespaces={{ .Release.Namespace }},{{ .Values.flux.namespace }}
+            - --custom-resource-state-config-file={{ $configPath }}/{{ $configFile }}
+            # The Go heap is collected before the limit, not killed at it.
+            - --auto-gomemlimit
+          ports:
+            - {name: metrics, containerPort: {{ $kubeState.port }}}
+            - {name: telemetry, containerPort: {{ $kubeState.telemetryPort }}}
+          readinessProbe:
+            httpGet: {path: /readyz, port: telemetry}
+          securityContext:
+            readOnlyRootFilesystem: true
+            {{- include "ledger-lab.restricted" . | nindent 12 }}
+          resources:
+            requests: {memory: {{ $kubeState.memory }}}
+            limits: {memory: {{ $kubeState.memory }}}
+          volumeMounts:
+            - {name: config, mountPath: {{ $configPath }}}
+      volumes:
+        - name: config
+          configMap: {name: {{ $name }}}
+{{- end }}

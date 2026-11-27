@@ -10,7 +10,9 @@ import com.ledgerlab.generator.TestcontainersConfiguration;
 import com.ledgerlab.generator.gateway.GatewayClient;
 import com.ledgerlab.generator.load.BaseSchedule;
 import com.ledgerlab.generator.load.Load;
+import com.ledgerlab.generator.load.MemoryMinuteStore;
 import com.ledgerlab.generator.load.ResponseMinutes;
+import com.ledgerlab.generator.load.SendPermission;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -55,7 +57,7 @@ class JournalFirstTest {
                 var clock = Clock.systemUTC();
                 var writer = new JournalWriter(
                     new JdbcTemplate(dataSource), new TransactionTemplate(new DataSourceTransactionManager(dataSource)), settings, registry);
-                var load = new Load(settings, new GatewayClient(settings, new ObjectMapper(), registry), writer, new ResponseMinutes(clock, settings, new BaseSchedule(settings)), new BaseSchedule(settings), clock, registry);
+                var load = new Load(settings, new GatewayClient(settings, new ObjectMapper(), registry), writer, new ResponseMinutes(clock, settings, new BaseSchedule(settings), new MemoryMinuteStore()), new BaseSchedule(settings), SendPermission.ALWAYS, clock, registry);
                 writer.start();
                 var paused = false;
                 try {
@@ -97,7 +99,7 @@ class JournalFirstTest {
                 var clock = Clock.systemUTC();
                 var writer = new JournalWriter(
                     new JdbcTemplate(dataSource), new TransactionTemplate(new DataSourceTransactionManager(dataSource)), settings, registry);
-                var load = new Load(settings, new GatewayClient(settings, new ObjectMapper(), registry), writer, new ResponseMinutes(clock, settings, new BaseSchedule(settings)), new BaseSchedule(settings), clock, registry);
+                var load = new Load(settings, new GatewayClient(settings, new ObjectMapper(), registry), writer, new ResponseMinutes(clock, settings, new BaseSchedule(settings), new MemoryMinuteStore()), new BaseSchedule(settings), SendPermission.ALWAYS, clock, registry);
                 writer.start();
                 load.begin();
                 await().atMost(Duration.ofSeconds(15)).until(() -> gateway.requests.get() > 50);

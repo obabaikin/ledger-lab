@@ -41,7 +41,7 @@ public class LoadController {
     @ApiResponse(responseCode = "503", description = "The generator did not confirm the pulse; without an answer it is taken as running", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @PostMapping(LOAD_PATH)
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public Pulse load(@PathVariable UUID sessionId, @RequestBody LoadRequest request) throws InterruptedException {
+    public Pulse load(@PathVariable UUID sessionId, @RequestBody LoadRequest request) {
         return load.raise(sessionId, request.tps(), request.seconds());
     }
 

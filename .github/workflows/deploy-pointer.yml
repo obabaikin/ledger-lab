@@ -1,0 +1,45 @@
+name: deploy pointer
+
+on:
+  schedule:
+    # After the hour's deploy has had its time (the window opens at :10, a chain still running at :55 is alerted) and
+    # before the next window, so a pointer moved here is applied in it. A passed e2e does not start a run: the pointer
+    # is applied in the window only, and a run in the middle of a chain could take the chain for done
+    # (move-pointer.sh's known limit, which a run started by hand keeps).
+    - cron: '57 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run decides at a time; a run that lost the race for the pointer fails on its push.
+  group: deploy-pointer
+  cancel-in-progress: false
+
+jobs:
+  move:
+    # Without the site's address there is no deployment to move the pointer for.
+    if: vars.DEPLOY_SITE_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # The push to the branch deploy; main takes pull requests only (its ruleset).
+      contents: write
+      actions: read
+    steps:
+      # The whole history, tags and the branch deploy: the commits after the pointer's, their versions, the pointers.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Move the pointer to the next commit of main that passed its e2e
+        env:
+          SITE_URL: ${{ vars.DEPLOY_SITE_URL }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: infra/ci/move-pointer.sh

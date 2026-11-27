@@ -1,3 +1,4 @@
+{{- if include "ledger-lab.renders" (list . "platform") -}}
 {{- $_ := include "ledger-lab.checkNumbers" . }}
 apiVersion: v1
 kind: Service
@@ -67,32 +68,35 @@ kind: ConfigMap
 metadata:
   name: create-topics
 data:
-  create-topics.sh: {{ .Files.Get "files/create-topics.sh" | quote }}
+  {{- $script := .Files.Get "files/create-topics.sh" }}
+  {{- if not $script }}
+  {{- fail "files/create-topics.sh is empty or missing: a Job that runs it would succeed without a topic" }}
+  {{- end }}
+  create-topics.sh: {{ $script | quote }}
 ---
-# A new name per release revision: a finished Job cannot be changed, and every install or upgrade checks the topics.
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: create-topics-{{ .Release.Revision }}
-spec:
-  backoffLimit: 10
-  ttlSecondsAfterFinished: 3600
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: create-topics
-          image: {{ .Values.kafka.image }}
-          command: ["/bin/sh", "/scripts/create-topics.sh"]
-          env:
-            - {name: KAFKA_BOOTSTRAP, value: "kafka:9092"}
-            - {name: KAFKA_PARTITIONS, value: {{ .Values.kafka.partitions | quote }}}
-            - {name: KAFKA_RETENTION_MS, value: {{ mul (int64 .Values.retentionHours) 3600000 | quote }}}
-            - {name: KAFKA_RETENTION_BYTES, value: {{ int64 .Values.kafka.retentionBytesPerPartition | quote }}}
-          resources:
-            limits: {memory: {{ .Values.kafka.toolsMemory }}}
-          volumeMounts:
-            - {name: scripts, mountPath: /scripts}
-      volumes:
-        - name: scripts
-          configMap: {name: create-topics}
+# Created again only when its spec or the script change, so every change of the topics is checked.
+{{ include "ledger-lab.setupJob" (dict "name" "create-topics" "spec" (include "ledger-lab.createTopicsSpec" .) "inputs" (.Files.Get "files/create-topics.sh")) }}
+{{- end }}
+{{- define "ledger-lab.createTopicsSpec" -}}
+backoffLimit: 10
+template:
+  spec:
+    restartPolicy: OnFailure
+    containers:
+      - name: create-topics
+        image: {{ .Values.kafka.image }}
+        command: ["/bin/sh", "/scripts/create-topics.sh"]
+        env:
+          - {name: KAFKA_BOOTSTRAP, value: "kafka:9092"}
+          - {name: KAFKA_WAIT_SECONDS, value: {{ include "ledger-lab.whole" (list "setupWaitSeconds" .Values.setupWaitSeconds false) | quote }}}
+          - {name: KAFKA_PARTITIONS, value: {{ .Values.kafka.partitions | quote }}}
+          - {name: KAFKA_RETENTION_MS, value: {{ mul (int64 .Values.retentionHours) 3600000 | quote }}}
+          - {name: KAFKA_RETENTION_BYTES, value: {{ int64 .Values.kafka.retentionBytesPerPartition | quote }}}
+        resources:
+          limits: {memory: {{ .Values.kafka.toolsMemory }}}
+        volumeMounts:
+          - {name: scripts, mountPath: /scripts}
+    volumes:
+      - name: scripts
+        configMap: {name: create-topics}
+{{- end }}

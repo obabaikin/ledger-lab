@@ -44,4 +44,16 @@ class GeneratorPropertiesTest {
         assertThatCode(() -> new GeneratorProperties.BaseProfile(false, 0, 0, 0, 0, List.of(), 0, LocalTime.MIDNIGHT, LocalTime.MIDNIGHT, ZoneId.of("UTC")))
             .doesNotThrowAnyException();
     }
+
+    @Test
+    void a_send_window_not_shorter_than_the_lease_or_a_renewal_not_more_often_than_the_window_stops_the_start() {
+        assertThatThrownBy(() -> new GeneratorProperties.Lease("a", Duration.ofSeconds(5), Duration.ofSeconds(1), Duration.ofMillis(100), Duration.ofSeconds(5)))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new GeneratorProperties.Lease("a", Duration.ofSeconds(5), Duration.ofSeconds(3), Duration.ofMillis(100), Duration.ofSeconds(3)))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new GeneratorProperties.Lease(" ", Duration.ofSeconds(5), Duration.ofSeconds(1), Duration.ofMillis(100), Duration.ofSeconds(3)))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatCode(() -> new GeneratorProperties.Lease("a", Duration.ofSeconds(5), Duration.ofSeconds(1), Duration.ofMillis(100), Duration.ofSeconds(3)))
+            .doesNotThrowAnyException();
+    }
 }

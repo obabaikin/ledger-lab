@@ -13,7 +13,9 @@ import com.ledgerlab.generator.bank.TransferStatus;
 import com.ledgerlab.generator.gateway.GatewayClient;
 import com.ledgerlab.generator.load.BaseSchedule;
 import com.ledgerlab.generator.load.Load;
+import com.ledgerlab.generator.load.MemoryMinuteStore;
 import com.ledgerlab.generator.load.ResponseMinutes;
+import com.ledgerlab.generator.load.SendPermission;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.sql.Timestamp;
 import java.time.Clock;
@@ -139,7 +141,7 @@ class JournalWriterTest extends IntegrationTest {
         var settings = TestData.settings(gateway.url()).tps(200).build();
         var registry = new SimpleMeterRegistry();
         var clock = Clock.systemUTC();
-        var load = new Load(settings, new GatewayClient(settings, new ObjectMapper(), registry), writer, new ResponseMinutes(clock, settings, new BaseSchedule(settings)), new BaseSchedule(settings), clock, registry);
+        var load = new Load(settings, new GatewayClient(settings, new ObjectMapper(), registry), writer, new ResponseMinutes(clock, settings, new BaseSchedule(settings), new MemoryMinuteStore()), new BaseSchedule(settings), SendPermission.ALWAYS, clock, registry);
 
         load.begin();
         Thread.sleep(1_000);
